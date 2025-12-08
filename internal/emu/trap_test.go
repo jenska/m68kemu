@@ -3,13 +3,13 @@ package emu
 import "testing"
 
 func TestTrapStacksExceptionFrameAndJumps(t *testing.T) {
-	cpu, ram := newCPU(t)
+	cpu, ram := newEnvironment(t)
 
 	// Simulate user mode and preset a distinct handler address.
 	cpu.regs.SR = 0x0700
 	handler := uint32(0x123456)
 	vector := uint32(1)
-	vectorNumber := uint32(32) + vector
+	vectorNumber := XTrap + vector
 	vectorAddress := vectorNumber << 2
 
 	if err := ram.WriteLongTo(vectorAddress, handler); err != nil {

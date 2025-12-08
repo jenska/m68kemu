@@ -6,7 +6,7 @@ import (
 	asm "github.com/jenska/m68kasm"
 )
 
-func newCPU(t *testing.T) (*CPU, *RAM) {
+func newEnvironment(t *testing.T) (*CPU, *RAM) {
 	t.Helper()
 
 	memory := NewRAM(0, 1024*512)
@@ -58,7 +58,7 @@ func TestInstructions(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			cpu, ram := newCPU(t)
+			cpu, ram := newEnvironment(t)
 
 			code := assemble(t, tt.src)
 

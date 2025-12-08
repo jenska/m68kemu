@@ -4,6 +4,16 @@ import (
 	"fmt"
 )
 
+const (
+	XBusError         = 2
+	XAddresError      = 3
+	xIllegal          = 4
+	xDivByZero        = 5
+	xPrivViolation    = 8
+	xUninitializedInt = 15
+	XTrap             = 32
+)
+
 type (
 	AddressError uint32
 	BusError     uint32
@@ -109,11 +119,51 @@ func (cpu *CPU) Registers() Registers {
 // callers to execute single instructions directly through the API.
 func (cpu *CPU) executeInstruction(opcode uint16) error {
 	cpu.ir = opcode
-	if handler := instructions[opcode]; handler == nil {
+	handler := instructions[opcode]
+	if handler == nil {
+		// TODO 68000 exception handling
 		return fmt.Errorf("unknown opcode 0x%04x", opcode)
-	} else {
-		return handler(cpu)
 	}
+
+	if err := handler(cpu); err != nil {
+		switch err.(type) {
+		case BusError:
+			return cpu.Exception(XBusError)
+		case AddressError:
+			return cpu.Exception(XAddresError)
+		default:
+			return err
+		}
+
+	}
+	return nil
+}
+
+func (cpu *CPU) Exception(vector uint32) error {
+	vectorOffset := (vector + uint32(cpu.ir&0x000f)) << 2
+	originalSR := cpu.regs.SR
+	if err := cpu.Push(Word, uint32(originalSR)); err != nil {
+		return err
+	}
+	if err := cpu.Push(Long, cpu.regs.PC); err != nil {
+		return err
+	}
+	if err := cpu.Push(Word, vectorOffset); err != nil {
+		return err
+	}
+
+	cpu.regs.SR |= srSupervisor
+
+	address, err := cpu.bus.ReadLongFrom(vectorOffset)
+	if err != nil {
+		return err
+	}
+	if address == 0 {
+		// TODO Unitialized Interrupt
+	}
+
+	cpu.regs.PC = address
+	return nil
 }
 
 // Step fetches the next opcode at the program counter and executes it.
