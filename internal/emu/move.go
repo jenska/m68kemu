@@ -1,0 +1,40 @@
+package emu
+
+func init() {
+	RegisterInstruction(moveaw, 0x3040, 0xf040, 0x0fff)
+	RegisterInstruction(moveal, 0x2040, 0xf040, 0x0fff)
+}
+
+func moveaw(cpu *CPU) error {
+	src, err := cpu.ResolveSrcEA(Word)
+	if err != nil {
+		return err
+	}
+	dst, err := cpu.ResolveDstEA(Word)
+	if err != nil {
+		return err
+	}
+	value, err := src.read()
+	if err != nil {
+		return err
+	}
+
+	return dst.write(value)
+}
+
+func moveal(cpu *CPU) error {
+	src, err := cpu.ResolveSrcEA(Long)
+	if err != nil {
+		return err
+	}
+	dst, err := cpu.ResolveDstEA(Long)
+	if err != nil {
+		return err
+	}
+	value, err := src.read()
+	if err != nil {
+		return err
+	}
+
+	return dst.write(value)
+}
