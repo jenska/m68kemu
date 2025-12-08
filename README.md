@@ -33,10 +33,12 @@ The steps below focus on improving m68kemu itself so it can serve as a reliable 
 
 ## Development
 1. Ensure you have Go 1.25 or newer installed (see `go.mod`).
-2. Run the test suite to verify the effective-address helpers and instruction wiring:
+2. Use the provided Makefile for common tasks:
 
    ```sh
-   go test ./...
+   make fmt         # format Go code
+   make check       # formatting check, go vet, staticcheck, and tests
+   make test        # run unit tests
    ```
 
 ## Example
