@@ -28,8 +28,6 @@ func assemble(t *testing.T, instruction string) []byte {
 }
 
 func TestInstructions(t *testing.T) {
-	cpu, ram := newCPU(t)
-
 	tests := []struct {
 		name string
 		src  string
@@ -60,13 +58,25 @@ func TestInstructions(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			cpu, ram := newCPU(t)
+
 			code := assemble(t, tt.src)
 
 			for i := range code {
-				ram.WriteByteTo(cpu.regs.PC+uint32(i), code[i])
+				addr := cpu.regs.PC + uint32(i)
+				if err := ram.WriteByteTo(addr, code[i]); err != nil {
+					t.Fatalf("failed to write byte to %04x: %v", addr, err)
+				}
 			}
 
-			cpu.Step()
+			opcode, err := cpu.fetchOpcode()
+			if err != nil {
+				t.Fatalf("failed to fetch opcode: %v", err)
+			}
+
+			if err := cpu.executeInstruction(opcode); err != nil {
+				t.Fatalf("failed to execute opcode %04x: %v", opcode, err)
+			}
 			if !tt.prec(cpu) {
 				t.Fatalf("unexpected precondition after execuding '%s'\n%s", tt.src, cpu)
 			}
