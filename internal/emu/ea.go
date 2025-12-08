@@ -118,6 +118,20 @@ func (cpu *CPU) ResolveDstEA(o *Size) (modifier, error) {
 	return eaDst[mode+y(cpu.ir)].init(cpu, o)
 }
 
+// ResolveMoveDstEA resolves the destination effective address for MOVE
+// instructions, which encode the destination mode and register in bits 11..6.
+// The function temporarily rewrites cpu.ir so that addressing mode helpers use
+// the destination register bits. The caller is responsible for restoring the
+// original cpu.ir value after using the returned modifier.
+func (cpu *CPU) ResolveMoveDstEA(o *Size) (modifier, uint16, error) {
+	mode := (cpu.ir >> 6) & 0x07
+	reg := (cpu.ir >> 9) & 0x07
+	orig := cpu.ir
+	cpu.ir = (mode << 3) | reg
+	result, err := cpu.ResolveDstEA(o)
+	return result, orig, err
+}
+
 func (cpu *CPU) Push(s *Size, value uint32) error {
 	cpu.regs.A[7] -= s.size
 	return cpu.Write(s, cpu.regs.A[7], value)

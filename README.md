@@ -2,6 +2,31 @@
 
 A small Motorola 68000 emulator written in Go. The emulator exposes a CPU core with a programmable memory bus, effective-address helpers, and a few initial instructions for experimenting with 68k code.
 
+## Roadmap for m68kemu as a computer-emulator core
+The steps below focus on improving m68kemu itself so it can serve as a reliable 68000 subsystem inside a broader computer emulator.
+
+1. **Complete and verify the CPU**
+   - Implement the full 68000 instruction set with accurate condition codes, status register transitions, privilege enforcement, and all addressing modes.
+   - Add precise exception handling (reset, bus/address errors, traps, and interrupt stacking) and per-instruction cycle timing.
+   - Provide trace-friendly hooks (per-instruction callbacks, disassembly output) so host emulators can integrate debugging and profiling tools.
+
+2. **Strengthen bus and memory interfaces**
+   - Evolve the `AddressBus` abstraction to cover byte/word/long access sizes, alignment rules, and bus faults so host machines can plug in their own memory maps and devices.
+   - Support configurable wait-state insertion and optional cycle callbacks to let the host model contention or clock stretching.
+   - Maintain a reference RAM/ROM implementation for quick testing while keeping the bus API decoupled from specific hardware layouts.
+
+3. **Interrupt and timing model**
+   - Expose interrupt level handling with clear APIs for asserting/deasserting lines, acknowledging vectors, and modeling autovectors.
+   - Add cycle accounting and optional timeslice stepping so host emulators can coordinate the CPU with video, audio, and I/O timing.
+
+4. **Testing and validation**
+   - Integrate public 68000 conformance suites and add unit tests that cover edge cases in addressing modes, exceptions, and timing.
+   - Provide sample harnesses that show how to embed m68kemu within a larger emulator, including minimal bus/device stubs.
+
+5. **Developer experience**
+   - Offer structured logs, watchpoints, and state snapshots to make host-level debugging straightforward.
+   - Document integration patterns (e.g., how to drive the CPU in lockstep with other chips) to reduce friction for emulator authors.
+
 ## Project layout
 - `internal/emu/` – core emulator types such as the CPU, register file, effective-address resolver, and the basic MOVEA word/long instructions. A minimal RAM implementation in this package satisfies the `AddressBus` interface for quick tests.
 - `doc/M68kOpcodes.pdf` – opcode reference used while implementing and verifying instruction behavior.
