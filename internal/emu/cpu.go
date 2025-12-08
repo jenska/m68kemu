@@ -47,8 +47,8 @@ func (regs *Registers) String() string {
 		result += fmt.Sprintf("D%d %08x ", i, uint32(regs.D[i]))
 	}
 	result += "\n"
-	for i := range regs.D {
-		result += fmt.Sprintf("A%d %08x ", i, uint32(regs.D[i]))
+	for i := range regs.A {
+		result += fmt.Sprintf("A%d %08x ", i, uint32(regs.A[i]))
 	}
 	result += "\n"
 

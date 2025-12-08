@@ -26,11 +26,17 @@ type (
 		address uint32
 	}
 
-	eaPostIncrement eaRegisterIndirect
+	eaPostIncrement struct {
+		eaRegisterIndirect
+	}
 
-	eaPreDecrement eaRegisterIndirect
+	eaPreDecrement struct {
+		eaRegisterIndirect
+	}
 
-	eaDisplacement eaRegisterIndirect
+	eaDisplacement struct {
+		eaRegisterIndirect
+	}
 
 	eaIndirectIndex struct {
 		eaRegisterIndirect
@@ -44,9 +50,13 @@ type (
 		address uint32
 	}
 
-	eaPCDisplacement eaDisplacement
+	eaPCDisplacement struct {
+		eaDisplacement
+	}
 
-	eaPCIndirectIndex eaIndirectIndex
+	eaPCIndirectIndex struct {
+		eaIndirectIndex
+	}
 
 	eaImmediate struct {
 		value uint32
@@ -63,14 +73,14 @@ var (
 		&eaRegister{areg: dy},
 		&eaRegister{areg: ay},
 		&eaRegisterIndirect{eaRegister{areg: ay}, 0},
-		&eaPostIncrement{eaRegister{areg: ay}, 0},
-		&eaPreDecrement{eaRegister{areg: ay}, 0},
-		&eaDisplacement{eaRegister{areg: ay}, 0},
+		&eaPostIncrement{eaRegisterIndirect{eaRegister{areg: ay}, 0}},
+		&eaPreDecrement{eaRegisterIndirect{eaRegister{areg: ay}, 0}},
+		&eaDisplacement{eaRegisterIndirect{eaRegister{areg: ay}, 0}},
 		&eaIndirectIndex{eaRegisterIndirect{eaRegister{areg: ay}, 0}, ix68000},
 		&eaAbsolute{eaSize: Word},
 		&eaAbsolute{eaSize: Long},
-		&eaPCDisplacement{eaRegister{areg: nil}, 0},
-		&eaPCIndirectIndex{eaRegisterIndirect{eaRegister{areg: nil}, 0}, ix68000},
+		&eaPCDisplacement{eaDisplacement{eaRegisterIndirect{eaRegister{areg: nil}, 0}}},
+		&eaPCIndirectIndex{eaIndirectIndex{eaRegisterIndirect{eaRegister{areg: nil}, 0}, ix68000}},
 		&eaImmediate{},
 	}
 
@@ -78,14 +88,14 @@ var (
 		&eaRegister{areg: dy},
 		&eaRegister{areg: ay},
 		&eaRegisterIndirect{eaRegister{areg: ay}, 0},
-		&eaPostIncrement{eaRegister{areg: ay}, 0},
-		&eaPreDecrement{eaRegister{areg: ay}, 0},
-		&eaDisplacement{eaRegister{areg: ay}, 0},
+		&eaPostIncrement{eaRegisterIndirect{eaRegister{areg: ay}, 0}},
+		&eaPreDecrement{eaRegisterIndirect{eaRegister{areg: ay}, 0}},
+		&eaDisplacement{eaRegisterIndirect{eaRegister{areg: ay}, 0}},
 		&eaIndirectIndex{eaRegisterIndirect{eaRegister{areg: ay}, 0}, ix68000},
 		&eaAbsolute{eaSize: Word},
 		&eaAbsolute{eaSize: Long},
-		&eaPCDisplacement{eaRegister{areg: nil}, 0},
-		&eaPCIndirectIndex{eaRegisterIndirect{eaRegister{areg: nil}, 0}, ix68000},
+		&eaPCDisplacement{eaDisplacement{eaRegisterIndirect{eaRegister{areg: nil}, 0}}},
+		&eaPCIndirectIndex{eaIndirectIndex{eaRegisterIndirect{eaRegister{areg: nil}, 0}, ix68000}},
 		&eaStatusRegister{},
 	}
 )

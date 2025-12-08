@@ -10,16 +10,15 @@ func moveaw(cpu *CPU) error {
 	if err != nil {
 		return err
 	}
-	dst, err := cpu.ResolveDstEA(Word)
-	if err != nil {
-		return err
-	}
 	value, err := src.read()
 	if err != nil {
 		return err
 	}
 
-	return dst.write(value)
+	// Destination is always an address register encoded in bits 11..9.
+	reg := (cpu.ir >> 9) & 0x7
+	cpu.regs.A[reg] = uint32(int32(int16(value)))
+	return nil
 }
 
 func moveal(cpu *CPU) error {
@@ -27,14 +26,13 @@ func moveal(cpu *CPU) error {
 	if err != nil {
 		return err
 	}
-	dst, err := cpu.ResolveDstEA(Long)
-	if err != nil {
-		return err
-	}
 	value, err := src.read()
 	if err != nil {
 		return err
 	}
 
-	return dst.write(value)
+	// Destination is always an address register encoded in bits 11..9.
+	reg := (cpu.ir >> 9) & 0x7
+	cpu.regs.A[reg] = value
+	return nil
 }
