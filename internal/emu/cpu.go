@@ -25,6 +25,21 @@ const (
 	srSupervisor = 0x2000
 )
 
+const (
+	eaMaskDataRegister    uint16 = 0x0800
+	eaMaskAddressRegister uint16 = 0x0400
+	eaMaskIndirect        uint16 = 0x0200
+	eaMaskPostIncrement   uint16 = 0x0100
+	eaMaskPreDecrement    uint16 = 0x0080
+	eaMaskDisplacement    uint16 = 0x0040
+	eaMaskIndex           uint16 = 0x0020
+	eaMaskAbsoluteShort   uint16 = 0x0010
+	eaMaskAbsoluteLong    uint16 = 0x0008
+	eaMaskImmediate       uint16 = 0x0004
+	eaMaskPCDisplacement  uint16 = 0x0002
+	eaMaskPCIndex         uint16 = 0x0001
+)
+
 var InstructionTable [0x10000]Instruction
 
 type (
@@ -260,21 +275,6 @@ func RegisterInstruction(ins Instruction, match, mask uint16, eaMask uint16) {
 }
 
 func validEA(opcode, mask uint16) bool {
-	const (
-		eaMaskDataRegister    = 0x0800
-		eaMaskAddressRegister = 0x0400
-		eaMaskIndirect        = 0x0200
-		eaMaskPostIncrement   = 0x0100
-		eaMaskPreDecrement    = 0x0080
-		eaMaskDisplacement    = 0x0040
-		eaMaskIndex           = 0x0020
-		eaMaskAbsoluteShort   = 0x0010
-		eaMaskAbsoluteLong    = 0x0008
-		eaMaskImmediate       = 0x0004
-		eaMaskPCDisplacement  = 0x0002
-		eaMaskPCIndex         = 0x0001
-	)
-
 	if mask == 0 {
 		return true
 	}
