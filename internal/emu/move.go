@@ -1,7 +1,6 @@
 package emu
 
 func init() {
-	// TODO replace with RegisterInstruction
 	registerMove(moveb, 0x1000)
 	registerMove(movew, 0x3000)
 	registerMove(movel, 0x2000)
@@ -10,6 +9,19 @@ func init() {
 
 	RegisterInstruction(moveq, 0x7000, 0xf100, 0)
 }
+
+const moveSourceEAMask = eaMaskDataRegister |
+	eaMaskAddressRegister |
+	eaMaskIndirect |
+	eaMaskPostIncrement |
+	eaMaskPreDecrement |
+	eaMaskDisplacement |
+	eaMaskIndex |
+	eaMaskAbsoluteShort |
+	eaMaskAbsoluteLong |
+	eaMaskImmediate |
+	eaMaskPCDisplacement |
+	eaMaskPCIndex
 
 func moveq(cpu *CPU) error {
 	value := int32(int8(cpu.regs.IR))
@@ -26,19 +38,11 @@ func moveq(cpu *CPU) error {
 }
 
 func registerMoveA(base uint16, handler Instruction) {
-	dstMode := uint16(1)
+	const dstMode = uint16(1)
 	for dstReg := uint16(0); dstReg < 8; dstReg++ {
-		for srcMode := uint16(0); srcMode < 8; srcMode++ {
-			for srcReg := uint16(0); srcReg < 8; srcReg++ {
-				opcode := base | (dstReg << 9) | (dstMode << 6) | (srcMode << 3) | srcReg
-				if !validEA(opcode, 0x0fff) {
-					continue
-				}
-				InstructionTable[opcode] = handler
-			}
-		}
+		match := base | (dstReg << 9) | (dstMode << 6)
+		RegisterInstruction(handler, match, 0xffc0, moveSourceEAMask)
 	}
-
 }
 
 func registerMove(ins Instruction, base uint16) {
@@ -52,18 +56,8 @@ func registerMove(ins Instruction, base uint16) {
 			if dstMode == 7 && (dstReg == 2 || dstReg == 3 || dstReg == 4) {
 				continue
 			}
-			for srcMode := uint16(0); srcMode < 8; srcMode++ {
-				for srcReg := uint16(0); srcReg < 8; srcReg++ {
-					opcode := base | (dstReg << 9) | (dstMode << 6) | (srcMode << 3) | srcReg
-					if !validEA(opcode, 0x0fff) {
-						continue
-					}
-					if InstructionTable[opcode] != nil {
-						continue
-					}
-					InstructionTable[opcode] = ins
-				}
-			}
+			match := base | (dstReg << 9) | (dstMode << 6)
+			RegisterInstruction(ins, match, 0xffc0, moveSourceEAMask)
 		}
 	}
 }
