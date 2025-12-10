@@ -56,6 +56,10 @@ func TestInstructions(t *testing.T) {
 			func(c *CPU) bool {
 				return int32(c.Registers().A[1]) == 1
 			}},
+		{"MoveAddressMnemonicLongFullWidth", "MOVEA.L #$12345678,A2\n",
+			func(c *CPU) bool {
+				return c.Registers().A[2] == 0x12345678
+			}},
 	}
 
 	for _, tt := range tests {

@@ -148,34 +148,52 @@ func (cpu *CPU) executeInstruction(opcode uint16) error {
 }
 
 func (cpu *CPU) Exception(vector uint32) error {
+	if vector > 255 {
+		return fmt.Errorf("invalid vector %d", vector)
+	}
+
 	vectorOffset := vector << 2
 	originalSR := cpu.regs.SR
 
-	var err error
-	if err = cpu.Push(Word, uint32(originalSR)); err != nil {
+	// TODO: track separate supervisor/user stacks once privilege modes are modeled.
+	cpu.regs.SR |= srSupervisor
+
+	// 68000 format 0 stack frame: vector offset (word), PC (long), SR (word).
+	if err := cpu.Push(Word, vectorOffset); err != nil {
 		return err
 	}
-	if err = cpu.Push(Long, cpu.regs.PC); err != nil {
+	if err := cpu.Push(Long, cpu.regs.PC); err != nil {
 		return err
 	}
-	if err = cpu.Push(Word, vectorOffset); err != nil {
+	if err := cpu.Push(Word, uint32(originalSR)); err != nil {
 		return err
 	}
 
-	cpu.regs.SR |= srSupervisor
-	address, err := cpu.Read(Long, vectorOffset)
+	handler, err := cpu.readVector(vectorOffset)
 	if err != nil {
 		return err
 	}
-	if address == 0 {
-		address, err = cpu.Read(Long, XUninitializedInt)
-		if err != nil {
-			panic("Uninitialized Interrupt")
-		}
+
+	cpu.regs.PC = handler
+	return nil
+}
+
+func (cpu *CPU) readVector(offset uint32) (uint32, error) {
+	if offset&1 != 0 {
+		return 0, AddressError(offset)
+	}
+	if offset >= 256<<2 {
+		return 0, AddressError(offset)
 	}
 
-	cpu.regs.PC = address
-	return nil
+	address, err := cpu.Read(Long, offset)
+	if err != nil {
+		return 0, err
+	}
+	if address == 0 {
+		return cpu.Read(Long, XUninitializedInt<<2)
+	}
+	return address, nil
 }
 
 // Step fetches the next opcode at the program counter and executes it.
