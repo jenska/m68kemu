@@ -11,12 +11,12 @@ const (
 )
 
 type (
-	Size       emu.Size
-	Registers  emu.Registers
-	AddressBus emu.AddressBus
+	Size       = emu.Size
+	Registers  = emu.Registers
+	AddressBus = emu.AddressBus
 
 	CPU interface {
-		// TODO Registers() Registers
+		Registers() Registers
 		Step() error
 		Reset() error
 	}

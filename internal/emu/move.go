@@ -184,6 +184,6 @@ func moveal(cpu *CPU) error {
 	}
 
 	// Destination is always an address register encoded in bits 11..9.
-	*ax(cpu) = uint32(int32(int16(value)))
+	*ax(cpu) = value
 	return nil
 }
