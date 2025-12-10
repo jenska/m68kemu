@@ -7,14 +7,25 @@ import (
 const (
 	XBusError         = 2
 	XAddresError      = 3
-	xIllegal          = 4
-	xDivByZero        = 5
-	xPrivViolation    = 8
-	xUninitializedInt = 15
+	XIllegal          = 4
+	XDivByZero        = 5
+	XPrivViolation    = 8
+	XUninitializedInt = 15
 	XTrap             = 32
+
+	srCarry      = 0x0001
+	srOverflow   = 0x0002
+	srZero       = 0x0004
+	srNegative   = 0x0008
+	srExtend     = 0x0010
+	srSupervisor = 0x2000
 )
 
+var InstructionTable [0x10000]Instruction
+
 type (
+	Instruction func(*CPU) error
+
 	AddressError uint32
 	BusError     uint32
 
@@ -36,22 +47,18 @@ type (
 		PC  uint32
 		SR  uint16
 		USP uint32
+		IR  uint16 // instruction register
 	}
-
-	Instruction func(*CPU) error
 
 	//  CPU core
 	CPU struct {
 		regs Registers
 		bus  AddressBus
-
-		ir uint16 // instruction register
 	}
 )
 
-var instructions [0x10000]Instruction
-
 func (regs *Registers) String() string {
+	// TODO show IR as disassembly
 	result := fmt.Sprintf("SR %04x PC %08x USP %08x SP %08x\n", regs.SR, regs.PC, regs.USP, regs.A[7])
 	for i := range regs.D {
 		result += fmt.Sprintf("D%d %08x ", i, uint32(regs.D[i]))
@@ -66,7 +73,6 @@ func (regs *Registers) String() string {
 }
 
 func (cpu *CPU) String() string {
-	// TODO add current instruction
 	return cpu.regs.String()
 }
 
@@ -80,15 +86,20 @@ func (be BusError) Error() string {
 
 func (cpu *CPU) Read(size *Size, address uint32) (uint32, error) {
 	address &= 0xffffff // 24bit address bus of 68000
-	// TODO return AddressError if address is odd and size != Byte
 	switch size {
 	case Byte:
 		result, err := cpu.bus.ReadByteFrom(address)
 		return uint32(result), err
 	case Word:
+		if address&1 != 0 {
+			return 0, AddressError(address)
+		}
 		result, err := cpu.bus.ReadWordFrom(address)
 		return uint32(result), err
 	case Long:
+		if address&1 != 0 {
+			return 0, AddressError(address)
+		}
 		return cpu.bus.ReadLongFrom(address)
 	default:
 		return 0, fmt.Errorf("unknown operand size")
@@ -97,13 +108,18 @@ func (cpu *CPU) Read(size *Size, address uint32) (uint32, error) {
 
 func (cpu *CPU) Write(size *Size, address uint32, value uint32) error {
 	address &= 0xffffff // 24bit address bus of 68000
-	// TODO return AddressError if address is odd and size != Byte
 	switch size {
 	case Byte:
 		return cpu.bus.WriteByteTo(address, uint8(value))
 	case Word:
+		if address&1 != 0 {
+			return AddressError(address)
+		}
 		return cpu.bus.WriteWordTo(address, uint16(value))
 	case Long:
+		if address&1 != 0 {
+			return AddressError(address)
+		}
 		return cpu.bus.WriteLongTo(address, value)
 	default:
 		return fmt.Errorf("unknown operand size")
@@ -118,8 +134,8 @@ func (cpu *CPU) Registers() Registers {
 // ExecuteInstruction runs an instruction without fetching it from memory. This allows
 // callers to execute single instructions directly through the API.
 func (cpu *CPU) executeInstruction(opcode uint16) error {
-	cpu.ir = opcode
-	handler := instructions[opcode]
+	cpu.regs.IR = opcode
+	handler := InstructionTable[opcode]
 	if handler == nil {
 		// TODO 68000 exception handling
 		return fmt.Errorf("unknown opcode 0x%04x", opcode)
@@ -140,26 +156,30 @@ func (cpu *CPU) executeInstruction(opcode uint16) error {
 }
 
 func (cpu *CPU) Exception(vector uint32) error {
-	vectorOffset := (vector + uint32(cpu.ir&0x000f)) << 2
+	vectorOffset := vector << 2
 	originalSR := cpu.regs.SR
-	if err := cpu.Push(Word, uint32(originalSR)); err != nil {
+
+	var err error
+	if err = cpu.Push(Word, uint32(originalSR)); err != nil {
 		return err
 	}
-	if err := cpu.Push(Long, cpu.regs.PC); err != nil {
+	if err = cpu.Push(Long, cpu.regs.PC); err != nil {
 		return err
 	}
-	if err := cpu.Push(Word, vectorOffset); err != nil {
+	if err = cpu.Push(Word, vectorOffset); err != nil {
 		return err
 	}
 
 	cpu.regs.SR |= srSupervisor
-
-	address, err := cpu.bus.ReadLongFrom(vectorOffset)
+	address, err := cpu.Read(Long, vectorOffset)
 	if err != nil {
 		return err
 	}
 	if address == 0 {
-		// TODO Unitialized Interrupt
+		address, err = cpu.Read(Long, XUninitializedInt)
+		if err != nil {
+			panic("Uninitialized Interrupt")
+		}
 	}
 
 	cpu.regs.PC = address
@@ -184,23 +204,41 @@ func (cpu *CPU) fetchOpcode() (uint16, error) {
 	}
 }
 
-func NewCPU(bus AddressBus, ssp, pc uint32) (*CPU, error) {
-	regs := Registers{}
-	regs.A[7] = ssp
-	regs.PC = pc
-	regs.SR = 0x2700
-	return &CPU{regs: regs, bus: bus}, nil
+func (cpu *CPU) Reset() error {
+	cpu.regs = Registers{SR: 0x2700}
+	ssp, err := cpu.bus.ReadLongFrom(0)
+	if err != nil {
+		return err
+	}
+	cpu.regs.A[7] = ssp
+	pc, err := cpu.bus.ReadLongFrom(4)
+	if err != nil {
+		return err
+	}
+	cpu.regs.PC = pc
+	return nil
 }
+
+func NewCPU(bus AddressBus) (*CPU, error) {
+	cpu := CPU{regs: Registers{SR: 0x2700}, bus: bus}
+	if err := cpu.Reset(); err != nil {
+		return nil, err
+	}
+	return &cpu, nil
+}
+
+var cnt int
 
 // RegisterInstruction adds an opcode handler to the CPU.
 func RegisterInstruction(ins Instruction, match, mask uint16, eaMask uint16) {
 	for value := uint16(0); ; {
 		index := match | value
 		if validEA(index, eaMask) {
-			if instructions[index] != nil {
+			if InstructionTable[index] != nil {
 				panic(fmt.Errorf("instruction 0x%04x already registered", index))
 			}
-			instructions[index] = ins
+			InstructionTable[index] = ins
+			cnt++
 		}
 
 		value = ((value | mask) + 1) & ^mask
@@ -208,6 +246,7 @@ func RegisterInstruction(ins Instruction, match, mask uint16, eaMask uint16) {
 			break
 		}
 	}
+	fmt.Printf("# instructions %d\n", cnt)
 }
 
 func validEA(opcode, mask uint16) bool {
@@ -257,4 +296,28 @@ func validEA(opcode, mask uint16) bool {
 		return (mask & eaMaskImmediate) != 0
 	}
 	return false
+}
+
+func (cpu *CPU) Push(s *Size, value uint32) error {
+	cpu.regs.A[7] -= s.size
+	return cpu.Write(s, cpu.regs.A[7], value)
+}
+
+func (cpu *CPU) Pop(s *Size) (uint32, error) {
+	if res, err := cpu.Read(s, cpu.regs.A[7]); err == nil {
+		cpu.regs.A[7] += s.size // sometimes odd
+		return res, nil
+	} else {
+		return 0, err
+	}
+}
+
+func (cpu *CPU) PopPc(s *Size) (uint32, error) {
+	if res, err := cpu.Read(s, cpu.regs.PC); err == nil {
+		cpu.regs.PC += s.align // never odd
+		return res, nil
+
+	} else {
+		return 0, err
+	}
 }

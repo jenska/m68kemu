@@ -4,7 +4,7 @@ import "testing"
 
 func TestEARegisterDirectReadWrite(t *testing.T) {
 	cpu, _ := newEnvironment(t)
-	cpu.ir = 0x0001 // y=1 selects D1
+	cpu.regs.IR = 0x0001 // y=1 selects D1
 	cpu.regs.D[1] = -0x10000
 
 	ea, err := (&eaRegister{areg: dy}).init(cpu, Word)
@@ -27,7 +27,7 @@ func TestEARegisterDirectReadWrite(t *testing.T) {
 
 func TestEAPostIncrementUpdatesAddressAndRegister(t *testing.T) {
 	cpu, _ := newEnvironment(t)
-	cpu.ir = 0x0000 // y=0 selects A0
+	cpu.regs.IR = 0x0000 // y=0 selects A0
 	cpu.regs.A[0] = 0x2000
 
 	ea, err := (&eaPostIncrement{eaRegisterIndirect{eaRegister{areg: ay}, 0}}).init(cpu, Word)
@@ -45,7 +45,7 @@ func TestEAPostIncrementUpdatesAddressAndRegister(t *testing.T) {
 
 func TestEAPreDecrementUsesUpdatedAddress(t *testing.T) {
 	cpu, ram := newEnvironment(t)
-	cpu.ir = 0x0000 // y=0 selects A0
+	cpu.regs.IR = 0x0000 // y=0 selects A0
 	cpu.regs.A[0] = 0x2000
 
 	ea, err := (&eaPreDecrement{eaRegisterIndirect{eaRegister{areg: ay}, 0}}).init(cpu, Byte)
@@ -70,7 +70,7 @@ func TestEAPreDecrementUsesUpdatedAddress(t *testing.T) {
 
 func TestEADisplacementUsesOffset(t *testing.T) {
 	cpu, _ := newEnvironment(t)
-	cpu.ir = 0x0000 // y=0 selects A0
+	cpu.regs.IR = 0x0000 // y=0 selects A0
 	cpu.regs.A[0] = 0x1000
 
 	if err := cpu.bus.WriteWordTo(cpu.regs.PC, 0xFFFE); err != nil {
@@ -83,10 +83,10 @@ func TestEADisplacementUsesOffset(t *testing.T) {
 	}
 
 	if addr := ea.computedAddress(); addr != 0x0FFE {
-		t.Fatalf("computed address mismatch: got %04x", addr)
+		t.Fatalf("computed address mismatch: got %08x", addr)
 	}
 	if cpu.regs.PC != 0x2002 {
-		t.Fatalf("PC not advanced after displacement read: %04x", cpu.regs.PC)
+		t.Fatalf("PC not advanced after displacement read: %08x", cpu.regs.PC)
 	}
 }
 
@@ -188,7 +188,7 @@ func TestEAStatusRegisterReadWrite(t *testing.T) {
 
 func TestEAIndirectIndexUsesIndexAndDisplacement(t *testing.T) {
 	cpu, _ := newEnvironment(t)
-	cpu.ir = 0x0000 // y=0 selects A0
+	cpu.regs.IR = 0x0000 // y=0 selects A0
 	cpu.regs.A[0] = 0x3000
 	cpu.regs.D[0] = 0x10
 

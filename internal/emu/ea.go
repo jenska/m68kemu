@@ -84,7 +84,7 @@ var (
 		&eaImmediate{},
 	}
 
-	eaDst = []ea{
+	eaSrc2 = []ea{
 		&eaRegister{areg: dy},
 		&eaRegister{areg: ay},
 		&eaRegisterIndirect{eaRegister{areg: ay}, 0},
@@ -98,72 +98,58 @@ var (
 		&eaPCIndirectIndex{eaIndirectIndex{eaRegisterIndirect{eaRegister{areg: nil}, 0}, ix68000}},
 		&eaStatusRegister{},
 	}
+
+	eaDst = []ea{
+		&eaRegister{areg: udx},
+		&eaRegister{areg: ax},
+		&eaRegisterIndirect{eaRegister{areg: ax}, 0},
+		&eaPostIncrement{eaRegisterIndirect{eaRegister{areg: ax}, 0}},
+		&eaPreDecrement{eaRegisterIndirect{eaRegister{areg: ax}, 0}},
+		&eaDisplacement{eaRegisterIndirect{eaRegister{areg: ax}, 0}},
+		&eaIndirectIndex{eaRegisterIndirect{eaRegister{areg: ax}, 0}, ix68000},
+		&eaAbsolute{eaSize: Word},
+		&eaAbsolute{eaSize: Long},
+		&eaPCDisplacement{eaDisplacement{eaRegisterIndirect{eaRegister{areg: nil}, 0}}},
+		&eaPCIndirectIndex{eaIndirectIndex{eaRegisterIndirect{eaRegister{areg: nil}, 0}, ix68000}},
+		&eaStatusRegister{},
+	}
 )
 
 // TODO add cycles
 func (cpu *CPU) ResolveSrcEA(o *Size) (modifier, error) {
-	mode := (cpu.ir >> 3) & 0x07
+	mode := (cpu.regs.IR >> 3) & 0x07
 	if mode < 7 {
 		return eaSrc[mode].init(cpu, o)
 	}
-	return eaSrc[mode+y(cpu.ir)].init(cpu, o)
+	return eaSrc[mode+y(cpu.regs.IR)].init(cpu, o)
 }
 
-// TODO add cycles
+// TODO add cycless
+func (cpu *CPU) ResolveSrcEA2(o *Size) (modifier, error) {
+	mode := (cpu.regs.IR >> 3) & 0x07
+	if mode < 7 {
+		return eaSrc2[mode].init(cpu, o)
+	}
+	return eaSrc2[mode+y(cpu.regs.IR)].init(cpu, o)
+}
+
 func (cpu *CPU) ResolveDstEA(o *Size) (modifier, error) {
-	mode := (cpu.ir >> 3) & 0x07
+	mode := (cpu.regs.IR >> 6) & 0x07
 	if mode < 7 {
 		return eaDst[mode].init(cpu, o)
 	}
-	return eaDst[mode+y(cpu.ir)].init(cpu, o)
-}
-
-// ResolveMoveDstEA resolves the destination effective address for MOVE
-// instructions, which encode the destination mode and register in bits 11..6.
-// The function temporarily rewrites cpu.ir so that addressing mode helpers use
-// the destination register bits. The caller is responsible for restoring the
-// original cpu.ir value after using the returned modifier.
-func (cpu *CPU) ResolveMoveDstEA(o *Size) (modifier, uint16, error) {
-	mode := (cpu.ir >> 6) & 0x07
-	reg := (cpu.ir >> 9) & 0x07
-	orig := cpu.ir
-	cpu.ir = (mode << 3) | reg
-	result, err := cpu.ResolveDstEA(o)
-	return result, orig, err
-}
-
-func (cpu *CPU) Push(s *Size, value uint32) error {
-	cpu.regs.A[7] -= s.size
-	return cpu.Write(s, cpu.regs.A[7], value)
-}
-
-func (cpu *CPU) Pop(s *Size) (uint32, error) {
-	if res, err := cpu.Read(s, cpu.regs.A[7]); err == nil {
-		cpu.regs.A[7] += s.size // sometimes odd
-		return res, nil
-	} else {
-		return 0, err
-	}
-}
-
-func (cpu *CPU) PopPc(s *Size) (uint32, error) {
-	if res, err := cpu.Read(s, cpu.regs.PC); err == nil {
-		cpu.regs.PC += s.align // never odd
-		return res, nil
-
-	} else {
-		return 0, err
-	}
+	return eaDst[mode+x(cpu.regs.IR)].init(cpu, o)
 }
 
 func x(ir uint16) uint16 { return (ir >> 9) & 0x7 }
 func y(ir uint16) uint16 { return ir & 0x7 }
 
-func dx(cpu *CPU) *uint32 { return (*uint32)(unsafe.Pointer(&cpu.regs.D[x(cpu.ir)])) }
-func dy(cpu *CPU) *uint32 { return (*uint32)(unsafe.Pointer(&cpu.regs.D[y(cpu.ir)])) }
+func udx(cpu *CPU) *uint32 { return (*uint32)(unsafe.Pointer(&cpu.regs.D[x(cpu.regs.IR)])) }
+func dx(cpu *CPU) *int32   { return &cpu.regs.D[x(cpu.regs.IR)] }
+func dy(cpu *CPU) *uint32  { return (*uint32)(unsafe.Pointer(&cpu.regs.D[y(cpu.regs.IR)])) }
 
-func ax(cpu *CPU) *uint32 { return &cpu.regs.A[x(cpu.ir)] }
-func ay(cpu *CPU) *uint32 { return &cpu.regs.A[y(cpu.ir)] }
+func ax(cpu *CPU) *uint32 { return &cpu.regs.A[x(cpu.regs.IR)] }
+func ay(cpu *CPU) *uint32 { return &cpu.regs.A[y(cpu.regs.IR)] }
 
 // -------------------------------------------------------------------
 // register direct
@@ -211,7 +197,7 @@ func (ea *eaRegisterIndirect) computedAddress() uint32 {
 
 func (ea *eaPostIncrement) init(cpu *CPU, o *Size) (modifier, error) {
 	ea.cpu, ea.size, ea.address = cpu, o, *ea.areg(cpu)
-	*ea.areg(cpu) += ea.size.size
+	*ea.areg(cpu) += o.size
 	return ea, nil
 }
 

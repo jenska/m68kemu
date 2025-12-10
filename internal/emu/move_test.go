@@ -10,6 +10,15 @@ func TestMoveInstruction(t *testing.T) {
 		check func(t *testing.T, cpu *CPU, ram *RAM)
 	}{
 		{
+			name: "MoveqImmediateToDataRegisters",
+			src:  "MOVEQ #-1,D1\nMOVEQ #1, D2\n",
+			check: func(t *testing.T, cpu *CPU, _ *RAM) {
+				if cpu.Registers().D[1] != -1 && cpu.Registers().D[2] == 1 {
+					t.Fatalf("expected D1 to be -1, got %d", cpu.Registers().D[1])
+				}
+			},
+		},
+		{
 			name: "MoveByteImmediateToDataRegister",
 			src:  "MOVE.B #0,D0\n",
 			check: func(t *testing.T, cpu *CPU, _ *RAM) {
@@ -94,7 +103,7 @@ func TestMoveInstruction(t *testing.T) {
 			for i := range code {
 				addr := cpu.regs.PC + uint32(i)
 				if err := ram.WriteByteTo(addr, code[i]); err != nil {
-					t.Fatalf("failed to write byte to %04x: %v", addr, err)
+					t.Fatalf("failed to write byte to %08x: %v", addr, err)
 				}
 			}
 

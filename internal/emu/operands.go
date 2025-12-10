@@ -1,10 +1,5 @@
 package emu
 
-import (
-	"encoding/binary"
-	"fmt"
-)
-
 // Size contains properties of the M68K operad types
 type Size struct {
 	size  uint32
@@ -12,10 +7,6 @@ type Size struct {
 	mask  uint32
 	bits  uint32
 	msb   uint32
-	fmt   string
-	ext   string
-	write func([]byte, int32)
-	read  func([]byte) int32
 }
 
 var (
@@ -26,14 +17,6 @@ var (
 		mask:  0x000000ff,
 		bits:  8,
 		msb:   0x00000080,
-		fmt:   "$%02x",
-		ext:   ".b",
-		write: func(sclice []byte, value int32) {
-			sclice[0] = byte(value)
-		},
-		read: func(slice []byte) int32 {
-			return int32(slice[0])
-		},
 	}
 
 	// Word is an M68K operand type
@@ -43,14 +26,6 @@ var (
 		mask:  0x0000ffff,
 		bits:  16,
 		msb:   0x00008000,
-		fmt:   "$%04x",
-		ext:   ".w",
-		write: func(slice []byte, value int32) {
-			binary.BigEndian.PutUint16(slice, uint16(value))
-		},
-		read: func(slice []byte) int32 {
-			return int32(binary.BigEndian.Uint16(slice))
-		},
 	}
 
 	// Long is an M68K operand type
@@ -60,37 +35,12 @@ var (
 		mask:  0xffffffff,
 		bits:  32,
 		msb:   0x80000000,
-		fmt:   "$%08x",
-		ext:   ".b",
-
-		write: func(sclice []byte, value int32) {
-			binary.BigEndian.PutUint32(sclice, uint32(value))
-		},
-		read: func(slice []byte) int32 {
-			return int32(binary.BigEndian.Uint32(slice))
-		},
 	}
 )
 
 // IsNegative tests an operand of a specifc size if it is negative
 func (s *Size) IsNegative(value int32) bool {
 	return s.msb&uint32(value) != 0
-}
-
-// HexString returns an unsingned hex string with leading zeroes
-func (s *Size) HexString(value int32) string {
-	v := uint32(value) & s.mask
-	return fmt.Sprintf(s.fmt, v)
-}
-
-// SignedHexString returns a signed hex with leading zeroes (-$0001)
-func (s *Size) SignedHexString(value int32) string {
-	if uint32(value) == s.msb {
-		return s.HexString(value)
-	} else if s.IsNegative(value) {
-		return "-" + s.HexString(-value)
-	}
-	return s.HexString(value)
 }
 
 func (s *Size) uset(value uint32, target *uint32) {
