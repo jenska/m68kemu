@@ -63,7 +63,7 @@ func TestEAPreDecrementUsesUpdatedAddress(t *testing.T) {
 	if err := ea.write(0xAA); err != nil {
 		t.Fatalf("write failed: %v", err)
 	}
-	if got, err := ram.ReadByteFrom(0x1FFF); err != nil || got != 0xAA {
+	if got, err := ram.Read(Byte, 0x1FFF); err != nil || got != 0xAA {
 		t.Fatalf("unexpected memory value %02x err=%v", got, err)
 	}
 }
@@ -73,7 +73,7 @@ func TestEADisplacementUsesOffset(t *testing.T) {
 	cpu.regs.IR = 0x0000 // y=0 selects A0
 	cpu.regs.A[0] = 0x1000
 
-	if err := cpu.bus.WriteWordTo(cpu.regs.PC, 0xFFFE); err != nil {
+	if err := cpu.bus.Write(Word, cpu.regs.PC, 0xFFFE); err != nil {
 		t.Fatalf("failed to write displacement: %v", err)
 	}
 
@@ -93,7 +93,7 @@ func TestEADisplacementUsesOffset(t *testing.T) {
 func TestEAPCDisplacementUsesProgramCounter(t *testing.T) {
 	cpu, _ := newEnvironment(t)
 
-	if err := cpu.bus.WriteWordTo(cpu.regs.PC, 0x0004); err != nil {
+	if err := cpu.bus.Write(Word, cpu.regs.PC, 0x0004); err != nil {
 		t.Fatalf("failed to write displacement: %v", err)
 	}
 
@@ -113,7 +113,7 @@ func TestEAPCDisplacementUsesProgramCounter(t *testing.T) {
 func TestEAAbsoluteWordAndLong(t *testing.T) {
 	cpu, _ := newEnvironment(t)
 
-	if err := cpu.bus.WriteWordTo(cpu.regs.PC, 0x1234); err != nil {
+	if err := cpu.bus.Write(Word, cpu.regs.PC, 0x1234); err != nil {
 		t.Fatalf("write absolute word failed: %v", err)
 	}
 	eaWord, err := (&eaAbsolute{eaSize: Word}).init(cpu, Word)
@@ -124,7 +124,7 @@ func TestEAAbsoluteWordAndLong(t *testing.T) {
 		t.Fatalf("absolute word address mismatch: %08x", addr)
 	}
 
-	if err := cpu.bus.WriteLongTo(cpu.regs.PC, 0xAABBCCDD); err != nil {
+	if err := cpu.bus.Write(Long, cpu.regs.PC, 0xAABBCCDD); err != nil {
 		t.Fatalf("write absolute long failed: %v", err)
 	}
 	eaLong, err := (&eaAbsolute{eaSize: Long}).init(cpu, Long)
@@ -139,7 +139,7 @@ func TestEAAbsoluteWordAndLong(t *testing.T) {
 func TestEAImmediateReadsFromPC(t *testing.T) {
 	cpu, _ := newEnvironment(t)
 
-	if err := cpu.bus.WriteWordTo(cpu.regs.PC, 0x00FF); err != nil {
+	if err := cpu.bus.Write(Word, cpu.regs.PC, 0x00FF); err != nil {
 		t.Fatalf("write immediate failed: %v", err)
 	}
 
@@ -192,7 +192,7 @@ func TestEAIndirectIndexUsesIndexAndDisplacement(t *testing.T) {
 	cpu.regs.A[0] = 0x3000
 	cpu.regs.D[0] = 0x10
 
-	if err := cpu.bus.WriteWordTo(cpu.regs.PC, 0x0801); err != nil {
+	if err := cpu.bus.Write(Word, cpu.regs.PC, 0x0801); err != nil {
 		t.Fatalf("failed to write index extension: %v", err)
 	}
 

@@ -10,8 +10,8 @@ func newEnvironment(t *testing.T) (*CPU, *RAM) {
 	t.Helper()
 
 	memory := NewRAM(0, 1024*64)
-	memory.WriteLongTo(0, 0x1000)
-	memory.WriteLongTo(4, 0x2000)
+	memory.Write(Long, 0, 0x1000)
+	memory.Write(Long, 4, 0x2000)
 	cpu, err := NewCPU(&memory)
 	if err != nil {
 		t.Fatalf("Failed to create CPU: %v", err)
@@ -66,7 +66,7 @@ func TestInstructions(t *testing.T) {
 
 			for i := range code {
 				addr := cpu.regs.PC + uint32(i)
-				if err := ram.WriteByteTo(addr, code[i]); err != nil {
+				if err := ram.Write(Byte, addr, uint32(code[i])); err != nil {
 					t.Fatalf("failed to write byte to %04x: %v", addr, err)
 				}
 			}

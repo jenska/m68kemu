@@ -58,7 +58,7 @@ func TestMoveInstruction(t *testing.T) {
 			check: func(t *testing.T, cpu *CPU, ram *RAM) {
 				for i, b := range []byte{0x12, 0x34, 0x56, 0x78} {
 					addr := uint32(0x2100 + i)
-					if got, _ := ram.ReadByteFrom(addr); got != b {
+					if got, _ := ram.Read(Byte, addr); got != uint32(b) {
 						t.Fatalf("expected memory %04x to be %02x, got %02x (A1=%04x, D0=%08x)", addr, b, got, cpu.regs.A[1], uint32(cpu.regs.D[0]))
 					}
 				}
@@ -72,7 +72,7 @@ func TestMoveInstruction(t *testing.T) {
 			src:  "MOVE.W (A0)+,-(A1)\n",
 			setup: func(cpu *CPU, ram *RAM) {
 				cpu.regs.A[0] = 0x3000
-				ram.WriteWordTo(0x3000, 0x0)
+				ram.Write(Word, 0x3000, 0x0)
 				cpu.regs.A[1] = 0x3102
 			},
 			check: func(t *testing.T, cpu *CPU, ram *RAM) {
@@ -82,7 +82,7 @@ func TestMoveInstruction(t *testing.T) {
 				if cpu.regs.A[1] != 0x3100 {
 					t.Fatalf("expected A1 to pre-decrement to 0x3100, got %04x", cpu.regs.A[1])
 				}
-				if got, _ := ram.ReadWordFrom(0x3100); got != 0x0000 {
+				if got, _ := ram.Read(Word, 0x3100); got != 0x0000 {
 					t.Fatalf("expected memory at 0x3100 to be zero, got %04x", got)
 				}
 				if cpu.regs.SR&srZero == 0 {
@@ -102,7 +102,7 @@ func TestMoveInstruction(t *testing.T) {
 			code := assemble(t, tt.src)
 			for i := range code {
 				addr := cpu.regs.PC + uint32(i)
-				if err := ram.WriteByteTo(addr, code[i]); err != nil {
+				if err := ram.Write(Byte, addr, uint32(code[i])); err != nil {
 					t.Fatalf("failed to write byte to %08x: %v", addr, err)
 				}
 			}

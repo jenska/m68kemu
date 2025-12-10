@@ -5,6 +5,10 @@ import (
 )
 
 const (
+	Byte Size = 1
+	Word Size = 2
+	Long Size = 4
+
 	XBusError         = 2
 	XAddresError      = 3
 	XIllegal          = 4
@@ -24,6 +28,8 @@ const (
 var InstructionTable [0x10000]Instruction
 
 type (
+	Size uint32
+
 	Instruction func(*CPU) error
 
 	AddressError uint32
@@ -31,12 +37,8 @@ type (
 
 	// AddressBus for accessing address areas
 	AddressBus interface {
-		ReadLongFrom(address uint32) (uint32, error)
-		WriteLongTo(address uint32, value uint32) error
-		ReadWordFrom(address uint32) (uint16, error)
-		WriteWordTo(address uint32, value uint16) error
-		ReadByteFrom(address uint32) (uint8, error)
-		WriteByteTo(address uint32, value uint8) error
+		Read(s Size, address uint32) (uint32, error)
+		Write(s Size, address uint32, value uint32) error
 		Reset()
 	}
 
@@ -84,43 +86,33 @@ func (be BusError) Error() string {
 	return fmt.Sprintln("BusError at %08x", uint32(be))
 }
 
-func (cpu *CPU) Read(size *Size, address uint32) (uint32, error) {
+func (cpu *CPU) Read(size Size, address uint32) (uint32, error) {
 	address &= 0xffffff // 24bit address bus of 68000
 	switch size {
 	case Byte:
-		result, err := cpu.bus.ReadByteFrom(address)
+		result, err := cpu.bus.Read(Byte, address)
 		return uint32(result), err
-	case Word:
+	case Word, Long:
 		if address&1 != 0 {
 			return 0, AddressError(address)
 		}
-		result, err := cpu.bus.ReadWordFrom(address)
+		result, err := cpu.bus.Read(size, address)
 		return uint32(result), err
-	case Long:
-		if address&1 != 0 {
-			return 0, AddressError(address)
-		}
-		return cpu.bus.ReadLongFrom(address)
 	default:
 		return 0, fmt.Errorf("unknown operand size")
 	}
 }
 
-func (cpu *CPU) Write(size *Size, address uint32, value uint32) error {
+func (cpu *CPU) Write(size Size, address uint32, value uint32) error {
 	address &= 0xffffff // 24bit address bus of 68000
 	switch size {
 	case Byte:
-		return cpu.bus.WriteByteTo(address, uint8(value))
-	case Word:
+		return cpu.bus.Write(Byte, address, value)
+	case Word, Long:
 		if address&1 != 0 {
 			return AddressError(address)
 		}
-		return cpu.bus.WriteWordTo(address, uint16(value))
-	case Long:
-		if address&1 != 0 {
-			return AddressError(address)
-		}
-		return cpu.bus.WriteLongTo(address, value)
+		return cpu.bus.Write(size, address, value)
 	default:
 		return fmt.Errorf("unknown operand size")
 
@@ -197,7 +189,7 @@ func (cpu *CPU) Step() error {
 
 func (cpu *CPU) fetchOpcode() (uint16, error) {
 	if opcode, err := cpu.Read(Word, cpu.regs.PC); err == nil {
-		cpu.regs.PC += uint32(Word.size)
+		cpu.regs.PC += uint32(Word)
 		return uint16(opcode), nil
 	} else {
 		return 0, err
@@ -206,12 +198,12 @@ func (cpu *CPU) fetchOpcode() (uint16, error) {
 
 func (cpu *CPU) Reset() error {
 	cpu.regs = Registers{SR: 0x2700}
-	ssp, err := cpu.bus.ReadLongFrom(0)
+	ssp, err := cpu.bus.Read(Long, 0)
 	if err != nil {
 		return err
 	}
 	cpu.regs.A[7] = ssp
-	pc, err := cpu.bus.ReadLongFrom(4)
+	pc, err := cpu.bus.Read(Long, 4)
 	if err != nil {
 		return err
 	}
@@ -298,23 +290,26 @@ func validEA(opcode, mask uint16) bool {
 	return false
 }
 
-func (cpu *CPU) Push(s *Size, value uint32) error {
-	cpu.regs.A[7] -= s.size
+func (cpu *CPU) Push(s Size, value uint32) error {
+	cpu.regs.A[7] -= uint32(s)
 	return cpu.Write(s, cpu.regs.A[7], value)
 }
 
-func (cpu *CPU) Pop(s *Size) (uint32, error) {
+func (cpu *CPU) Pop(s Size) (uint32, error) {
 	if res, err := cpu.Read(s, cpu.regs.A[7]); err == nil {
-		cpu.regs.A[7] += s.size // sometimes odd
+		cpu.regs.A[7] += uint32(s) // sometimes odd
 		return res, nil
 	} else {
 		return 0, err
 	}
 }
 
-func (cpu *CPU) PopPc(s *Size) (uint32, error) {
+func (cpu *CPU) PopPc(s Size) (uint32, error) {
 	if res, err := cpu.Read(s, cpu.regs.PC); err == nil {
-		cpu.regs.PC += s.align // never odd
+		cpu.regs.PC += uint32(s)
+		if cpu.regs.PC&1 != 0 {
+			cpu.regs.PC++ // never odd
+		}
 		return res, nil
 
 	} else {

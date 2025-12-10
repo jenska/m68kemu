@@ -12,14 +12,14 @@ func TestTrapStacksExceptionFrameAndJumps(t *testing.T) {
 	vectorNumber := XTrap + vector
 	vectorAddress := vectorNumber << 2
 
-	if err := ram.WriteLongTo(vectorAddress, handler); err != nil {
+	if err := ram.Write(Long, vectorAddress, handler); err != nil {
 		t.Fatalf("failed to write vector: %v", err)
 	}
 
 	code := assemble(t, "TRAP #1\n")
 	for i := range code {
 		addr := cpu.regs.PC + uint32(i)
-		if err := ram.WriteByteTo(addr, code[i]); err != nil {
+		if err := ram.Write(Byte, addr, uint32(code[i])); err != nil {
 			t.Fatalf("failed to write byte to %04x: %v", addr, err)
 		}
 	}
@@ -34,20 +34,20 @@ func TestTrapStacksExceptionFrameAndJumps(t *testing.T) {
 		t.Fatalf("failed to execute TRAP: %v", err)
 	}
 
-	expectedSP := uint32(0x1000 - (Word.size + Long.size + Word.size))
+	expectedSP := uint32(0x1000 - (Word + Long + Word))
 	if cpu.regs.A[7] != expectedSP {
 		t.Fatalf("unexpected SP after trap: got %08x want %08x", cpu.regs.A[7], expectedSP)
 	}
 
-	stackedVector, err := ram.ReadWordFrom(expectedSP)
+	stackedVector, err := ram.Read(Word, expectedSP)
 	if err != nil {
 		t.Fatalf("failed reading stacked vector: %v", err)
 	}
-	if stackedVector != uint16(vectorAddress) {
+	if stackedVector != vectorAddress {
 		t.Fatalf("stacked vector mismatch: got %04x want %04x", stackedVector, uint16(vectorAddress))
 	}
 
-	stackedPC, err := ram.ReadLongFrom(expectedSP + Word.size)
+	stackedPC, err := ram.Read(Long, expectedSP+uint32(Word))
 	if err != nil {
 		t.Fatalf("failed reading stacked PC: %v", err)
 	}
@@ -55,7 +55,7 @@ func TestTrapStacksExceptionFrameAndJumps(t *testing.T) {
 		t.Fatalf("stacked PC mismatch: got %08x want %08x", stackedPC, returnPC)
 	}
 
-	stackedSR, err := ram.ReadWordFrom(expectedSP + Word.size + Long.size)
+	stackedSR, err := ram.Read(Word, expectedSP+uint32(Word+Long))
 	if err != nil {
 		t.Fatalf("failed reading stacked SR: %v", err)
 	}

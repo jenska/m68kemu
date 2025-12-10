@@ -4,7 +4,14 @@ import (
 	"github.com/jenska/m68kemu/internal/emu"
 )
 
+const (
+	Byte = emu.Byte
+	Word = emu.Word
+	Long = emu.Long
+)
+
 type (
+	Size       emu.Size
 	Registers  emu.Registers
 	AddressBus emu.AddressBus
 
