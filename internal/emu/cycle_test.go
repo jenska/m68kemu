@@ -79,6 +79,21 @@ func TestCycleCounterWaitStates(t *testing.T) {
 	}
 }
 
+func TestExecuteInstructionAddsOpcodeCycles(t *testing.T) {
+	cpu, _ := newEnvironment(t)
+
+	const opcode = uint16(0x4e71) // NOP
+
+	if err := cpu.executeInstruction(opcode); err != nil {
+		t.Fatalf("executeInstruction failed: %v", err)
+	}
+
+	expected := uint64(opcodeCycles(opcode))
+	if cpu.Cycles() != expected {
+		t.Fatalf("unexpected cycles after executeInstruction: got %d want %d", cpu.Cycles(), expected)
+	}
+}
+
 func TestEACycleTable(t *testing.T) {
 	tests := []struct {
 		name           string
