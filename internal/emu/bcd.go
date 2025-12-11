@@ -32,7 +32,13 @@ func abcd(cpu *CPU) error {
 		return err
 	}
 
-	updateBCDFlags(cpu, result, carry)
+	cpu.regs.SR &^= srCarry | srExtend | srZero
+	if carry {
+		cpu.regs.SR |= srCarry | srExtend
+	}
+	if result == 0 {
+		cpu.regs.SR |= srZero
+	}
 
 	return nil
 }
@@ -48,7 +54,13 @@ func sbcd(cpu *CPU) error {
 		return err
 	}
 
-	updateBCDFlags(cpu, result, borrow)
+	cpu.regs.SR &^= srCarry | srExtend | srZero
+	if borrow {
+		cpu.regs.SR |= srCarry | srExtend
+	}
+	if result == 0 {
+		cpu.regs.SR |= srZero
+	}
 
 	return nil
 }
@@ -64,7 +76,13 @@ func nbcd(cpu *CPU) error {
 		return err
 	}
 
-	updateBCDFlags(cpu, result, borrow)
+	cpu.regs.SR &^= srCarry | srExtend | srZero
+	if borrow {
+		cpu.regs.SR |= srCarry | srExtend
+	}
+	if result == 0 {
+		cpu.regs.SR |= srZero
+	}
 
 	return nil
 }
@@ -108,17 +126,12 @@ func bcdSub(src, dst byte, extend bool) (byte, bool) {
 	return byte(diff & 0xff), borrow
 }
 
-func updateBCDFlags(cpu *CPU, result byte, carry bool) {
-	cpu.regs.SR &^= srCarry | srExtend | srZero
-	if carry {
-		cpu.regs.SR |= srCarry | srExtend
-	}
-	if result == 0 {
-		cpu.regs.SR |= srZero
-	}
+type bcdOperand struct {
+	value byte
+	write func(byte) error
 }
 
-type bcdOperand struct {
+type bcdSourceDest struct {
 	value byte
 	write func(byte) error
 }
@@ -158,13 +171,13 @@ func bcdOperands(cpu *CPU) (bcdOperand, bcdOperand, error) {
 	}, nil
 }
 
-func bcdDestination(cpu *CPU) (bcdOperand, error) {
+func bcdDestination(cpu *CPU) (bcdSourceDest, error) {
 	mode := (cpu.regs.IR >> 3) & 0x1
 	reg := y(cpu.regs.IR)
 
 	if mode == 0 {
 		dstReg := dy(cpu)
-		return bcdOperand{
+		return bcdSourceDest{
 			value: byte(*dstReg & 0xff),
 			write: func(v byte) error {
 				*dstReg = (*dstReg & 0xffffff00) | uint32(v)
@@ -178,10 +191,10 @@ func bcdDestination(cpu *CPU) (bcdOperand, error) {
 
 	value, err := cpu.Read(Byte, addr)
 	if err != nil {
-		return bcdOperand{}, err
+		return bcdSourceDest{}, err
 	}
 
-	return bcdOperand{
+	return bcdSourceDest{
 		value: byte(value),
 		write: func(v byte) error { return cpu.Write(Byte, addr, uint32(v)) },
 	}, nil
