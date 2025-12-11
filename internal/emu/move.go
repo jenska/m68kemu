@@ -6,7 +6,6 @@ func init() {
 	registerMove(movel, 0x2000)
 	registerMoveA(0x3000, moveaw)
 	registerMoveA(0x2000, moveal)
-
 	RegisterInstruction(moveq, 0x7000, 0xf100, 0)
 }
 

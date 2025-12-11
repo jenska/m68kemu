@@ -1,22 +1,12 @@
 package emu
 
 func init() {
-	registerABCD()
-	registerSBCD()
-	registerNBCD()
-}
-
-func registerABCD() {
 	RegisterInstruction(abcd, 0xc100, 0xf1f8, 0)
 	RegisterInstruction(abcd, 0xc108, 0xf1f8, 0)
-}
 
-func registerSBCD() {
 	RegisterInstruction(sbcd, 0x8100, 0xf1f8, 0)
 	RegisterInstruction(sbcd, 0x8108, 0xf1f8, 0)
-}
 
-func registerNBCD() {
 	RegisterInstruction(nbcd, 0x4800, 0xfff8, 0)
 	RegisterInstruction(nbcd, 0x4820, 0xfff8, 0)
 }

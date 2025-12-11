@@ -2,15 +2,11 @@ package emu
 
 import "fmt"
 
-const leaPeaAddressMask = eaMaskIndirect | eaMaskPostIncrement | eaMaskPreDecrement | eaMaskDisplacement | eaMaskIndex | eaMaskAbsoluteShort | eaMaskAbsoluteLong | eaMaskPCDisplacement | eaMaskPCIndex
-
 func init() {
-	registerLEA()
-	registerPEA()
-}
+	const leaPeaAddressMask = eaMaskIndirect | eaMaskPostIncrement | eaMaskPreDecrement | eaMaskDisplacement | eaMaskIndex | eaMaskAbsoluteShort | eaMaskAbsoluteLong | eaMaskPCDisplacement | eaMaskPCIndex
 
-func registerLEA() {
 	RegisterInstruction(lea, 0x41c0, 0xf1c0, leaPeaAddressMask)
+	RegisterInstruction(pea, 0x4840, 0xffc0, leaPeaAddressMask)
 }
 
 func lea(cpu *CPU) error {
@@ -27,10 +23,6 @@ func lea(cpu *CPU) error {
 
 	*ax(cpu) = src.computedAddress()
 	return nil
-}
-
-func registerPEA() {
-	RegisterInstruction(pea, 0x4840, 0xffc0, leaPeaAddressMask)
 }
 
 func pea(cpu *CPU) error {
