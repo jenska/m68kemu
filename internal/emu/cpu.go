@@ -5,25 +5,25 @@ import (
 )
 
 const (
-        Byte Size = 1
-        Word Size = 2
-        Long Size = 4
+	Byte Size = 1
+	Word Size = 2
+	Long Size = 4
 
-        XBusError         = 2
-        XAddresError      = 3
-        XIllegal          = 4
-        XDivByZero        = 5
-        XPrivViolation    = 8
-        XUninitializedInt = 15
-        XTrap             = 32
+	XBusError         = 2
+	XAddresError      = 3
+	XIllegal          = 4
+	XDivByZero        = 5
+	XPrivViolation    = 8
+	XUninitializedInt = 15
+	XTrap             = 32
 
-        srCarry         = 0x0001
-        srOverflow      = 0x0002
-        srZero          = 0x0004
-        srNegative      = 0x0008
-        srExtend        = 0x0010
-        srInterruptMask = 0x0700
-        srSupervisor    = 0x2000
+	srCarry         = 0x0001
+	srOverflow      = 0x0002
+	srZero          = 0x0004
+	srNegative      = 0x0008
+	srExtend        = 0x0010
+	srInterruptMask = 0x0700
+	srSupervisor    = 0x2000
 )
 
 const (
@@ -53,6 +53,11 @@ type (
 	BusError     uint32
 
 	BreakpointType int
+
+	// CycleCalculator builds a static cycle count for a given opcode. Results are
+	// stored in OpcodeCycleTable during instruction registration and can be looked
+	// up at execution time for fixed-cost instructions.
+	CycleCalculator func(opcode uint16) uint32
 
 	// AddressBus for accessing address areas
 	AddressBus interface {
@@ -229,13 +234,13 @@ func (cpu *CPU) handleBreakpoint(bp Breakpoint, kind BreakpointType, address uin
 // callers to execute single instructions directly through the API.
 func (cpu *CPU) executeInstruction(opcode uint16) error {
 	cpu.regs.IR = opcode
-	cpu.addCycles(opcodeCycles(opcode))
+
+	cpu.addCycles(OpcodeCycleTable[opcode])
+
 	handler := InstructionTable[opcode]
 	if handler == nil {
 		return cpu.Exception(XIllegal)
 	}
-
-	cpu.addCycles(opcodeCycles(opcode))
 
 	if err := handler(cpu); err != nil {
 		switch err.(type) {
@@ -521,5 +526,23 @@ func (cpu *CPU) PopPc(s Size) (uint32, error) {
 
 	} else {
 		return 0, err
+	}
+}
+
+// addCycles increments the CPU cycle counter using a uint32 input to keep call
+// sites close to the 68k reference values while storing the counter as a wider
+// type.
+func (cpu *CPU) addCycles(c uint32) {
+	cpu.cycles += uint64(c)
+}
+
+// Cycles returns the total number of cycles executed since the last reset.
+func (cpu *CPU) Cycles() uint64 {
+	return cpu.cycles
+}
+
+func constantCycles(c uint32) CycleCalculator {
+	return func(uint16) uint32 {
+		return c
 	}
 }

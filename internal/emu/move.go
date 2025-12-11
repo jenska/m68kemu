@@ -180,3 +180,30 @@ func moveal(cpu *CPU) error {
 	*ax(cpu) = value
 	return nil
 }
+
+func moveCycles(ir uint16, size Size) uint32 {
+	srcMode := (ir >> 3) & 0x7
+	srcReg := ir & 0x7
+	dstMode := (ir >> 6) & 0x7
+	dstReg := (ir >> 9) & 0x7
+
+	return 4 + eaAccessCycles(srcMode, srcReg, size) + eaAccessCycles(dstMode, dstReg, size)
+}
+
+func moveAddressCycles(ir uint16, size Size) uint32 {
+	srcMode := (ir >> 3) & 0x7
+	srcReg := ir & 0x7
+	return 4 + eaAccessCycles(srcMode, srcReg, size)
+}
+
+func moveCycleCalculator(size Size) CycleCalculator {
+	return func(opcode uint16) uint32 {
+		return moveCycles(opcode, size)
+	}
+}
+
+func moveAddressCycleCalculator(size Size) CycleCalculator {
+	return func(opcode uint16) uint32 {
+		return moveAddressCycles(opcode, size)
+	}
+}

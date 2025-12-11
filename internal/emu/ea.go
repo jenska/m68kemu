@@ -72,6 +72,17 @@ type (
 )
 
 var (
+	eaCycleTable = [8][8]uint32{
+		{0, 0, 0, 0, 0, 0, 0, 0},         // Dn
+		{0, 0, 0, 0, 0, 0, 0, 0},         // An
+		{4, 4, 4, 4, 4, 4, 4, 4},         // (An)
+		{4, 4, 4, 4, 4, 4, 4, 4},         // (An)+
+		{6, 6, 6, 6, 6, 6, 6, 6},         // -(An)
+		{8, 8, 8, 8, 8, 8, 8, 8},         // (d16,An)
+		{10, 10, 10, 10, 10, 10, 10, 10}, // (d8,An,Xn)
+		{8, 12, 8, 10, 0, 0, 0, 0},       // (xxx).W, (xxx).L, (d16,PC), (d8,PC,Xn), #<data>
+	}
+
 	eaSrc = []ea{
 		&eaRegister{areg: dy},
 		&eaRegister{areg: ay},
@@ -439,4 +450,19 @@ func ix68000(c *CPU, a uint32) (uint32, error) {
 		xn = int32(int16(ext))
 	}
 	return uint32(int32(a) + xn + int32(int8(ext))), nil
+}
+
+func eaAccessCycles(mode, reg uint16, size Size) uint32 {
+	if mode == 7 && reg == 4 { // #<data>
+		switch size {
+		case Byte, Word:
+			return 4
+		case Long:
+			return 8
+		default:
+			return 0
+		}
+	}
+
+	return eaCycleTable[mode][reg]
 }
