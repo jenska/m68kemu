@@ -11,6 +11,10 @@ type RAM struct {
 	mem    []byte
 }
 
+// WaitStates allows RAM to satisfy WaitStateDevice while imposing no additional
+// delay.
+func (ram *RAM) WaitStates(Size, uint32) uint32 { return 0 }
+
 func (ram *RAM) Contains(address uint32) bool {
 	return address >= ram.offset && address < ram.offset+uint32(len(ram.mem))
 }

@@ -16,6 +16,8 @@ func lea(cpu *CPU) error {
 		return fmt.Errorf("invalid addressing mode for LEA")
 	}
 
+	cpu.addCycles(leaPeaCycles(cpu.regs.IR, 4))
+
 	src, err := cpu.ResolveSrcEA(Long)
 	if err != nil {
 		return err
@@ -31,6 +33,8 @@ func pea(cpu *CPU) error {
 	if mode < 2 || (mode == 7 && reg == 4) {
 		return fmt.Errorf("invalid addressing mode for PEA")
 	}
+
+	cpu.addCycles(leaPeaCycles(cpu.regs.IR, 8))
 
 	src, err := cpu.ResolveSrcEA(Long)
 	if err != nil {

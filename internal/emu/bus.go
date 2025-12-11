@@ -10,6 +10,13 @@ type Device interface {
 	Reset()
 }
 
+// WaitStateDevice optionally advertises additional wait states a device
+// imposes per transaction. Implementations may vary their contribution based
+// on access size and address.
+type WaitStateDevice interface {
+	WaitStates(Size, uint32) uint32
+}
+
 // WaitHook can be used to simulate wait states or count cycles for bus access.
 type WaitHook func(states uint32)
 
@@ -64,7 +71,7 @@ func (b *Bus) Read(s Size, address uint32) (uint32, error) {
 		return 0, BusError(address)
 	}
 
-	b.wait()
+	b.wait(s, address, dev)
 	return dev.Read(s, address)
 }
 
@@ -80,13 +87,22 @@ func (b *Bus) Write(s Size, address uint32, value uint32) error {
 		return BusError(address)
 	}
 
-	b.wait()
+	b.wait(s, address, dev)
 	return dev.Write(s, address, value)
 }
 
-func (b *Bus) wait() {
-	if b.waitHook != nil && b.waitStates > 0 {
-		b.waitHook(b.waitStates)
+func (b *Bus) wait(size Size, address uint32, dev Device) {
+	if b.waitHook == nil {
+		return
+	}
+
+	states := b.waitStates
+	if wsDev, ok := dev.(WaitStateDevice); ok {
+		states += wsDev.WaitStates(size, address)
+	}
+
+	if states > 0 {
+		b.waitHook(states)
 	}
 }
 
