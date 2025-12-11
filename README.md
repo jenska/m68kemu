@@ -1,6 +1,6 @@
 # m68kemu
 
-A small Motorola 68000 emulator written in Go. The emulator exposes a CPU core with a programmable memory bus, effective-address helpers, and a few initial instructions for experimenting with 68k code.
+A small Motorola 68000 emulator written in Go. The emulator exposes a CPU core with a programmable memory bus, effective-address helpers, a level-aware interrupt controller (including autovectors), and a growing set of instructions for experimenting with 68k code.
 
 ## Roadmap for m68kemu as a computer-emulator core
 The steps below focus on improving m68kemu itself so it can serve as a reliable 68000 subsystem inside a broader computer emulator.
@@ -35,7 +35,7 @@ The steps below focus on improving m68kemu itself so it can serve as a reliable 
 The emulator currently covers a small but growing subset of 68000 opcodes:
 
 - Data movement: `MOVE.{B/W/L}`, `MOVEA.{W/L}`, `MOVEQ`
-- Address calculation/stack: `LEA`, `PEA`, `TRAP #n`
+- Address calculation/stack: `LEA`, `PEA`, `TRAP #n`, `NOP`
 - BCD arithmetic: `ABCD`, `SBCD`, `NBCD` (register and predecrement memory forms)
 - Shifts and rotates: `ASL/ASR`, `LSL/LSR`, `ROL/ROR`, `ROXL/ROXR` (register and memory forms with full condition code updates)
 
