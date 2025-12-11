@@ -88,7 +88,7 @@ func TestExecuteInstructionAddsOpcodeCycles(t *testing.T) {
 		t.Fatalf("executeInstruction failed: %v", err)
 	}
 
-	expected := uint64(opcodeCycles(opcode))
+	expected := uint64(OpcodeCycleTable[opcode])
 	if cpu.Cycles() != expected {
 		t.Fatalf("unexpected cycles after executeInstruction: got %d want %d", cpu.Cycles(), expected)
 	}
@@ -134,7 +134,7 @@ func TestOpcodeCycleTable(t *testing.T) {
 	assertWordCycles(t, shiftImmediate, shiftRegisterCycleCalculator(shiftImmediate))
 
 	shiftRegister := uint16(code[4])<<8 | uint16(code[5])
-	assertWordCycles(t, shiftRegister, instructionCycleTable.ShiftRegister)
+	assertWordCycles(t, shiftRegister, 6)
 
 	shiftMemory := uint16(code[6])<<8 | uint16(code[7])
 	assertWordCycles(t, shiftMemory, shiftMemoryCycleCalculator(shiftMemory))

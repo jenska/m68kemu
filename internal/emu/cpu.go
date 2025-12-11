@@ -54,6 +54,11 @@ type (
 
 	BreakpointType int
 
+	// CycleCalculator builds a static cycle count for a given opcode. Results are
+	// stored in OpcodeCycleTable during instruction registration and can be looked
+	// up at execution time for fixed-cost instructions.
+	CycleCalculator func(opcode uint16) uint32
+
 	// AddressBus for accessing address areas
 	AddressBus interface {
 		Read(s Size, address uint32) (uint32, error)
@@ -229,12 +234,13 @@ func (cpu *CPU) handleBreakpoint(bp Breakpoint, kind BreakpointType, address uin
 // callers to execute single instructions directly through the API.
 func (cpu *CPU) executeInstruction(opcode uint16) error {
 	cpu.regs.IR = opcode
+
+	cpu.addCycles(OpcodeCycleTable[opcode])
+
 	handler := InstructionTable[opcode]
 	if handler == nil {
 		return cpu.Exception(XIllegal)
 	}
-
-	cpu.addCycles(opcodeCycles(opcode))
 
 	if err := handler(cpu); err != nil {
 		switch err.(type) {
@@ -520,5 +526,23 @@ func (cpu *CPU) PopPc(s Size) (uint32, error) {
 
 	} else {
 		return 0, err
+	}
+}
+
+// addCycles increments the CPU cycle counter using a uint32 input to keep call
+// sites close to the 68k reference values while storing the counter as a wider
+// type.
+func (cpu *CPU) addCycles(c uint32) {
+	cpu.cycles += uint64(c)
+}
+
+// Cycles returns the total number of cycles executed since the last reset.
+func (cpu *CPU) Cycles() uint64 {
+	return cpu.cycles
+}
+
+func constantCycles(c uint32) CycleCalculator {
+	return func(uint16) uint32 {
+		return c
 	}
 }

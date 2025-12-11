@@ -117,14 +117,14 @@ func doShiftRotate(value uint32, count int, width int, operation int, left bool,
 	switch operation {
 	case 0: // arithmetic shift
 		if left {
-			return asl(value, count, width, extend)
+			return asl(value, count, width)
 		}
-		return asr(value, count, width, extend)
+		return asr(value, count, width)
 	case 1: // logical shift
 		if left {
-			return lsl(value, count, width, extend)
+			return lsl(value, count, width)
 		}
-		return lsr(value, count, width, extend)
+		return lsr(value, count, width)
 	case 2: // rotate with extend
 		if left {
 			return roxl(value, count, width, extend)
@@ -140,7 +140,7 @@ func doShiftRotate(value uint32, count int, width int, operation int, left bool,
 	}
 }
 
-func asl(value uint32, count, width int, extend bool) (uint32, shiftRotateFlags) {
+func asl(value uint32, count, width int) (uint32, shiftRotateFlags) {
 	mask := uint32((1 << width) - 1)
 	value &= mask
 	var carry uint32
@@ -158,7 +158,7 @@ func asl(value uint32, count, width int, extend bool) (uint32, shiftRotateFlags)
 	}
 }
 
-func asr(value uint32, count, width int, extend bool) (uint32, shiftRotateFlags) {
+func asr(value uint32, count, width int) (uint32, shiftRotateFlags) {
 	mask := uint32((1 << width) - 1)
 	value &= mask
 	sign := value & (1 << (width - 1))
@@ -173,7 +173,7 @@ func asr(value uint32, count, width int, extend bool) (uint32, shiftRotateFlags)
 	return value & mask, shiftRotateFlags{carryOut: carry, changeCarry: true, extendOut: carry != 0, changeExtend: true}
 }
 
-func lsl(value uint32, count, width int, extend bool) (uint32, shiftRotateFlags) {
+func lsl(value uint32, count, width int) (uint32, shiftRotateFlags) {
 	mask := uint32((1 << width) - 1)
 	value &= mask
 	var carry uint32
@@ -184,7 +184,7 @@ func lsl(value uint32, count, width int, extend bool) (uint32, shiftRotateFlags)
 	return value, shiftRotateFlags{carryOut: carry, changeCarry: true, extendOut: carry != 0, changeExtend: true}
 }
 
-func lsr(value uint32, count, width int, extend bool) (uint32, shiftRotateFlags) {
+func lsr(value uint32, count, width int) (uint32, shiftRotateFlags) {
 	mask := uint32((1 << width) - 1)
 	value &= mask
 	var carry uint32
@@ -284,4 +284,35 @@ func b2i(v bool) uint32 {
 		return 1
 	}
 	return 0
+}
+
+func shiftMemoryCycles(ir uint16) uint32 {
+	mode := (ir >> 3) & 0x7
+	reg := ir & 0x7
+	return 8 + eaAccessCycles(mode, reg, Word)
+}
+
+func shiftRegisterCycleCalculator(opcode uint16) uint32 {
+	operation := int((opcode >> 3) & 0x7)
+	registerCount := operation >= 4
+	if registerCount {
+		return 6
+	}
+
+	countField := int((opcode >> 9) & 0x7)
+	if countField == 0 {
+		countField = 8
+	}
+	return 6 + uint32(countField*2)
+}
+
+func shiftMemoryCycleCalculator(opcode uint16) uint32 {
+	return shiftMemoryCycles(opcode)
+}
+
+func shiftRotateCycleCalculator(opcode uint16) uint32 {
+	if (opcode>>6)&0x7 == 0x7 {
+		return shiftMemoryCycleCalculator(opcode)
+	}
+	return shiftRegisterCycleCalculator(opcode)
 }

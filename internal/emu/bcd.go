@@ -193,3 +193,24 @@ func bcdDestination(cpu *CPU) (bcdSourceDest, error) {
 		write: func(v byte) error { return cpu.Write(Byte, addr, uint32(v)) },
 	}, nil
 }
+
+func abcdCycleCalculator(opcode uint16) uint32 {
+	if (opcode>>3)&0x1 == 0 {
+		return 6
+	}
+	return 18
+}
+
+func sbcdCycleCalculator(opcode uint16) uint32 {
+	if (opcode>>3)&0x1 == 0 {
+		return 6
+	}
+	return 18
+}
+
+func nbcdCycleCalculator(opcode uint16) uint32 {
+	if (opcode>>3)&0x1 == 0 {
+		return 6
+	}
+	return 8
+}
