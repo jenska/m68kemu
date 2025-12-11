@@ -117,3 +117,38 @@ func TestNBCDRegister(t *testing.T) {
 		t.Fatalf("zero flag should be cleared, SR=%04x", cpu.regs.SR)
 	}
 }
+
+func TestBCDZeroPropagation(t *testing.T) {
+	tests := []struct {
+		name    string
+		setupSR uint16
+		src     uint8
+		dst     uint8
+		asm     string
+		wantSRZ bool
+		wantDst uint8
+	}{
+		{"ABCDZeroStaysSet", srZero, 0x00, 0x00, "ABCD D0,D1", true, 0x00},
+		{"ABCDZeroClears", srZero, 0x01, 0x00, "ABCD D0,D1", false, 0x01},
+		{"SBCDZeroClears", srZero, 0x00, 0x01, "SBCD D0,D1", false, 0x01},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cpu, ram := newEnvironment(t)
+			cpu.regs.SR &^= srCarry | srExtend | srZero
+			cpu.regs.SR |= tt.setupSR
+			cpu.regs.D[0] = int32(tt.src)
+			cpu.regs.D[1] = int32(tt.dst)
+
+			runSingleInstruction(t, cpu, ram, tt.asm)
+
+			if got := cpu.regs.D[1] & 0xff; got != int32(tt.wantDst) {
+				t.Fatalf("expected %02x in destination, got %02x", tt.wantDst, got)
+			}
+			if zSet := cpu.regs.SR&srZero != 0; zSet != tt.wantSRZ {
+				t.Fatalf("zero flag mismatch: want %v got %v (SR=%04x)", tt.wantSRZ, zSet, cpu.regs.SR)
+			}
+		})
+	}
+}

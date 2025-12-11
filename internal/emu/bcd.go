@@ -22,11 +22,13 @@ func abcd(cpu *CPU) error {
 		return err
 	}
 
-	cpu.regs.SR &^= srCarry | srExtend | srZero
+	cpu.regs.SR &^= srCarry | srExtend
 	if carry {
 		cpu.regs.SR |= srCarry | srExtend
 	}
-	if result == 0 {
+	if result != 0 {
+		cpu.regs.SR &^= srZero
+	} else {
 		cpu.regs.SR |= srZero
 	}
 
@@ -44,11 +46,13 @@ func sbcd(cpu *CPU) error {
 		return err
 	}
 
-	cpu.regs.SR &^= srCarry | srExtend | srZero
+	cpu.regs.SR &^= srCarry | srExtend
 	if borrow {
 		cpu.regs.SR |= srCarry | srExtend
 	}
-	if result == 0 {
+	if result != 0 {
+		cpu.regs.SR &^= srZero
+	} else {
 		cpu.regs.SR |= srZero
 	}
 
@@ -66,11 +70,13 @@ func nbcd(cpu *CPU) error {
 		return err
 	}
 
-	cpu.regs.SR &^= srCarry | srExtend | srZero
+	cpu.regs.SR &^= srCarry | srExtend
 	if borrow {
 		cpu.regs.SR |= srCarry | srExtend
 	}
-	if result == 0 {
+	if result != 0 {
+		cpu.regs.SR &^= srZero
+	} else {
 		cpu.regs.SR |= srZero
 	}
 
