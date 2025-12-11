@@ -50,11 +50,41 @@ type (
 	AddressError uint32
 	BusError     uint32
 
+	BreakpointType int
+
 	// AddressBus for accessing address areas
 	AddressBus interface {
 		Read(s Size, address uint32) (uint32, error)
 		Write(s Size, address uint32, value uint32) error
 		Reset()
+	}
+
+	TraceInfo struct {
+		PC        uint32
+		SR        uint16
+		Registers Registers
+	}
+
+	TraceCallback func(TraceInfo)
+
+	Breakpoint struct {
+		Address   uint32
+		OnExecute bool
+		OnRead    bool
+		OnWrite   bool
+		Halt      bool
+		Callback  func(BreakpointEvent) error
+	}
+
+	BreakpointEvent struct {
+		Type      BreakpointType
+		Address   uint32
+		Registers Registers
+	}
+
+	BreakpointHit struct {
+		Address uint32
+		Type    BreakpointType
 	}
 
 	// Registers represents the programmer visible registers of the 68000 CPU.
@@ -72,7 +102,16 @@ type (
 	CPU struct {
 		regs Registers
 		bus  AddressBus
+		trap TraceCallback
+
+		breakpoints map[uint32]Breakpoint
 	}
+)
+
+const (
+	BreakpointExecute BreakpointType = iota
+	BreakpointRead
+	BreakpointWrite
 )
 
 func (regs *Registers) String() string {
@@ -102,15 +141,38 @@ func (be BusError) Error() string {
 	return fmt.Sprintln("BusError at %08x", uint32(be))
 }
 
+func (bh BreakpointHit) Error() string {
+	return fmt.Sprintf("breakpoint hit at %08x (%v)", bh.Address, bh.Type)
+}
+
+func (bt BreakpointType) String() string {
+	switch bt {
+	case BreakpointExecute:
+		return "execute"
+	case BreakpointRead:
+		return "read"
+	case BreakpointWrite:
+		return "write"
+	default:
+		return "unknown"
+	}
+}
+
 func (cpu *CPU) Read(size Size, address uint32) (uint32, error) {
 	address &= 0xffffff // 24bit address bus of 68000
 	switch size {
 	case Byte:
+		if err := cpu.checkAccessBreakpoint(address, BreakpointRead); err != nil {
+			return 0, err
+		}
 		result, err := cpu.bus.Read(Byte, address)
 		return uint32(result), err
 	case Word, Long:
 		if address&1 != 0 {
 			return 0, AddressError(address)
+		}
+		if err := cpu.checkAccessBreakpoint(address, BreakpointRead); err != nil {
+			return 0, err
 		}
 		result, err := cpu.bus.Read(size, address)
 		return uint32(result), err
@@ -123,10 +185,16 @@ func (cpu *CPU) Write(size Size, address uint32, value uint32) error {
 	address &= 0xffffff // 24bit address bus of 68000
 	switch size {
 	case Byte:
+		if err := cpu.checkAccessBreakpoint(address, BreakpointWrite); err != nil {
+			return err
+		}
 		return cpu.bus.Write(Byte, address, value)
 	case Word, Long:
 		if address&1 != 0 {
 			return AddressError(address)
+		}
+		if err := cpu.checkAccessBreakpoint(address, BreakpointWrite); err != nil {
+			return err
 		}
 		return cpu.bus.Write(size, address, value)
 	default:
@@ -137,6 +205,32 @@ func (cpu *CPU) Write(size Size, address uint32, value uint32) error {
 
 func (cpu *CPU) Registers() Registers {
 	return cpu.regs
+}
+
+func (cpu *CPU) SetTracer(cb TraceCallback) {
+	cpu.trap = cb
+}
+
+func (cpu *CPU) AddBreakpoint(bp Breakpoint) {
+	if cpu.breakpoints == nil {
+		cpu.breakpoints = make(map[uint32]Breakpoint)
+	}
+	cpu.breakpoints[bp.Address] = bp
+}
+
+func (cpu *CPU) handleBreakpoint(bp Breakpoint, kind BreakpointType, address uint32) error {
+	event := BreakpointEvent{Type: kind, Address: address, Registers: cpu.regs}
+	if bp.Callback != nil {
+		if err := bp.Callback(event); err != nil {
+			return err
+		}
+	}
+
+	if bp.Halt {
+		return BreakpointHit{Address: address, Type: kind}
+	}
+
+	return nil
 }
 
 // ExecuteInstruction runs an instruction without fetching it from memory. This allows
@@ -224,11 +318,64 @@ func (cpu *CPU) readVector(offset uint32) (uint32, error) {
 
 // Step fetches the next opcode at the program counter and executes it.
 func (cpu *CPU) Step() error {
+	if err := cpu.checkExecuteBreakpoint(cpu.regs.PC); err != nil {
+		return err
+	}
+
+	pc := cpu.regs.PC
 	if opcode, err := cpu.fetchOpcode(); err == nil {
-		return cpu.executeInstruction(opcode)
+		if err := cpu.executeInstruction(opcode); err != nil {
+			return err
+		}
+
+		cpu.sendTrace(pc)
+		return nil
 	} else {
 		return err
 	}
+}
+
+func (cpu *CPU) sendTrace(pc uint32) {
+	if cpu.trap == nil {
+		return
+	}
+
+	cpu.trap(TraceInfo{PC: pc, SR: cpu.regs.SR, Registers: cpu.regs})
+}
+
+func (cpu *CPU) checkExecuteBreakpoint(pc uint32) error {
+	if cpu.breakpoints == nil {
+		return nil
+	}
+
+	if bp, ok := cpu.breakpoints[pc]; ok && bp.OnExecute {
+		return cpu.handleBreakpoint(bp, BreakpointExecute, pc)
+	}
+	return nil
+}
+
+func (cpu *CPU) checkAccessBreakpoint(address uint32, kind BreakpointType) error {
+	if cpu.breakpoints == nil {
+		return nil
+	}
+
+	bp, ok := cpu.breakpoints[address]
+	if !ok {
+		return nil
+	}
+
+	switch kind {
+	case BreakpointRead:
+		if !bp.OnRead {
+			return nil
+		}
+	case BreakpointWrite:
+		if !bp.OnWrite {
+			return nil
+		}
+	}
+
+	return cpu.handleBreakpoint(bp, kind, address)
 }
 
 func (cpu *CPU) fetchOpcode() (uint16, error) {
