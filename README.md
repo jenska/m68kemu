@@ -50,16 +50,21 @@ The emulator currently covers a small but growing subset of 68000 opcodes:
    ```
 
 ## Example
-The CPU can be stepped manually once you provide a memory implementation. The snippet below shows how to create a CPU with the built-in RAM helper and execute a single MOVEA instruction:
+The CPU can be stepped manually once you provide a memory implementation. The snippet below shows how to create a CPU with the built-in RAM helper, attach it to a bus, and execute a single MOVEA instruction:
 
 ```go
 ram := emu.NewRAM(0, 0x10000) // 64 KiB starting at address 0
-cpu, _ := emu.NewCPU(&ram, 0x1000, 0x0200)
+bus := emu.NewBus(&ram)
+cpu, _ := emu.NewCPU(bus)
+
+// Set initial SSP and PC
+_ = ram.Write(emu.Long, 0x0000, 0x00002000)
+_ = ram.Write(emu.Long, 0x0004, 0x00000200)
 
 // Encode MOVEA.L (long) from absolute long address 0x00000400 into A0
-_ = ram.WriteWordTo(0x0200, 0x2040) // opcode for MOVEA.L with absolute long source
-_ = ram.WriteLongTo(0x0202, 0x00000400)
-_ = ram.WriteLongTo(0x0400, 0xDEADBEEF) // data at the source address
+_ = ram.Write(emu.Word, 0x0200, 0x2040)      // opcode for MOVEA.L with absolute long source
+_ = ram.Write(emu.Long, 0x0202, 0x00000400)
+_ = ram.Write(emu.Long, 0x0400, 0xDEADBEEF)  // data at the source address
 
 _ = cpu.Step() // executes the single instruction
 // cpu.Registers().A[0] now contains 0xDEADBEEF

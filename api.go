@@ -17,6 +17,8 @@ type (
 	Size            = emu.Size
 	Registers       = emu.Registers
 	AddressBus      = emu.AddressBus
+	Device          = emu.Device
+	WaitHook        = emu.WaitHook
 	Breakpoint      = emu.Breakpoint
 	BreakpointEvent = emu.BreakpointEvent
 	BreakpointType  = emu.BreakpointType
@@ -36,4 +38,8 @@ type (
 
 func NewCPU(ab AddressBus) (CPU, error) {
 	return emu.NewCPU(ab)
+}
+
+func NewBus(devices ...Device) *emu.Bus {
+	return emu.NewBus(devices...)
 }
