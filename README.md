@@ -58,3 +58,15 @@ _ = cpu.Step() // executes the single instruction
 ```
 
 This repository currently focuses on correctness of addressing calculations and MOVEA handling; additional instructions can be registered using the exposed `RegisterInstruction` helper.
+
+### Tracing and breakpoints
+Tracing can be enabled via the exported API by installing a tracer callback on the CPU. Breakpoints and watchpoints halt execution (or invoke callbacks) when an instruction is executed or when a specific address is read or written:
+
+```go
+cpu.SetTracer(func(info emu.TraceInfo) {
+        fmt.Printf("PC=%04x SR=%04x\n", info.PC, info.SR)
+})
+
+cpu.AddBreakpoint(emu.Breakpoint{Address: 0x2000, OnExecute: true, Halt: true})
+cpu.AddBreakpoint(emu.Breakpoint{Address: 0x4000, OnWrite: true, Halt: true})
+```

@@ -5,20 +5,31 @@ import (
 )
 
 const (
-	Byte = emu.Byte
-	Word = emu.Word
-	Long = emu.Long
+	Byte              = emu.Byte
+	Word              = emu.Word
+	Long              = emu.Long
+	BreakpointExecute = emu.BreakpointExecute
+	BreakpointRead    = emu.BreakpointRead
+	BreakpointWrite   = emu.BreakpointWrite
 )
 
 type (
-	Size       = emu.Size
-	Registers  = emu.Registers
-	AddressBus = emu.AddressBus
+	Size            = emu.Size
+	Registers       = emu.Registers
+	AddressBus      = emu.AddressBus
+	Breakpoint      = emu.Breakpoint
+	BreakpointEvent = emu.BreakpointEvent
+	BreakpointType  = emu.BreakpointType
+	TraceInfo       = emu.TraceInfo
+	TraceCallback   = emu.TraceCallback
+	BreakpointHit   = emu.BreakpointHit
 
 	CPU interface {
 		Registers() Registers
 		Step() error
 		Reset() error
+		SetTracer(TraceCallback)
+		AddBreakpoint(Breakpoint)
 	}
 )
 
