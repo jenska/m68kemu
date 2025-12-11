@@ -55,8 +55,8 @@ func TestABCDCarryAndZero(t *testing.T) {
 	if cpu.regs.SR&(srCarry|srExtend) != srCarry|srExtend {
 		t.Fatalf("carry/extend should be set, SR=%04x", cpu.regs.SR)
 	}
-	if cpu.regs.SR&srZero == 0 {
-		t.Fatalf("zero flag should be set, SR=%04x", cpu.regs.SR)
+	if cpu.regs.SR&srZero != 0 {
+		t.Fatalf("zero flag should remain clear without prior zero, SR=%04x", cpu.regs.SR)
 	}
 }
 
@@ -130,7 +130,9 @@ func TestBCDZeroPropagation(t *testing.T) {
 	}{
 		{"ABCDZeroStaysSet", srZero, 0x00, 0x00, "ABCD D0,D1", true, 0x00},
 		{"ABCDZeroClears", srZero, 0x01, 0x00, "ABCD D0,D1", false, 0x01},
+		{"ABCDZeroNeedsPriorZ", 0, 0x00, 0x00, "ABCD D0,D1", false, 0x00},
 		{"SBCDZeroClears", srZero, 0x00, 0x01, "SBCD D0,D1", false, 0x01},
+		{"SBCDZeroNeedsPriorZ", 0, 0x00, 0x00, "SBCD D0,D1", false, 0x00},
 	}
 
 	for _, tt := range tests {
@@ -150,5 +152,23 @@ func TestBCDZeroPropagation(t *testing.T) {
 				t.Fatalf("zero flag mismatch: want %v got %v (SR=%04x)", tt.wantSRZ, zSet, cpu.regs.SR)
 			}
 		})
+	}
+}
+
+func TestNBCDZeroAndExtend(t *testing.T) {
+	cpu, ram := newEnvironment(t)
+	cpu.regs.SR &^= srExtend | srZero
+	cpu.regs.D[2] = 0x00
+
+	runSingleInstruction(t, cpu, ram, "NBCD D2")
+
+	if got := cpu.regs.D[2] & 0xff; got != 0x00 {
+		t.Fatalf("expected NBCD of zero to stay zero, got %02x", got)
+	}
+	if cpu.regs.SR&srZero == 0 {
+		t.Fatalf("zero flag should be set for NBCD of zero, SR=%04x", cpu.regs.SR)
+	}
+	if cpu.regs.SR&(srCarry|srExtend) != 0 {
+		t.Fatalf("carry/extend should remain clear without borrow, SR=%04x", cpu.regs.SR)
 	}
 }

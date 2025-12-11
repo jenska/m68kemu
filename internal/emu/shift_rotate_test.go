@@ -53,6 +53,26 @@ func TestShiftRotateFlags(t *testing.T) {
 			0x06,
 			0,
 		},
+		{
+			"ASLWordOverflow",
+			"ASL.W #1,D3",
+			3,
+			0,
+			map[int]int32{3: 0x4000},
+			0xffff,
+			0x8000,
+			srNegative | srOverflow,
+		},
+		{
+			"ROLDoesNotChangeExtend",
+			"ROL.B #1,D4",
+			4,
+			srExtend,
+			map[int]int32{4: 0x81},
+			0xff,
+			0x03,
+			srCarry | srExtend,
+		},
 	}
 
 	for _, tt := range tests {
@@ -87,5 +107,24 @@ func TestShiftZeroCountPreservesExtend(t *testing.T) {
 
 	if cpu.regs.SR&srExtend == 0 {
 		t.Fatalf("extend bit should remain set when count is zero")
+	}
+}
+
+func TestShiftRotateMemoryLogicalRight(t *testing.T) {
+	cpu, ram := newEnvironment(t)
+	cpu.regs.A[0] = 0x200
+
+	if err := ram.Write(Word, 0x200, 0x8001); err != nil {
+		t.Fatalf("failed to seed memory: %v", err)
+	}
+
+	runSingleInstruction(t, cpu, ram, "LSR.W (A0)")
+
+	if val, _ := ram.Read(Word, 0x200); val != 0x4000 {
+		t.Fatalf("expected logical shift right result 0x4000, got %04x", val)
+	}
+	expectedFlags := uint16(srCarry | srExtend)
+	if got := cpu.regs.SR & (srCarry | srExtend | srZero | srNegative | srOverflow); got != expectedFlags {
+		t.Fatalf("unexpected flags for memory LSR: got %04x want %04x", got, expectedFlags)
 	}
 }
