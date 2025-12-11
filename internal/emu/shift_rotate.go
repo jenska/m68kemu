@@ -3,13 +3,13 @@ package emu
 import "fmt"
 
 func init() {
-	RegisterInstruction(shiftRotate, 0xe000, 0xf000, 0)
+	RegisterInstruction(shiftRotate, 0xe000, 0xf000, 0, shiftRotateCycleCalculator)
 }
 
 func shiftRotate(cpu *CPU) error {
 	opcode := cpu.regs.IR
 
-	if (opcode>>6)&0x7 == 0x3 {
+	if (opcode>>6)&0x7 == 0x7 {
 		return shiftRotateMemory(cpu)
 	}
 
@@ -35,7 +35,9 @@ func shiftRotate(cpu *CPU) error {
 		}
 	}
 
-	cpu.addCycles(shiftRegisterCycles(count))
+	if registerCount {
+		cpu.addCycles(uint32(count * 2))
+	}
 
 	var size Size
 	var mask uint32
@@ -61,8 +63,6 @@ func shiftRotate(cpu *CPU) error {
 func shiftRotateMemory(cpu *CPU) error {
 	opcode := cpu.regs.IR
 	op := int((opcode >> 9) & 0x7)
-
-	cpu.addCycles(shiftMemoryCycles(opcode))
 
 	ea, err := cpu.ResolveSrcEA(Word)
 	if err != nil {

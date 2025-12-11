@@ -78,3 +78,67 @@ func TestCycleCounterWaitStates(t *testing.T) {
 		t.Fatalf("unexpected cycles with wait states: got %d want %d", cpu.Cycles(), expected)
 	}
 }
+
+func TestExecuteInstructionAddsOpcodeCycles(t *testing.T) {
+	cpu, _ := newEnvironment(t)
+
+	const opcode = uint16(0x4e71) // NOP
+
+	if err := cpu.executeInstruction(opcode); err != nil {
+		t.Fatalf("executeInstruction failed: %v", err)
+	}
+
+	expected := uint64(opcodeCycles(opcode))
+	if cpu.Cycles() != expected {
+		t.Fatalf("unexpected cycles after executeInstruction: got %d want %d", cpu.Cycles(), expected)
+	}
+}
+
+func TestEACycleTable(t *testing.T) {
+	tests := []struct {
+		name           string
+		mode, reg      uint16
+		size           Size
+		expectedCycles uint32
+	}{
+		{"Dn", 0, 0, Byte, 0},
+		{"An", 1, 0, Word, 0},
+		{"(An)", 2, 3, Long, 4},
+		{"-(An)", 4, 7, Word, 6},
+		{"AbsoluteLong", 7, 1, Word, 12},
+		{"PCIndexed", 7, 3, Long, 10},
+		{"ImmediateWord", 7, 4, Word, 4},
+		{"ImmediateLong", 7, 4, Long, 8},
+	}
+
+	for _, tt := range tests {
+		if got := eaAccessCycles(tt.mode, tt.reg, tt.size); got != tt.expectedCycles {
+			t.Fatalf("%s: unexpected cycle count: got %d want %d", tt.name, got, tt.expectedCycles)
+		}
+	}
+}
+
+func TestOpcodeCycleTable(t *testing.T) {
+	code := assemble(t, "MOVE.L D0,(A0)\nLSL.B #1,D0\nLSL.B D1,D0\nASL.W (A0)\nABCD D0,D1")
+	assertWordCycles := func(t *testing.T, word uint16, expected uint32) {
+		t.Helper()
+		if got := OpcodeCycleTable[word]; got != expected {
+			t.Fatalf("opcode %04x: unexpected cycles got %d want %d", word, got, expected)
+		}
+	}
+
+	moveOpcode := uint16(code[0])<<8 | uint16(code[1])
+	assertWordCycles(t, moveOpcode, moveCycles(moveOpcode, Long))
+
+	shiftImmediate := uint16(code[2])<<8 | uint16(code[3])
+	assertWordCycles(t, shiftImmediate, shiftRegisterCycleCalculator(shiftImmediate))
+
+	shiftRegister := uint16(code[4])<<8 | uint16(code[5])
+	assertWordCycles(t, shiftRegister, instructionCycleTable.ShiftRegister)
+
+	shiftMemory := uint16(code[6])<<8 | uint16(code[7])
+	assertWordCycles(t, shiftMemory, shiftMemoryCycleCalculator(shiftMemory))
+
+	abcdOpcode := uint16(code[8])<<8 | uint16(code[9])
+	assertWordCycles(t, abcdOpcode, abcdCycleCalculator(abcdOpcode))
+}

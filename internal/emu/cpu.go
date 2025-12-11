@@ -42,6 +42,7 @@ const (
 )
 
 var InstructionTable [0x10000]Instruction
+var OpcodeCycleTable [0x10000]uint32
 
 type (
 	Size uint32
@@ -232,6 +233,8 @@ func (cpu *CPU) executeInstruction(opcode uint16) error {
 	if handler == nil {
 		return cpu.Exception(XIllegal)
 	}
+
+	cpu.addCycles(opcodeCycles(opcode))
 
 	if err := handler(cpu); err != nil {
 		switch err.(type) {
@@ -437,10 +440,9 @@ func NewCPU(bus AddressBus) (*CPU, error) {
 	return &cpu, nil
 }
 
-var cnt int
-
-// RegisterInstruction adds an opcode handler to the CPU.
-func RegisterInstruction(ins Instruction, match, mask uint16, eaMask uint16) {
+// RegisterInstruction adds an opcode handler to the CPU and records the
+// precomputed cycle count for each opcode value that matches the mask.
+func RegisterInstruction(ins Instruction, match, mask uint16, eaMask uint16, calc CycleCalculator) {
 	for value := uint16(0); ; {
 		index := match | value
 		if validEA(index, eaMask) {
@@ -448,7 +450,9 @@ func RegisterInstruction(ins Instruction, match, mask uint16, eaMask uint16) {
 				panic(fmt.Errorf("instruction 0x%04x already registered", index))
 			}
 			InstructionTable[index] = ins
-			cnt++
+			if calc != nil {
+				OpcodeCycleTable[index] = calc(index)
+			}
 		}
 
 		value = ((value | mask) + 1) & ^mask
@@ -456,7 +460,6 @@ func RegisterInstruction(ins Instruction, match, mask uint16, eaMask uint16) {
 			break
 		}
 	}
-	fmt.Printf("# instructions %d\n", cnt)
 }
 
 func validEA(opcode, mask uint16) bool {

@@ -5,8 +5,8 @@ import "fmt"
 func init() {
 	const leaPeaAddressMask = eaMaskIndirect | eaMaskPostIncrement | eaMaskPreDecrement | eaMaskDisplacement | eaMaskIndex | eaMaskAbsoluteShort | eaMaskAbsoluteLong | eaMaskPCDisplacement | eaMaskPCIndex
 
-	RegisterInstruction(lea, 0x41c0, 0xf1c0, leaPeaAddressMask)
-	RegisterInstruction(pea, 0x4840, 0xffc0, leaPeaAddressMask)
+	RegisterInstruction(lea, 0x41c0, 0xf1c0, leaPeaAddressMask, leaPeaCycleCalculator(instructionCycleTable.Lea))
+	RegisterInstruction(pea, 0x4840, 0xffc0, leaPeaAddressMask, leaPeaCycleCalculator(instructionCycleTable.Pea))
 }
 
 func lea(cpu *CPU) error {
@@ -15,8 +15,6 @@ func lea(cpu *CPU) error {
 	if mode < 2 || (mode == 7 && reg == 4) {
 		return fmt.Errorf("invalid addressing mode for LEA")
 	}
-
-	cpu.addCycles(leaPeaCycles(cpu.regs.IR, 4))
 
 	src, err := cpu.ResolveSrcEA(Long)
 	if err != nil {
@@ -33,8 +31,6 @@ func pea(cpu *CPU) error {
 	if mode < 2 || (mode == 7 && reg == 4) {
 		return fmt.Errorf("invalid addressing mode for PEA")
 	}
-
-	cpu.addCycles(leaPeaCycles(cpu.regs.IR, 8))
 
 	src, err := cpu.ResolveSrcEA(Long)
 	if err != nil {

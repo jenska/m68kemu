@@ -12,40 +12,56 @@ func (cpu *CPU) Cycles() uint64 {
 	return cpu.cycles
 }
 
-func eaAccessCycles(mode, reg uint16, size Size) uint32 {
-	switch mode {
-	case 0: // Dn
-		return 0
-	case 1: // An
-		return 0
-	case 2: // (An)
-		return 4
-	case 3: // (An)+
-		return 4
-	case 4: // -(An)
-		return 6
-	case 5: // (d16,An)
-		return 8
-	case 6: // (d8,An,Xn)
-		return 10
-	case 7:
-		switch reg {
-		case 0: // (xxx).W
-			return 8
-		case 1: // (xxx).L
-			return 12
-		case 2: // (d16,PC)
-			return 8
-		case 3: // (d8,PC,Xn)
-			return 10
-		case 4: // #<data>
-			if size == Long {
-				return 8
-			}
-			return 4
-		}
+// CycleCalculator builds a static cycle count for a given opcode. Results are
+// stored in OpcodeCycleTable during instruction registration and can be looked
+// up at execution time for fixed-cost instructions.
+type CycleCalculator func(opcode uint16) uint32
+
+func opcodeCycles(opcode uint16) uint32 {
+	return OpcodeCycleTable[opcode]
+}
+
+var instructionCycleTable = struct {
+	Move          uint32
+	MoveAddress   uint32
+	Lea           uint32
+	Pea           uint32
+	ShiftRegister uint32
+	ShiftMemory   uint32
+}{
+	Move:          4,
+	MoveAddress:   4,
+	Lea:           4,
+	Pea:           8,
+	ShiftRegister: 6,
+	ShiftMemory:   8,
+}
+
+var (
+	eaCycleTable = [8][8]uint32{
+		{0, 0, 0, 0, 0, 0, 0, 0},         // Dn
+		{0, 0, 0, 0, 0, 0, 0, 0},         // An
+		{4, 4, 4, 4, 4, 4, 4, 4},         // (An)
+		{4, 4, 4, 4, 4, 4, 4, 4},         // (An)+
+		{6, 6, 6, 6, 6, 6, 6, 6},         // -(An)
+		{8, 8, 8, 8, 8, 8, 8, 8},         // (d16,An)
+		{10, 10, 10, 10, 10, 10, 10, 10}, // (d8,An,Xn)
+		{8, 12, 8, 10, 0, 0, 0, 0},       // (xxx).W, (xxx).L, (d16,PC), (d8,PC,Xn), #<data>
 	}
-	return 0
+
+	immediateCycleTable = map[Size]uint32{
+		Byte: 4,
+		Word: 4,
+		Long: 8,
+	}
+)
+
+func eaAccessCycles(mode, reg uint16, size Size) uint32 {
+	if mode == 7 && reg == 4 { // #<data>
+		return immediateCycleTable[size]
+	}
+
+	return eaCycleTable[mode][reg]
 }
 
 func moveCycles(ir uint16, size Size) uint32 {
@@ -54,13 +70,13 @@ func moveCycles(ir uint16, size Size) uint32 {
 	dstMode := (ir >> 6) & 0x7
 	dstReg := (ir >> 9) & 0x7
 
-	return 4 + eaAccessCycles(srcMode, srcReg, size) + eaAccessCycles(dstMode, dstReg, size)
+	return instructionCycleTable.Move + eaAccessCycles(srcMode, srcReg, size) + eaAccessCycles(dstMode, dstReg, size)
 }
 
 func moveAddressCycles(ir uint16, size Size) uint32 {
 	srcMode := (ir >> 3) & 0x7
 	srcReg := ir & 0x7
-	return 4 + eaAccessCycles(srcMode, srcReg, size)
+	return instructionCycleTable.MoveAddress + eaAccessCycles(srcMode, srcReg, size)
 }
 
 func leaPeaCycles(ir uint16, base uint32) uint32 {
@@ -70,11 +86,81 @@ func leaPeaCycles(ir uint16, base uint32) uint32 {
 }
 
 func shiftRegisterCycles(count int) uint32 {
-	return 6 + uint32(count*2)
+	return instructionCycleTable.ShiftRegister + uint32(count*2)
 }
 
 func shiftMemoryCycles(ir uint16) uint32 {
 	mode := (ir >> 3) & 0x7
 	reg := ir & 0x7
-	return 8 + eaAccessCycles(mode, reg, Word)
+	return instructionCycleTable.ShiftMemory + eaAccessCycles(mode, reg, Word)
+}
+
+func constantCycles(c uint32) CycleCalculator {
+	return func(uint16) uint32 {
+		return c
+	}
+}
+
+func moveCycleCalculator(size Size) CycleCalculator {
+	return func(opcode uint16) uint32 {
+		return moveCycles(opcode, size)
+	}
+}
+
+func moveAddressCycleCalculator(size Size) CycleCalculator {
+	return func(opcode uint16) uint32 {
+		return moveAddressCycles(opcode, size)
+	}
+}
+
+func leaPeaCycleCalculator(base uint32) CycleCalculator {
+	return func(opcode uint16) uint32 {
+		return leaPeaCycles(opcode, base)
+	}
+}
+
+func shiftRegisterCycleCalculator(opcode uint16) uint32 {
+	operation := int((opcode >> 3) & 0x7)
+	registerCount := operation >= 4
+	if registerCount {
+		return instructionCycleTable.ShiftRegister
+	}
+
+	countField := int((opcode >> 9) & 0x7)
+	if countField == 0 {
+		countField = 8
+	}
+	return instructionCycleTable.ShiftRegister + uint32(countField*2)
+}
+
+func shiftMemoryCycleCalculator(opcode uint16) uint32 {
+	return shiftMemoryCycles(opcode)
+}
+
+func shiftRotateCycleCalculator(opcode uint16) uint32 {
+	if (opcode>>6)&0x7 == 0x7 {
+		return shiftMemoryCycleCalculator(opcode)
+	}
+	return shiftRegisterCycleCalculator(opcode)
+}
+
+func abcdCycleCalculator(opcode uint16) uint32 {
+	if (opcode>>3)&0x1 == 0 {
+		return 6
+	}
+	return 18
+}
+
+func sbcdCycleCalculator(opcode uint16) uint32 {
+	if (opcode>>3)&0x1 == 0 {
+		return 6
+	}
+	return 18
+}
+
+func nbcdCycleCalculator(opcode uint16) uint32 {
+	if (opcode>>3)&0x1 == 0 {
+		return 6
+	}
+	return 8
 }
