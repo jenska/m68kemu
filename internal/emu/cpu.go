@@ -5,25 +5,25 @@ import (
 )
 
 const (
-	Byte Size = 1
-	Word Size = 2
-	Long Size = 4
+        Byte Size = 1
+        Word Size = 2
+        Long Size = 4
 
-	XBusError         = 2
-	XAddresError      = 3
-	XIllegal          = 4
-	XDivByZero        = 5
-	XPrivViolation    = 8
-	XUninitializedInt = 15
-	XTrap             = 32
+        XBusError         = 2
+        XAddresError      = 3
+        XIllegal          = 4
+        XDivByZero        = 5
+        XPrivViolation    = 8
+        XUninitializedInt = 15
+        XTrap             = 32
 
-	srCarry         = 0x0001
-	srOverflow      = 0x0002
-	srZero          = 0x0004
-	srNegative      = 0x0008
-	srExtend        = 0x0010
-	srInterruptMask = 0x0700
-	srSupervisor    = 0x2000
+        srCarry         = 0x0001
+        srOverflow      = 0x0002
+        srZero          = 0x0004
+        srNegative      = 0x0008
+        srExtend        = 0x0010
+        srInterruptMask = 0x0700
+        srSupervisor    = 0x2000
 )
 
 const (
@@ -42,6 +42,7 @@ const (
 )
 
 var InstructionTable [0x10000]Instruction
+var OpcodeCycleTable [0x10000]uint32
 
 type (
 	Size uint32
@@ -228,6 +229,7 @@ func (cpu *CPU) handleBreakpoint(bp Breakpoint, kind BreakpointType, address uin
 // callers to execute single instructions directly through the API.
 func (cpu *CPU) executeInstruction(opcode uint16) error {
 	cpu.regs.IR = opcode
+	cpu.addCycles(opcodeCycles(opcode))
 	handler := InstructionTable[opcode]
 	if handler == nil {
 		return cpu.Exception(XIllegal)
@@ -437,26 +439,26 @@ func NewCPU(bus AddressBus) (*CPU, error) {
 	return &cpu, nil
 }
 
-var cnt int
-
-// RegisterInstruction adds an opcode handler to the CPU.
-func RegisterInstruction(ins Instruction, match, mask uint16, eaMask uint16) {
-	for value := uint16(0); ; {
-		index := match | value
+// RegisterInstruction adds an opcode handler to the CPU and records the
+// precomputed cycle count for each opcode value that matches the mask.
+func RegisterInstruction(ins Instruction, match, mask uint16, eaMask uint16, calc CycleCalculator) {
+        for value := uint16(0); ; {
+                index := match | value
 		if validEA(index, eaMask) {
 			if InstructionTable[index] != nil {
 				panic(fmt.Errorf("instruction 0x%04x already registered", index))
 			}
 			InstructionTable[index] = ins
-			cnt++
-		}
+			if calc != nil {
+				OpcodeCycleTable[index] = calc(index)
+			}
+                }
 
-		value = ((value | mask) + 1) & ^mask
-		if value == 0 {
-			break
-		}
-	}
-	fmt.Printf("# instructions %d\n", cnt)
+                value = ((value | mask) + 1) & ^mask
+                if value == 0 {
+                        break
+                }
+        }
 }
 
 func validEA(opcode, mask uint16) bool {

@@ -1,12 +1,12 @@
 package emu
 
 func init() {
-	registerMove(moveb, 0x1000)
-	registerMove(movew, 0x3000)
-	registerMove(movel, 0x2000)
-	registerMoveA(0x3000, moveaw)
-	registerMoveA(0x2000, moveal)
-	RegisterInstruction(moveq, 0x7000, 0xf100, 0)
+	registerMove(moveb, 0x1000, moveCycleCalculator(Byte))
+	registerMove(movew, 0x3000, moveCycleCalculator(Word))
+	registerMove(movel, 0x2000, moveCycleCalculator(Long))
+	registerMoveA(0x3000, moveaw, moveAddressCycleCalculator(Word))
+	registerMoveA(0x2000, moveal, moveAddressCycleCalculator(Long))
+	RegisterInstruction(moveq, 0x7000, 0xf100, 0, constantCycles(4))
 }
 
 const moveSourceEAMask = eaMaskDataRegister |
@@ -23,8 +23,6 @@ const moveSourceEAMask = eaMaskDataRegister |
 	eaMaskPCIndex
 
 func moveq(cpu *CPU) error {
-	cpu.addCycles(4)
-
 	value := int32(int8(cpu.regs.IR))
 	*dx(cpu) = value
 
@@ -38,15 +36,15 @@ func moveq(cpu *CPU) error {
 	return nil
 }
 
-func registerMoveA(base uint16, handler Instruction) {
+func registerMoveA(base uint16, handler Instruction, calc CycleCalculator) {
 	const dstMode = uint16(1)
 	for dstReg := uint16(0); dstReg < 8; dstReg++ {
 		match := base | (dstReg << 9) | (dstMode << 6)
-		RegisterInstruction(handler, match, 0xffc0, moveSourceEAMask)
+		RegisterInstruction(handler, match, 0xffc0, moveSourceEAMask, calc)
 	}
 }
 
-func registerMove(ins Instruction, base uint16) {
+func registerMove(ins Instruction, base uint16, calc CycleCalculator) {
 	for dstMode := uint16(0); dstMode < 8; dstMode++ {
 		// Address register destinations are handled by MOVEA.
 		if dstMode == 1 {
@@ -58,14 +56,12 @@ func registerMove(ins Instruction, base uint16) {
 				continue
 			}
 			match := base | (dstReg << 9) | (dstMode << 6)
-			RegisterInstruction(ins, match, 0xffc0, moveSourceEAMask)
+			RegisterInstruction(ins, match, 0xffc0, moveSourceEAMask, calc)
 		}
 	}
 }
 
 func moveb(cpu *CPU) error {
-	cpu.addCycles(moveCycles(cpu.regs.IR, Byte))
-
 	src, err := cpu.ResolveSrcEA(Byte)
 	if err != nil {
 		return err
@@ -96,8 +92,6 @@ func moveb(cpu *CPU) error {
 }
 
 func movew(cpu *CPU) error {
-	cpu.addCycles(moveCycles(cpu.regs.IR, Word))
-
 	src, err := cpu.ResolveSrcEA(Word)
 	if err != nil {
 		return err
@@ -128,8 +122,6 @@ func movew(cpu *CPU) error {
 }
 
 func movel(cpu *CPU) error {
-	cpu.addCycles(moveCycles(cpu.regs.IR, Long))
-
 	src, err := cpu.ResolveSrcEA(Long)
 	if err != nil {
 		return err
@@ -160,8 +152,6 @@ func movel(cpu *CPU) error {
 }
 
 func moveaw(cpu *CPU) error {
-	cpu.addCycles(moveAddressCycles(cpu.regs.IR, Word))
-
 	src, err := cpu.ResolveSrcEA(Word)
 	if err != nil {
 		return err
@@ -177,8 +167,6 @@ func moveaw(cpu *CPU) error {
 }
 
 func moveal(cpu *CPU) error {
-	cpu.addCycles(moveAddressCycles(cpu.regs.IR, Long))
-
 	src, err := cpu.ResolveSrcEA(Long)
 	if err != nil {
 		return err
