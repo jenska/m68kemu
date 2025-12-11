@@ -12,11 +12,12 @@ type RAM struct {
 }
 
 func (ram *RAM) rangeCheck(address uint32, s Size) bool {
-	return address >= ram.offset && address < ram.offset+uint32(len(ram.mem)-int(s))
+	end := address + uint32(s) - 1
+	return address >= ram.offset && end < ram.offset+uint32(len(ram.mem))
 }
 
 func (ram *RAM) Read(s Size, address uint32) (uint32, error) {
-	if !ram.rangeCheck(address, Long) {
+	if !ram.rangeCheck(address, s) {
 		return 0, BusError(address)
 	}
 	switch s {
@@ -31,7 +32,7 @@ func (ram *RAM) Read(s Size, address uint32) (uint32, error) {
 }
 
 func (ram *RAM) Write(s Size, address uint32, value uint32) error {
-	if !ram.rangeCheck(address, Long) {
+	if !ram.rangeCheck(address, s) {
 		return BusError(address)
 	}
 	switch s {
@@ -52,5 +53,5 @@ func (ram *RAM) Reset() {
 }
 
 func NewRAM(offset, size uint32) RAM {
-	return RAM{offset: 0, mem: make([]byte, size)}
+	return RAM{offset: offset, mem: make([]byte, size)}
 }
