@@ -107,9 +107,9 @@ func TestNBCDRegister(t *testing.T) {
 
 	runSingleInstruction(t, cpu, ram, "NBCD D3")
 
-        if got := cpu.regs.D[3] & 0xff; got != 0x98 {
-                t.Fatalf("expected 0x98 in D3 low byte, got %02x", got)
-        }
+	if got := cpu.regs.D[3] & 0xff; got != 0x98 {
+		t.Fatalf("expected 0x98 in D3 low byte, got %02x", got)
+	}
 	if cpu.regs.SR&(srCarry|srExtend) != srCarry|srExtend {
 		t.Fatalf("carry/extend should be set after borrow, SR=%04x", cpu.regs.SR)
 	}
