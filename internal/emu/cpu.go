@@ -163,16 +163,7 @@ func (bt BreakpointType) String() string {
 func (cpu *CPU) Read(size Size, address uint32) (uint32, error) {
 	address &= 0xffffff // 24bit address bus of 68000
 	switch size {
-	case Byte:
-		if err := cpu.checkAccessBreakpoint(address, BreakpointRead); err != nil {
-			return 0, err
-		}
-		result, err := cpu.bus.Read(Byte, address)
-		return uint32(result), err
-	case Word, Long:
-		if address&1 != 0 {
-			return 0, AddressError(address)
-		}
+	case Byte, Word, Long:
 		if err := cpu.checkAccessBreakpoint(address, BreakpointRead); err != nil {
 			return 0, err
 		}
@@ -180,21 +171,14 @@ func (cpu *CPU) Read(size Size, address uint32) (uint32, error) {
 		return uint32(result), err
 	default:
 		return 0, fmt.Errorf("unknown operand size")
+
 	}
 }
 
 func (cpu *CPU) Write(size Size, address uint32, value uint32) error {
 	address &= 0xffffff // 24bit address bus of 68000
 	switch size {
-	case Byte:
-		if err := cpu.checkAccessBreakpoint(address, BreakpointWrite); err != nil {
-			return err
-		}
-		return cpu.bus.Write(Byte, address, value)
-	case Word, Long:
-		if address&1 != 0 {
-			return AddressError(address)
-		}
+	case Byte, Word, Long:
 		if err := cpu.checkAccessBreakpoint(address, BreakpointWrite); err != nil {
 			return err
 		}
@@ -327,8 +311,8 @@ func (cpu *CPU) readVector(offset uint32) (uint32, error) {
 }
 
 func (cpu *CPU) interrupt(level uint8, vector uint32) error {
-        newSR := (cpu.regs.SR & ^uint16(srInterruptMask)) | srSupervisor | (uint16(level) << 8)
-        return cpu.raiseException(vector, newSR)
+	newSR := (cpu.regs.SR & ^uint16(srInterruptMask)) | srSupervisor | (uint16(level) << 8)
+	return cpu.raiseException(vector, newSR)
 }
 
 func (cpu *CPU) checkInterrupts() error {

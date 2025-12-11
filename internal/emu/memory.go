@@ -11,6 +11,10 @@ type RAM struct {
 	mem    []byte
 }
 
+func (ram *RAM) Contains(address uint32) bool {
+	return address >= ram.offset && address < ram.offset+uint32(len(ram.mem))
+}
+
 func (ram *RAM) rangeCheck(address uint32, s Size) bool {
 	end := address + uint32(s) - 1
 	return address >= ram.offset && end < ram.offset+uint32(len(ram.mem))

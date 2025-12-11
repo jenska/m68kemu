@@ -10,9 +10,10 @@ func newEnvironment(t *testing.T) (*CPU, *RAM) {
 	t.Helper()
 
 	memory := NewRAM(0, 1024*64)
+	bus := NewBus(&memory)
 	memory.Write(Long, 0, 0x1000)
 	memory.Write(Long, 4, 0x2000)
-	cpu, err := NewCPU(&memory)
+	cpu, err := NewCPU(bus)
 	if err != nil {
 		t.Fatalf("Failed to create CPU: %v", err)
 	}
