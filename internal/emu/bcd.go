@@ -17,20 +17,13 @@ func abcd(cpu *CPU) error {
 		return err
 	}
 
+	prevZero := cpu.regs.SR&srZero != 0
 	result, carry := bcdAdd(src.value, dst.value, cpu.regs.SR&srExtend != 0)
 	if err := dst.write(result); err != nil {
 		return err
 	}
 
-	cpu.regs.SR &^= srCarry | srExtend
-	if carry {
-		cpu.regs.SR |= srCarry | srExtend
-	}
-	if result != 0 {
-		cpu.regs.SR &^= srZero
-	} else {
-		cpu.regs.SR |= srZero
-	}
+	updateBCDFlags(cpu, result, carry, prevZero, true)
 
 	return nil
 }
@@ -41,20 +34,13 @@ func sbcd(cpu *CPU) error {
 		return err
 	}
 
+	prevZero := cpu.regs.SR&srZero != 0
 	result, borrow := bcdSub(src.value, dst.value, cpu.regs.SR&srExtend != 0)
 	if err := dst.write(result); err != nil {
 		return err
 	}
 
-	cpu.regs.SR &^= srCarry | srExtend
-	if borrow {
-		cpu.regs.SR |= srCarry | srExtend
-	}
-	if result != 0 {
-		cpu.regs.SR &^= srZero
-	} else {
-		cpu.regs.SR |= srZero
-	}
+	updateBCDFlags(cpu, result, borrow, prevZero, true)
 
 	return nil
 }
@@ -65,22 +51,34 @@ func nbcd(cpu *CPU) error {
 		return err
 	}
 
+	prevZero := cpu.regs.SR&srZero != 0
 	result, borrow := bcdSub(operand.value, 0, cpu.regs.SR&srExtend != 0)
 	if err := operand.write(result); err != nil {
 		return err
 	}
 
-	cpu.regs.SR &^= srCarry | srExtend
-	if borrow {
-		cpu.regs.SR |= srCarry | srExtend
-	}
-	if result != 0 {
-		cpu.regs.SR &^= srZero
-	} else {
-		cpu.regs.SR |= srZero
-	}
+	updateBCDFlags(cpu, result, borrow, prevZero, false)
 
 	return nil
+}
+
+func updateBCDFlags(cpu *CPU, result byte, carry bool, prevZero bool, propagateZero bool) {
+	cpu.regs.SR &^= srCarry | srOverflow | srNegative
+	if carry {
+		cpu.regs.SR |= srCarry | srExtend
+	} else {
+		cpu.regs.SR &^= srExtend
+	}
+
+	zero := result == 0
+	if propagateZero {
+		zero = zero && prevZero
+	}
+	if zero {
+		cpu.regs.SR |= srZero
+	} else {
+		cpu.regs.SR &^= srZero
+	}
 }
 
 func bcdAdd(src, dst byte, extend bool) (byte, bool) {

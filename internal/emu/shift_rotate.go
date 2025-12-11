@@ -9,7 +9,7 @@ func init() {
 func shiftRotate(cpu *CPU) error {
 	opcode := cpu.regs.IR
 
-	if (opcode>>6)&0x7 == 0x7 {
+	if (opcode>>6)&0x3 == 0x3 {
 		return shiftRotateMemory(cpu)
 	}
 
@@ -56,13 +56,14 @@ func shiftRotate(cpu *CPU) error {
 	result, flags := doShiftRotate(uint32(value), count, int(size)*8, operation, left, cpu.regs.SR&srExtend != 0)
 
 	cpu.regs.D[register] = (cpu.regs.D[register] & ^int32(mask)) | int32(result)
-	updateShiftRotateFlags(cpu, result, int(size)*8, flags, count)
+	updateShiftRotateFlags(cpu, result, int(size)*8, flags)
 	return nil
 }
 
 func shiftRotateMemory(cpu *CPU) error {
 	opcode := cpu.regs.IR
-	op := int((opcode >> 9) & 0x7)
+	logical := ((opcode >> 9) & 0x1) != 0
+	left := ((opcode >> 8) & 0x1) != 0
 
 	ea, err := cpu.ResolveSrcEA(Word)
 	if err != nil {
@@ -74,20 +75,35 @@ func shiftRotateMemory(cpu *CPU) error {
 		return err
 	}
 
-	result, flags := doShiftRotate(uint32(val), 1, 16, op, (op&0x4) != 0, cpu.regs.SR&srExtend != 0)
+	var (
+		result uint32
+		flags  shiftRotateFlags
+	)
+	switch {
+	case !logical && !left:
+		result, flags = asr(uint32(val), 1, 16, cpu.regs.SR&srExtend != 0)
+	case !logical && left:
+		result, flags = asl(uint32(val), 1, 16, cpu.regs.SR&srExtend != 0)
+	case logical && !left:
+		result, flags = lsr(uint32(val), 1, 16, cpu.regs.SR&srExtend != 0)
+	case logical && left:
+		result, flags = lsl(uint32(val), 1, 16, cpu.regs.SR&srExtend != 0)
+	}
 
 	if err := ea.write(result); err != nil {
 		return err
 	}
 
-	updateShiftRotateFlags(cpu, result, 16, flags, 1)
+	updateShiftRotateFlags(cpu, result, 16, flags)
 	return nil
 }
 
 type shiftRotateFlags struct {
-	carryOut  uint32
-	extendOut bool
-	overflow  bool
+	carryOut     uint32
+	changeCarry  bool
+	extendOut    bool
+	changeExtend bool
+	overflow     bool
 }
 
 func doShiftRotate(value uint32, count int, width int, operation int, left bool, extend bool) (uint32, shiftRotateFlags) {
@@ -116,9 +132,9 @@ func doShiftRotate(value uint32, count int, width int, operation int, left bool,
 		return roxr(value, count, width, extend)
 	case 3: // rotate
 		if left {
-			return rol(value, count, width), shiftRotateFlags{}
+			return rol(value, count, width)
 		}
-		return ror(value, count, width), shiftRotateFlags{}
+		return ror(value, count, width)
 	default:
 		return value, shiftRotateFlags{}
 	}
@@ -126,70 +142,70 @@ func doShiftRotate(value uint32, count int, width int, operation int, left bool,
 
 func asl(value uint32, count, width int) (uint32, shiftRotateFlags) {
 	mask := uint32((1 << width) - 1)
-	max := int64(1<<(width-1)) - 1
-	min := -int64(1 << (width - 1))
-
-	full := int64(signExtend(value, width)) << count
-	result := uint32(full) & mask
-	carry := (value >> (uint(count) % uint(width))) & 1
-	if count > width {
-		carry = 0
+	value &= mask
+	var carry uint32
+	for i := 0; i < count; i++ {
+		carry = (value >> (width - 1)) & 1
+		value = (value << 1) & mask
 	}
-	overflow := full > max || full < min
-	return result, shiftRotateFlags{carryOut: carry, extendOut: carry != 0, overflow: overflow}
+	newMsb := (value >> (width - 1)) & 1
+	return value, shiftRotateFlags{
+		carryOut:     carry,
+		changeCarry:  true,
+		extendOut:    carry != 0,
+		changeExtend: true,
+		overflow:     (carry ^ newMsb) != 0,
+	}
 }
 
 func asr(value uint32, count, width int) (uint32, shiftRotateFlags) {
 	mask := uint32((1 << width) - 1)
 	value &= mask
-
-	signed := signExtend(value, width)
-	carry := (value >> (count - 1)) & 1
-	if count >= width {
-		carry = (value >> (width - 1)) & 1
+	sign := value & (1 << (width - 1))
+	var carry uint32
+	for i := 0; i < count; i++ {
+		carry = value & 1
+		value >>= 1
+		if sign != 0 {
+			value |= 1 << (width - 1)
+		}
 	}
-	result := uint32(signed >> count)
-	result &= mask
-	return result, shiftRotateFlags{carryOut: carry, extendOut: carry != 0}
+	return value & mask, shiftRotateFlags{carryOut: carry, changeCarry: true, extendOut: carry != 0, changeExtend: true}
 }
 
 func lsl(value uint32, count, width int) (uint32, shiftRotateFlags) {
 	mask := uint32((1 << width) - 1)
 	value &= mask
-
-	shift := count % width
-	carry := (value >> (width - shift)) & 1
-	if shift == 0 {
-		carry = 0
+	var carry uint32
+	for i := 0; i < count; i++ {
+		carry = (value >> (width - 1)) & 1
+		value = (value << 1) & mask
 	}
-	result := (value << shift) & mask
-	return result, shiftRotateFlags{carryOut: carry, extendOut: carry != 0}
+	return value, shiftRotateFlags{carryOut: carry, changeCarry: true, extendOut: carry != 0, changeExtend: true}
 }
 
 func lsr(value uint32, count, width int) (uint32, shiftRotateFlags) {
 	mask := uint32((1 << width) - 1)
 	value &= mask
-
-	shift := count % width
-	carry := (value >> (shift - 1)) & 1
-	if shift == 0 {
-		carry = 0
+	var carry uint32
+	for i := 0; i < count; i++ {
+		carry = value & 1
+		value >>= 1
 	}
-	result := value >> shift
-	return result, shiftRotateFlags{carryOut: carry, extendOut: carry != 0}
+	return value, shiftRotateFlags{carryOut: carry, changeCarry: true, extendOut: carry != 0, changeExtend: true}
 }
 
 func roxl(value uint32, count, width int, extend bool) (uint32, shiftRotateFlags) {
 	mask := uint32((1 << width) - 1)
 	value &= mask
-
 	shift := count % (width + 1)
+	var carry uint32
 	for i := 0; i < shift; i++ {
-		carry := extend
+		carry = b2i(extend)
 		extend = (value>>(width-1))&1 != 0
-		value = ((value << 1) | b2i(carry)) & mask
+		value = ((value << 1) | carry) & mask
 	}
-	return value, shiftRotateFlags{carryOut: b2i(extend), extendOut: extend}
+	return value, shiftRotateFlags{carryOut: b2i(extend), changeCarry: true, extendOut: extend, changeExtend: true}
 }
 
 func roxr(value uint32, count, width int, extend bool) (uint32, shiftRotateFlags) {
@@ -202,55 +218,55 @@ func roxr(value uint32, count, width int, extend bool) (uint32, shiftRotateFlags
 		extend = value&1 != 0
 		value = (value >> 1) | (b2i(carry) << (width - 1))
 	}
-	return value, shiftRotateFlags{carryOut: b2i(extend), extendOut: extend}
+	return value, shiftRotateFlags{carryOut: b2i(extend), changeCarry: true, extendOut: extend, changeExtend: true}
 }
 
-func rol(value uint32, count, width int) uint32 {
+func rol(value uint32, count, width int) (uint32, shiftRotateFlags) {
 	mask := uint32((1 << width) - 1)
 	value &= mask
 	shift := count % width
-	return ((value << shift) | (value >> (width - shift))) & mask
+	if shift == 0 {
+		return value, shiftRotateFlags{carryOut: ^uint32(0)}
+	}
+	carry := (value >> (width - shift)) & 1
+	result := ((value << shift) | (value >> (width - shift))) & mask
+	return result, shiftRotateFlags{carryOut: carry, changeCarry: true}
 }
 
-func ror(value uint32, count, width int) uint32 {
+func ror(value uint32, count, width int) (uint32, shiftRotateFlags) {
 	mask := uint32((1 << width) - 1)
 	value &= mask
 	shift := count % width
-	return ((value >> shift) | (value << (width - shift))) & mask
+	if shift == 0 {
+		return value, shiftRotateFlags{carryOut: ^uint32(0)}
+	}
+	carry := (value >> (shift - 1)) & 1
+	result := ((value >> shift) | (value << (width - shift))) & mask
+	return result, shiftRotateFlags{carryOut: carry, changeCarry: true}
 }
 
-func updateShiftRotateFlags(cpu *CPU, result uint32, width int, flags shiftRotateFlags, count int) {
+func updateShiftRotateFlags(cpu *CPU, result uint32, width int, flags shiftRotateFlags) {
 	mask := uint32((1 << width) - 1)
 	result &= mask
 
-	// When count is zero for register operations, C and X remain unchanged.
-	if count == 0 {
-		cpu.regs.SR &^= srOverflow
-		cpu.regs.SR &^= srNegative | srZero
-		if result == 0 {
-			cpu.regs.SR |= srZero
-		}
-		if result&(1<<(width-1)) != 0 {
-			cpu.regs.SR |= srNegative
-		}
-		return
-	}
-
-	cpu.regs.SR &^= srCarry | srZero | srNegative | srOverflow
+	cpu.regs.SR &^= srZero | srNegative | srOverflow
 	if result == 0 {
 		cpu.regs.SR |= srZero
 	}
 	if result&(1<<(width-1)) != 0 {
 		cpu.regs.SR |= srNegative
 	}
-	if flags.carryOut != ^uint32(0) {
+
+	if flags.changeCarry {
+		cpu.regs.SR &^= srCarry
 		if flags.carryOut != 0 {
 			cpu.regs.SR |= srCarry
 		}
+	}
+	if flags.changeExtend {
+		cpu.regs.SR &^= srExtend
 		if flags.extendOut {
 			cpu.regs.SR |= srExtend
-		} else {
-			cpu.regs.SR &^= srExtend
 		}
 	}
 	if flags.overflow {
