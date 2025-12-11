@@ -31,6 +31,14 @@ The steps below focus on improving m68kemu itself so it can serve as a reliable 
 - `internal/emu/` – core emulator types such as the CPU, register file, effective-address resolver, and the basic MOVEA word/long instructions. A minimal RAM implementation in this package satisfies the `AddressBus` interface for quick tests.
 - `doc/M68kOpcodes.pdf` – opcode reference used while implementing and verifying instruction behavior.
 
+## Supported instructions
+The emulator currently covers a small but growing subset of 68000 opcodes:
+
+- Data movement: `MOVE.{B/W/L}`, `MOVEA.{W/L}`, `MOVEQ`
+- Address calculation/stack: `LEA`, `PEA`, `TRAP #n`
+- BCD arithmetic: `ABCD`, `SBCD`, `NBCD` (register and predecrement memory forms)
+- Shifts and rotates: `ASL/ASR`, `LSL/LSR`, `ROL/ROR`, `ROXL/ROXR` (register and memory forms with full condition code updates)
+
 ## Development
 1. Ensure you have Go 1.25 or newer installed (see `go.mod`).
 2. Use the provided Makefile for common tasks:
