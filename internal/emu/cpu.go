@@ -63,6 +63,7 @@ type (
 		A   [8]uint32
 		PC  uint32
 		SR  uint16
+		SSP uint32
 		USP uint32
 		IR  uint16 // instruction register
 	}
@@ -76,7 +77,7 @@ type (
 
 func (regs *Registers) String() string {
 	// TODO show IR as disassembly
-	result := fmt.Sprintf("SR %04x PC %08x USP %08x SP %08x\n", regs.SR, regs.PC, regs.USP, regs.A[7])
+	result := fmt.Sprintf("SR %04x PC %08x USP %08x SSP %08x SP %08x\n", regs.SR, regs.PC, regs.USP, regs.SSP, regs.A[7])
 	for i := range regs.D {
 		result += fmt.Sprintf("D%d %08x ", i, uint32(regs.D[i]))
 	}
@@ -144,8 +145,7 @@ func (cpu *CPU) executeInstruction(opcode uint16) error {
 	cpu.regs.IR = opcode
 	handler := InstructionTable[opcode]
 	if handler == nil {
-		// TODO 68000 exception handling
-		return fmt.Errorf("unknown opcode 0x%04x", opcode)
+		return cpu.Exception(XIllegal)
 	}
 
 	if err := handler(cpu); err != nil {
@@ -169,9 +169,7 @@ func (cpu *CPU) Exception(vector uint32) error {
 
 	vectorOffset := vector << 2
 	originalSR := cpu.regs.SR
-
-	// TODO: track separate supervisor/user stacks once privilege modes are modeled.
-	cpu.regs.SR |= srSupervisor
+	cpu.setSR(cpu.regs.SR | srSupervisor)
 
 	// 68000 format 0 stack frame: vector offset (word), PC (long), SR (word).
 	if err := cpu.Push(Word, vectorOffset); err != nil {
@@ -191,6 +189,19 @@ func (cpu *CPU) Exception(vector uint32) error {
 
 	cpu.regs.PC = handler
 	return nil
+}
+
+func (cpu *CPU) setSR(value uint16) {
+	if (cpu.regs.SR^value)&srSupervisor != 0 {
+		if value&srSupervisor != 0 {
+			cpu.regs.USP = cpu.regs.A[7]
+			cpu.regs.A[7] = cpu.regs.SSP
+		} else {
+			cpu.regs.SSP = cpu.regs.A[7]
+			cpu.regs.A[7] = cpu.regs.USP
+		}
+	}
+	cpu.regs.SR = value
 }
 
 func (cpu *CPU) readVector(offset uint32) (uint32, error) {
@@ -236,6 +247,7 @@ func (cpu *CPU) Reset() error {
 		return err
 	}
 	cpu.regs.A[7] = ssp
+	cpu.regs.SSP = ssp
 	pc, err := cpu.bus.Read(Long, 4)
 	if err != nil {
 		return err
