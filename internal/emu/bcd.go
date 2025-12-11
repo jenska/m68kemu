@@ -7,28 +7,18 @@ func init() {
 }
 
 func registerABCD() {
-	for dst := uint16(0); dst < 8; dst++ {
-		for src := uint16(0); src < 8; src++ {
-			InstructionTable[0xc100|(dst<<9)|src] = abcd
-			InstructionTable[0xc108|(dst<<9)|src] = abcd
-		}
-	}
+	RegisterInstruction(abcd, 0xc100, 0xf1f8, 0)
+	RegisterInstruction(abcd, 0xc108, 0xf1f8, 0)
 }
 
 func registerSBCD() {
-	for dst := uint16(0); dst < 8; dst++ {
-		for src := uint16(0); src < 8; src++ {
-			InstructionTable[0x8100|(dst<<9)|src] = sbcd
-			InstructionTable[0x8108|(dst<<9)|src] = sbcd
-		}
-	}
+	RegisterInstruction(sbcd, 0x8100, 0xf1f8, 0)
+	RegisterInstruction(sbcd, 0x8108, 0xf1f8, 0)
 }
 
 func registerNBCD() {
-	for reg := uint16(0); reg < 8; reg++ {
-		InstructionTable[0x4800|reg] = nbcd
-		InstructionTable[0x4820|reg] = nbcd
-	}
+	RegisterInstruction(nbcd, 0x4800, 0xfff8, 0)
+	RegisterInstruction(nbcd, 0x4820, 0xfff8, 0)
 }
 
 func abcd(cpu *CPU) error {
