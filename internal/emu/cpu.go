@@ -5,25 +5,25 @@ import (
 )
 
 const (
-	Byte Size = 1
-	Word Size = 2
-	Long Size = 4
+        Byte Size = 1
+        Word Size = 2
+        Long Size = 4
 
-	XBusError         = 2
-	XAddresError      = 3
-	XIllegal          = 4
-	XDivByZero        = 5
-	XPrivViolation    = 8
-	XUninitializedInt = 15
-	XTrap             = 32
+        XBusError         = 2
+        XAddresError      = 3
+        XIllegal          = 4
+        XDivByZero        = 5
+        XPrivViolation    = 8
+        XUninitializedInt = 15
+        XTrap             = 32
 
-	srCarry         = 0x0001
-	srOverflow      = 0x0002
-	srZero          = 0x0004
-	srNegative      = 0x0008
-	srExtend        = 0x0010
-	srInterruptMask = 0x0700
-	srSupervisor    = 0x2000
+        srCarry         = 0x0001
+        srOverflow      = 0x0002
+        srZero          = 0x0004
+        srNegative      = 0x0008
+        srExtend        = 0x0010
+        srInterruptMask = 0x0700
+        srSupervisor    = 0x2000
 )
 
 const (
@@ -229,6 +229,7 @@ func (cpu *CPU) handleBreakpoint(bp Breakpoint, kind BreakpointType, address uin
 // callers to execute single instructions directly through the API.
 func (cpu *CPU) executeInstruction(opcode uint16) error {
 	cpu.regs.IR = opcode
+	cpu.addCycles(opcodeCycles(opcode))
 	handler := InstructionTable[opcode]
 	if handler == nil {
 		return cpu.Exception(XIllegal)
