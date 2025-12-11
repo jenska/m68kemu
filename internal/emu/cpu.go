@@ -102,6 +102,7 @@ type (
 	//  CPU core
 	CPU struct {
 		regs       Registers
+		cycles     uint64
 		bus        AddressBus
 		trap       TraceCallback
 		interrupts *InterruptController
@@ -413,11 +414,23 @@ func (cpu *CPU) Reset() error {
 		return err
 	}
 	cpu.regs.PC = pc
+	cpu.cycles = 0
 	return nil
 }
 
 func NewCPU(bus AddressBus) (*CPU, error) {
 	cpu := CPU{bus: bus}
+
+	if b, ok := bus.(*Bus); ok {
+		previous := b.waitHook
+		b.SetWaitHook(func(states uint32) {
+			if previous != nil {
+				previous(states)
+			}
+			cpu.addCycles(states)
+		})
+	}
+
 	if err := cpu.Reset(); err != nil {
 		return nil, err
 	}

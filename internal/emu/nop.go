@@ -6,6 +6,7 @@ func init() {
 
 // nop implements the 68000 NOP instruction (opcode 0x4E71).
 // It performs no operation and leaves all condition codes unchanged.
-func nop(_ *CPU) error {
+func nop(cpu *CPU) error {
+	cpu.addCycles(4)
 	return nil
 }

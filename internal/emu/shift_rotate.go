@@ -35,6 +35,8 @@ func shiftRotate(cpu *CPU) error {
 		}
 	}
 
+	cpu.addCycles(shiftRegisterCycles(count))
+
 	var size Size
 	var mask uint32
 	switch sizeField {
@@ -59,6 +61,9 @@ func shiftRotate(cpu *CPU) error {
 func shiftRotateMemory(cpu *CPU) error {
 	opcode := cpu.regs.IR
 	op := int((opcode >> 9) & 0x7)
+
+	cpu.addCycles(shiftMemoryCycles(opcode))
+
 	ea, err := cpu.ResolveSrcEA(Word)
 	if err != nil {
 		return err

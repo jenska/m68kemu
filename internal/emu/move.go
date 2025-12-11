@@ -23,6 +23,8 @@ const moveSourceEAMask = eaMaskDataRegister |
 	eaMaskPCIndex
 
 func moveq(cpu *CPU) error {
+	cpu.addCycles(4)
+
 	value := int32(int8(cpu.regs.IR))
 	*dx(cpu) = value
 
@@ -62,6 +64,8 @@ func registerMove(ins Instruction, base uint16) {
 }
 
 func moveb(cpu *CPU) error {
+	cpu.addCycles(moveCycles(cpu.regs.IR, Byte))
+
 	src, err := cpu.ResolveSrcEA(Byte)
 	if err != nil {
 		return err
@@ -92,6 +96,8 @@ func moveb(cpu *CPU) error {
 }
 
 func movew(cpu *CPU) error {
+	cpu.addCycles(moveCycles(cpu.regs.IR, Word))
+
 	src, err := cpu.ResolveSrcEA(Word)
 	if err != nil {
 		return err
@@ -122,6 +128,8 @@ func movew(cpu *CPU) error {
 }
 
 func movel(cpu *CPU) error {
+	cpu.addCycles(moveCycles(cpu.regs.IR, Long))
+
 	src, err := cpu.ResolveSrcEA(Long)
 	if err != nil {
 		return err
@@ -152,6 +160,8 @@ func movel(cpu *CPU) error {
 }
 
 func moveaw(cpu *CPU) error {
+	cpu.addCycles(moveAddressCycles(cpu.regs.IR, Word))
+
 	src, err := cpu.ResolveSrcEA(Word)
 	if err != nil {
 		return err
@@ -167,6 +177,8 @@ func moveaw(cpu *CPU) error {
 }
 
 func moveal(cpu *CPU) error {
+	cpu.addCycles(moveAddressCycles(cpu.regs.IR, Long))
+
 	src, err := cpu.ResolveSrcEA(Long)
 	if err != nil {
 		return err

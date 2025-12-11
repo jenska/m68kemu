@@ -12,6 +12,12 @@ func init() {
 }
 
 func abcd(cpu *CPU) error {
+	if (cpu.regs.IR>>3)&0x1 == 0 {
+		cpu.addCycles(6)
+	} else {
+		cpu.addCycles(18)
+	}
+
 	src, dst, err := bcdOperands(cpu)
 	if err != nil {
 		return err
@@ -36,6 +42,12 @@ func abcd(cpu *CPU) error {
 }
 
 func sbcd(cpu *CPU) error {
+	if (cpu.regs.IR>>3)&0x1 == 0 {
+		cpu.addCycles(6)
+	} else {
+		cpu.addCycles(18)
+	}
+
 	src, dst, err := bcdOperands(cpu)
 	if err != nil {
 		return err
@@ -60,6 +72,13 @@ func sbcd(cpu *CPU) error {
 }
 
 func nbcd(cpu *CPU) error {
+	mode := (cpu.regs.IR >> 3) & 0x1
+	if mode == 0 {
+		cpu.addCycles(6)
+	} else {
+		cpu.addCycles(8)
+	}
+
 	operand, err := bcdDestination(cpu)
 	if err != nil {
 		return err

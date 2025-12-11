@@ -16,10 +16,11 @@ const (
 type (
 	Size            = emu.Size
 	Registers       = emu.Registers
-	AddressBus      = emu.AddressBus
-	Device          = emu.Device
-	WaitHook        = emu.WaitHook
-	Breakpoint      = emu.Breakpoint
+        AddressBus      = emu.AddressBus
+        Device          = emu.Device
+        WaitStateDevice = emu.WaitStateDevice
+        WaitHook        = emu.WaitHook
+        Breakpoint      = emu.Breakpoint
 	BreakpointEvent = emu.BreakpointEvent
 	BreakpointType  = emu.BreakpointType
 	TraceInfo       = emu.TraceInfo
@@ -33,6 +34,7 @@ type (
 		SetTracer(TraceCallback)
 		AddBreakpoint(Breakpoint)
 		RequestInterrupt(level uint8, vector *uint8) error
+		Cycles() uint64
 	}
 )
 
