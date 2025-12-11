@@ -30,6 +30,7 @@ type (
 		Reset() error
 		SetTracer(TraceCallback)
 		AddBreakpoint(Breakpoint)
+		RequestInterrupt(level uint8, vector *uint8) error
 	}
 )
 

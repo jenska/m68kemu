@@ -17,12 +17,13 @@ const (
 	XUninitializedInt = 15
 	XTrap             = 32
 
-	srCarry      = 0x0001
-	srOverflow   = 0x0002
-	srZero       = 0x0004
-	srNegative   = 0x0008
-	srExtend     = 0x0010
-	srSupervisor = 0x2000
+	srCarry         = 0x0001
+	srOverflow      = 0x0002
+	srZero          = 0x0004
+	srNegative      = 0x0008
+	srExtend        = 0x0010
+	srInterruptMask = 0x0700
+	srSupervisor    = 0x2000
 )
 
 const (
@@ -100,9 +101,10 @@ type (
 
 	//  CPU core
 	CPU struct {
-		regs Registers
-		bus  AddressBus
-		trap TraceCallback
+		regs       Registers
+		bus        AddressBus
+		trap       TraceCallback
+		interrupts *InterruptController
 
 		breakpoints map[uint32]Breakpoint
 	}
@@ -211,6 +213,10 @@ func (cpu *CPU) SetTracer(cb TraceCallback) {
 	cpu.trap = cb
 }
 
+func (cpu *CPU) RequestInterrupt(level uint8, vector *uint8) error {
+	return cpu.interrupts.Request(level, vector)
+}
+
 func (cpu *CPU) AddBreakpoint(bp Breakpoint) {
 	if cpu.breakpoints == nil {
 		cpu.breakpoints = make(map[uint32]Breakpoint)
@@ -256,14 +262,14 @@ func (cpu *CPU) executeInstruction(opcode uint16) error {
 	return nil
 }
 
-func (cpu *CPU) Exception(vector uint32) error {
+func (cpu *CPU) raiseException(vector uint32, newSR uint16) error {
 	if vector > 255 {
 		return fmt.Errorf("invalid vector %d", vector)
 	}
 
 	vectorOffset := vector << 2
 	originalSR := cpu.regs.SR
-	cpu.setSR(cpu.regs.SR | srSupervisor)
+	cpu.setSR(newSR)
 
 	// 68000 format 0 stack frame: vector offset (word), PC (long), SR (word).
 	if err := cpu.Push(Word, vectorOffset); err != nil {
@@ -283,6 +289,10 @@ func (cpu *CPU) Exception(vector uint32) error {
 
 	cpu.regs.PC = handler
 	return nil
+}
+
+func (cpu *CPU) Exception(vector uint32) error {
+	return cpu.raiseException(vector, cpu.regs.SR|srSupervisor)
 }
 
 func (cpu *CPU) setSR(value uint16) {
@@ -316,6 +326,20 @@ func (cpu *CPU) readVector(offset uint32) (uint32, error) {
 	return address, nil
 }
 
+func (cpu *CPU) interrupt(level uint8, vector uint32) error {
+        newSR := (cpu.regs.SR & ^uint16(srInterruptMask)) | srSupervisor | (uint16(level) << 8)
+        return cpu.raiseException(vector, newSR)
+}
+
+func (cpu *CPU) checkInterrupts() error {
+	level, vector, ok := cpu.interrupts.Pending(cpu.regs.SR)
+	if !ok {
+		return nil
+	}
+
+	return cpu.interrupt(level, vector)
+}
+
 // Step fetches the next opcode at the program counter and executes it.
 func (cpu *CPU) Step() error {
 	if err := cpu.checkExecuteBreakpoint(cpu.regs.PC); err != nil {
@@ -325,6 +349,10 @@ func (cpu *CPU) Step() error {
 	pc := cpu.regs.PC
 	if opcode, err := cpu.fetchOpcode(); err == nil {
 		if err := cpu.executeInstruction(opcode); err != nil {
+			return err
+		}
+
+		if err := cpu.checkInterrupts(); err != nil {
 			return err
 		}
 
@@ -389,6 +417,7 @@ func (cpu *CPU) fetchOpcode() (uint16, error) {
 
 func (cpu *CPU) Reset() error {
 	cpu.regs = Registers{SR: 0x2700}
+	cpu.interrupts = NewInterruptController()
 	ssp, err := cpu.bus.Read(Long, 0)
 	if err != nil {
 		return err
@@ -404,7 +433,7 @@ func (cpu *CPU) Reset() error {
 }
 
 func NewCPU(bus AddressBus) (*CPU, error) {
-	cpu := CPU{regs: Registers{SR: 0x2700}, bus: bus}
+	cpu := CPU{bus: bus}
 	if err := cpu.Reset(); err != nil {
 		return nil, err
 	}
