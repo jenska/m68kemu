@@ -1,6 +1,31 @@
 # m68kemu
 
-A small Motorola 68000 emulator written in Go. The emulator exposes a CPU core with a programmable memory bus, effective-address helpers, a level-aware interrupt controller (including autovectors), and a growing set of instructions for experimenting with 68k code.
+A small Motorola 68000 emulator written in Go. The emulator exposes a CPU core with a programmable memory bus, effective-address helpers, a level-aware interrupt controller (including autovectors), and a growing set of instructions for experimenting with 68k code. Everything is packaged as a Go library so it can be embedded inside a larger machine emulator or used directly in tests and small tools.
+
+## Features
+- **Accurate CPU core**
+  - Programmer-visible registers (D0–D7, A0–A7/USP/SSP), full 24-bit PC, and status register bits (X, N, Z, V, C) are maintained.
+  - Supports per-instruction cycle accounting; `Cycles()` exposes the running tally, and registration helpers populate an opcode-specific cycle table.
+  - Interrupt controller with level-based requests and autovector handling (`RequestInterrupt`) mirrors 68000 priorities and masks.
+- **Memory bus and devices**
+  - Pluggable `AddressBus` that routes byte/word/long accesses to registered devices, enforces alignment, and produces bus errors when unmapped regions are accessed.
+  - Optional wait-state hook for cycle modeling and device-level `WaitStateDevice` support.
+  - Simple `RAM` helper that implements the bus interfaces for quick experiments; additional devices can be added for ROMs or peripherals.
+- **Debugging hooks**
+  - Instruction tracing via `SetTracer`, reporting PC, SR, and register snapshots before each opcode runs.
+  - Breakpoints/watchpoints with execution, read, and write triggers; callbacks can halt execution or react to memory touches.
+- **Execution control**
+  - Single-step via `Step()` or budgeted execution via `RunCycles(budget)` for coordinating the CPU with other subsystems.
+  - Reset behavior that clears memory devices and initializes stack pointers from the reset vector in memory.
+
+## Supported instructions
+The emulator currently implements the following opcode families with proper condition-code updates and addressing modes appropriate to each instruction:
+
+- **Data movement**: `MOVE.{B/W/L}`, `MOVEA.{W/L}`, `MOVEQ`
+- **Address calculation / stack / flow**: `LEA`, `PEA`, `JSR`, `RTS`, `TRAP #n`, `NOP`, `BRA`, `BSR`, `Bcc`
+- **Arithmetic and loops**: `ADD.{B/W/L}` (both `<ea>,Dn` and `Dn,<ea>` forms), `SUBQ.{B/W/L}`
+- **BCD arithmetic**: `ABCD`, `SBCD`, `NBCD` (register and predecrement memory forms)
+- **Shifts and rotates**: `ASL/ASR`, `LSL/LSR`, `ROL/ROR`, `ROXL/ROXR` (register and memory variants with full condition code updates)
 
 ## Roadmap for m68kemu as a computer-emulator core
 The steps below focus on improving m68kemu itself so it can serve as a reliable 68000 subsystem inside a broader computer emulator.
@@ -30,15 +55,6 @@ The steps below focus on improving m68kemu itself so it can serve as a reliable 
 ## Project layout
 - `doc/M68kOpcodes.pdf` – opcode reference used while implementing and verifying instruction behavior.
 
-## Supported instructions
-The emulator currently covers a small but growing subset of 68000 opcodes:
-
-- Data movement: `MOVE.{B/W/L}`, `MOVEA.{W/L}`, `MOVEQ`
-- Arithmetic: `ADD.{B/W/L}`, `SUBQ.{B/W/L}`
-- Address calculation/stack/flow: `LEA`, `PEA`, `TRAP #n`, `NOP`, `BRA`, `Bcc`
-- BCD arithmetic: `ABCD`, `SBCD`, `NBCD` (register and predecrement memory forms)
-- Shifts and rotates: `ASL/ASR`, `LSL/LSR`, `ROL/ROR`, `ROXL/ROXR` (register and memory forms with full condition code updates)
-
 ## Development
 1. Ensure you have Go 1.25 or newer installed (see `go.mod`).
 2. Use the provided Makefile for common tasks:
@@ -49,8 +65,8 @@ The emulator currently covers a small but growing subset of 68000 opcodes:
    make test        # run unit tests
    ```
 
-## Example
-The CPU can be stepped manually once you provide a memory implementation. The snippet below shows how to create a CPU with the built-in RAM helper, attach it to a bus, and execute a single MOVEA instruction:
+## Examples
+The CPU can be stepped manually once you provide a memory implementation. The snippet below shows how to create a CPU with the built-in RAM helper, attach it to a bus, and execute a single `MOVEA` instruction:
 
 ```go
 ram := m68kemu.NewRAM(0, 0x10000) // 64 KiB starting at address 0
@@ -70,8 +86,6 @@ _ = cpu.Step() // executes the single instruction
 // alternatively run for a fixed cycle budget with cpu.RunCycles(4)
 // cpu.Registers().A[0] now contains 0xDEADBEEF
 ```
-
-This repository currently focuses on correctness of addressing calculations and MOVEA handling; additional instructions can be registered using the exposed `RegisterInstruction` helper.
 
 ### Fibonacci demo
 The following 68000 program uses `ADD`, `SUBQ`, and `BNE` to calculate ten Fibonacci numbers and stream them into memory starting at `$3000`:
