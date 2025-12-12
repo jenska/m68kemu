@@ -23,7 +23,7 @@ func TestExceptionSwitchesToSupervisorStackFromUser(t *testing.T) {
 		t.Fatalf("failed to write vector: %v", err)
 	}
 
-	if err := cpu.Exception(vector); err != nil {
+	if err := cpu.exception(vector); err != nil {
 		t.Fatalf("exception failed: %v", err)
 	}
 
@@ -86,7 +86,7 @@ func TestExceptionUsesCurrentSupervisorStack(t *testing.T) {
 		t.Fatalf("failed to write vector: %v", err)
 	}
 
-	if err := cpu.Exception(vector); err != nil {
+	if err := cpu.exception(vector); err != nil {
 		t.Fatalf("exception failed: %v", err)
 	}
 

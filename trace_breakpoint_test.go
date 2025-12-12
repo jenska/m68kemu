@@ -63,7 +63,7 @@ func TestWatchpointFiresOnWrite(t *testing.T) {
 	target := uint32(0x3000)
 	cpu.AddBreakpoint(Breakpoint{Address: target, OnWrite: true, Halt: true})
 
-	err := cpu.Write(Byte, target, 0xAA)
+	err := cpu.write(Byte, target, 0xAA)
 	var hit BreakpointHit
 	if !errors.As(err, &hit) {
 		t.Fatalf("expected breakpoint hit on write, got %v", err)
@@ -87,7 +87,7 @@ func TestWatchpointCallbackWithoutHaltAllowsAccess(t *testing.T) {
 		return nil
 	}})
 
-	if _, err := cpu.Read(Word, target); err != nil {
+	if _, err := cpu.read(Word, target); err != nil {
 		t.Fatalf("read failed with callback breakpoint: %v", err)
 	}
 

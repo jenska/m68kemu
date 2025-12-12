@@ -6,7 +6,7 @@ func init() {
 	registerMove(movel, 0x2000, moveCycleCalculator(Long))
 	registerMoveA(0x3000, moveaw, moveAddressCycleCalculator(Word))
 	registerMoveA(0x2000, moveal, moveAddressCycleCalculator(Long))
-	RegisterInstruction(moveq, 0x7000, 0xf100, 0, constantCycles(4))
+	registerInstruction(moveq, 0x7000, 0xf100, 0, constantCycles(4))
 }
 
 const moveSourceEAMask = eaMaskDataRegister |
@@ -36,15 +36,15 @@ func moveq(cpu *cpu) error {
 	return nil
 }
 
-func registerMoveA(base uint16, handler Instruction, calc CycleCalculator) {
+func registerMoveA(base uint16, handler instruction, calc cycleCalculator) {
 	const dstMode = uint16(1)
 	for dstReg := uint16(0); dstReg < 8; dstReg++ {
 		match := base | (dstReg << 9) | (dstMode << 6)
-		RegisterInstruction(handler, match, 0xffc0, moveSourceEAMask, calc)
+		registerInstruction(handler, match, 0xffc0, moveSourceEAMask, calc)
 	}
 }
 
-func registerMove(ins Instruction, base uint16, calc CycleCalculator) {
+func registerMove(ins instruction, base uint16, calc cycleCalculator) {
 	for dstMode := uint16(0); dstMode < 8; dstMode++ {
 		// Address register destinations are handled by MOVEA.
 		if dstMode == 1 {
@@ -56,7 +56,7 @@ func registerMove(ins Instruction, base uint16, calc CycleCalculator) {
 				continue
 			}
 			match := base | (dstReg << 9) | (dstMode << 6)
-			RegisterInstruction(ins, match, 0xffc0, moveSourceEAMask, calc)
+			registerInstruction(ins, match, 0xffc0, moveSourceEAMask, calc)
 		}
 	}
 }
@@ -196,13 +196,13 @@ func moveAddressCycles(ir uint16, size Size) uint32 {
 	return 4 + eaAccessCycles(srcMode, srcReg, size)
 }
 
-func moveCycleCalculator(size Size) CycleCalculator {
+func moveCycleCalculator(size Size) cycleCalculator {
 	return func(opcode uint16) uint32 {
 		return moveCycles(opcode, size)
 	}
 }
 
-func moveAddressCycleCalculator(size Size) CycleCalculator {
+func moveAddressCycleCalculator(size Size) cycleCalculator {
 	return func(opcode uint16) uint32 {
 		return moveAddressCycles(opcode, size)
 	}

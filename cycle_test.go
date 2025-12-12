@@ -88,7 +88,7 @@ func TestExecuteInstructionAddsOpcodeCycles(t *testing.T) {
 		t.Fatalf("executeInstruction failed: %v", err)
 	}
 
-	expected := uint64(OpcodeCycleTable[opcode])
+	expected := uint64(opcodeCycleTable[opcode])
 	if cpu.Cycles() != expected {
 		t.Fatalf("unexpected cycles after executeInstruction: got %d want %d", cpu.Cycles(), expected)
 	}
@@ -146,7 +146,7 @@ func TestOpcodeCycleTable(t *testing.T) {
 	code := assemble(t, "MOVE.L D0,(A0)\nLSL.B #1,D0\nLSL.B D1,D0\nASL.W (A0)\nABCD D0,D1")
 	assertWordCycles := func(t *testing.T, word uint16, expected uint32) {
 		t.Helper()
-		if got := OpcodeCycleTable[word]; got != expected {
+		if got := opcodeCycleTable[word]; got != expected {
 			t.Fatalf("opcode %04x: unexpected cycles got %d want %d", word, got, expected)
 		}
 	}

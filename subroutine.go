@@ -2,14 +2,10 @@ package m68kemu
 
 // Subroutine control flow: JSR/RTS
 func init() {
-	registerSubroutine()
-}
-
-func registerSubroutine() {
 	const controlAlterableMask = eaMaskIndirect | eaMaskDisplacement | eaMaskIndex | eaMaskAbsoluteShort | eaMaskAbsoluteLong | eaMaskPCDisplacement | eaMaskPCIndex
 
-	RegisterInstruction(jsr, 0x4e80, 0xffc0, controlAlterableMask, jsrCycleCalculator())
-	RegisterInstruction(rts, 0x4e75, 0xffff, 0, constantCycles(16))
+	registerInstruction(jsr, 0x4e80, 0xffc0, controlAlterableMask, jsrCycleCalculator())
+	registerInstruction(rts, 0x4e75, 0xffff, 0, constantCycles(16))
 }
 
 func jsr(cpu *cpu) error {
@@ -19,7 +15,7 @@ func jsr(cpu *cpu) error {
 	}
 
 	returnAddr := cpu.regs.PC
-	if err := cpu.Push(Long, returnAddr); err != nil {
+	if err := cpu.push(Long, returnAddr); err != nil {
 		return err
 	}
 
@@ -28,7 +24,7 @@ func jsr(cpu *cpu) error {
 }
 
 func rts(cpu *cpu) error {
-	addr, err := cpu.Pop(Long)
+	addr, err := cpu.pop(Long)
 	if err != nil {
 		return err
 	}
@@ -36,7 +32,7 @@ func rts(cpu *cpu) error {
 	return nil
 }
 
-func jsrCycleCalculator() CycleCalculator {
+func jsrCycleCalculator() cycleCalculator {
 	return func(opcode uint16) uint32 {
 		mode := (opcode >> 3) & 0x7
 		reg := opcode & 0x7

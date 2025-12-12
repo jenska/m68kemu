@@ -211,11 +211,11 @@ func (ea *eaRegisterIndirect) init(cpu *cpu, o Size) (modifier, error) {
 }
 
 func (ea *eaRegisterIndirect) read() (uint32, error) {
-	return ea.cpu.Read(ea.size, ea.address)
+	return ea.cpu.read(ea.size, ea.address)
 }
 
 func (ea *eaRegisterIndirect) write(v uint32) error {
-	return ea.cpu.Write(ea.size, ea.address, v)
+	return ea.cpu.write(ea.size, ea.address, v)
 }
 
 func (ea *eaRegisterIndirect) computedAddress() uint32 {
@@ -232,11 +232,11 @@ func (ea *eaPostIncrement) init(cpu *cpu, o Size) (modifier, error) {
 }
 
 func (ea *eaPostIncrement) read() (uint32, error) {
-	return ea.cpu.Read(ea.size, ea.address)
+	return ea.cpu.read(ea.size, ea.address)
 }
 
 func (ea *eaPostIncrement) write(v uint32) error {
-	return ea.cpu.Write(ea.size, ea.address, v)
+	return ea.cpu.write(ea.size, ea.address, v)
 }
 
 // -------------------------------------------------------------------
@@ -249,11 +249,11 @@ func (ea *eaPreDecrement) init(cpu *cpu, o Size) (modifier, error) {
 }
 
 func (ea *eaPreDecrement) read() (uint32, error) {
-	return ea.cpu.Read(ea.size, ea.address)
+	return ea.cpu.read(ea.size, ea.address)
 }
 
 func (ea *eaPreDecrement) write(v uint32) error {
-	return ea.cpu.Write(ea.size, ea.address, v)
+	return ea.cpu.write(ea.size, ea.address, v)
 }
 
 // -------------------------------------------------------------------
@@ -261,7 +261,7 @@ func (ea *eaPreDecrement) write(v uint32) error {
 
 func (ea *eaDisplacement) init(cpu *cpu, o Size) (modifier, error) {
 	ea.cpu, ea.size = cpu, o
-	offset, err := cpu.PopPc(Word)
+	offset, err := cpu.popPc(Word)
 	if err != nil {
 		return nil, err
 	}
@@ -275,7 +275,7 @@ func (ea *eaDisplacement) computedAddress() uint32 {
 
 func (ea *eaPCDisplacement) init(cpu *cpu, o Size) (modifier, error) {
 	ea.cpu, ea.size = cpu, o
-	offset, err := cpu.PopPc(Word)
+	offset, err := cpu.popPc(Word)
 	if err != nil {
 		return nil, err
 	}
@@ -315,7 +315,7 @@ func (ea *eaPCIndirectIndex) init(cpu *cpu, o Size) (modifier, error) {
 
 func (ea *eaAbsolute) init(cpu *cpu, o Size) (modifier, error) {
 	ea.cpu, ea.size = cpu, o
-	address, err := cpu.PopPc(ea.eaSize)
+	address, err := cpu.popPc(ea.eaSize)
 	if err != nil {
 		return nil, err
 	}
@@ -324,11 +324,11 @@ func (ea *eaAbsolute) init(cpu *cpu, o Size) (modifier, error) {
 }
 
 func (ea *eaAbsolute) read() (uint32, error) {
-	return ea.cpu.Read(ea.size, ea.address)
+	return ea.cpu.read(ea.size, ea.address)
 }
 
 func (ea *eaAbsolute) write(v uint32) error {
-	return ea.cpu.Write(ea.size, ea.address, v)
+	return ea.cpu.write(ea.size, ea.address, v)
 }
 
 func (ea *eaAbsolute) computedAddress() uint32 {
@@ -339,7 +339,7 @@ func (ea *eaAbsolute) computedAddress() uint32 {
 // immediate
 
 func (ea *eaImmediate) init(cpu *cpu, o Size) (modifier, error) {
-	value, err := cpu.PopPc(o)
+	value, err := cpu.popPc(o)
 	if err != nil {
 		return nil, err
 	}
@@ -434,7 +434,7 @@ func (ea *eaStatusRegister) computedAddress() uint32 {
 // 1  011  mem indir with long outer
 // 1  100-111  reserved
 func ix68000(c *cpu, a uint32) (uint32, error) {
-	ext, err := c.PopPc(Word)
+	ext, err := c.popPc(Word)
 	if err != nil {
 		return 0, err
 	}

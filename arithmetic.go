@@ -1,85 +1,51 @@
 package m68kemu
 
 func init() {
-	registerAdd()
-	registerSub()
-	registerAddq()
-	registerSubq()
-	registerMulDiv()
-}
-
-func registerAdd() {
-	addEAMask := eaMaskDataRegister | eaMaskIndirect | eaMaskPostIncrement |
+	addSubEAMask := eaMaskDataRegister | eaMaskIndirect | eaMaskPostIncrement |
 		eaMaskPreDecrement | eaMaskDisplacement | eaMaskIndex |
 		eaMaskAbsoluteShort | eaMaskAbsoluteLong | eaMaskImmediate |
 		eaMaskPCDisplacement | eaMaskPCIndex
-
-	addAlterableMask := eaMaskDataRegister | eaMaskIndirect | eaMaskPostIncrement |
+	addSubAlterableMask := eaMaskDataRegister | eaMaskIndirect | eaMaskPostIncrement |
 		eaMaskPreDecrement | eaMaskDisplacement | eaMaskIndex |
 		eaMaskAbsoluteShort | eaMaskAbsoluteLong
 
 	// ADD <ea>,Dn
 	for opmode := uint16(0); opmode <= 2; opmode++ {
 		match := uint16(0xd000) | (opmode << 6)
-		RegisterInstruction(add, match, 0xf1c0, addEAMask, addCycleCalculator(opmode, false))
+		registerInstruction(add, match, 0xf1c0, addSubEAMask, addCycleCalculator(opmode, false))
 	}
 
 	// ADD Dn,<ea>
 	for opmode := uint16(4); opmode <= 6; opmode++ {
 		match := uint16(0xd000) | (opmode << 6)
-		RegisterInstruction(add, match, 0xf1c0, addAlterableMask, addCycleCalculator(opmode, true))
+		registerInstruction(add, match, 0xf1c0, addSubAlterableMask, addCycleCalculator(opmode, true))
 	}
-}
-
-func registerSub() {
-	subEAMask := eaMaskDataRegister | eaMaskIndirect | eaMaskPostIncrement |
-		eaMaskPreDecrement | eaMaskDisplacement | eaMaskIndex |
-		eaMaskAbsoluteShort | eaMaskAbsoluteLong | eaMaskImmediate |
-		eaMaskPCDisplacement | eaMaskPCIndex
-
-	subAlterableMask := eaMaskDataRegister | eaMaskIndirect | eaMaskPostIncrement |
-		eaMaskPreDecrement | eaMaskDisplacement | eaMaskIndex |
-		eaMaskAbsoluteShort | eaMaskAbsoluteLong
 
 	// SUB <ea>,Dn
 	for opmode := uint16(0); opmode <= 2; opmode++ {
 		match := uint16(0x9000) | (opmode << 6)
-		RegisterInstruction(sub, match, 0xf1c0, subEAMask, addCycleCalculator(opmode, false))
+		registerInstruction(sub, match, 0xf1c0, addSubEAMask, addCycleCalculator(opmode, false))
 	}
 
 	// SUB Dn,<ea>
 	for opmode := uint16(4); opmode <= 6; opmode++ {
 		match := uint16(0x9000) | (opmode << 6)
-		RegisterInstruction(sub, match, 0xf1c0, subAlterableMask, addCycleCalculator(opmode, true))
+		registerInstruction(sub, match, 0xf1c0, addSubAlterableMask, addCycleCalculator(opmode, true))
 	}
-}
 
-func registerAddq() {
 	alterableMask := eaMaskDataRegister | eaMaskAddressRegister | eaMaskIndirect |
 		eaMaskPostIncrement | eaMaskPreDecrement | eaMaskDisplacement |
 		eaMaskIndex | eaMaskAbsoluteShort | eaMaskAbsoluteLong
-	RegisterInstruction(addq, 0x5000, 0xf100, alterableMask, addqSubqCycleCalculator())
-}
+	registerInstruction(addq, 0x5000, 0xf100, alterableMask, addqSubqCycleCalculator())
+	registerInstruction(subq, 0x5100, 0xf100, alterableMask, addqSubqCycleCalculator())
 
-func registerSubq() {
-	alterableMask := eaMaskDataRegister | eaMaskAddressRegister | eaMaskIndirect |
-		eaMaskPostIncrement | eaMaskPreDecrement | eaMaskDisplacement |
-		eaMaskIndex | eaMaskAbsoluteShort | eaMaskAbsoluteLong
-	RegisterInstruction(subq, 0x5100, 0xf100, alterableMask, addqSubqCycleCalculator())
-}
-
-func registerMulDiv() {
-	divMask := eaMaskDataRegister | eaMaskIndirect | eaMaskPostIncrement |
+	divMulMask := eaMaskDataRegister | eaMaskIndirect | eaMaskPostIncrement |
 		eaMaskPreDecrement | eaMaskDisplacement | eaMaskIndex |
 		eaMaskAbsoluteShort | eaMaskAbsoluteLong | eaMaskPCDisplacement | eaMaskPCIndex
-	RegisterInstruction(divu, 0x80c0, 0xf1c0, divMask, constantCycles(140))
-	RegisterInstruction(divs, 0x81c0, 0xf1c0, divMask, constantCycles(158))
-
-	mulMask := eaMaskDataRegister | eaMaskIndirect | eaMaskPostIncrement |
-		eaMaskPreDecrement | eaMaskDisplacement | eaMaskIndex |
-		eaMaskAbsoluteShort | eaMaskAbsoluteLong | eaMaskPCDisplacement | eaMaskPCIndex
-	RegisterInstruction(mulu, 0xc0c0, 0xf1c0, mulMask, constantCycles(70))
-	RegisterInstruction(muls, 0xc1c0, 0xf1c0, mulMask, constantCycles(70))
+	registerInstruction(divu, 0x80c0, 0xf1c0, divMulMask, constantCycles(140))
+	registerInstruction(divs, 0x81c0, 0xf1c0, divMulMask, constantCycles(158))
+	registerInstruction(mulu, 0xc0c0, 0xf1c0, divMulMask, constantCycles(70))
+	registerInstruction(muls, 0xc1c0, 0xf1c0, divMulMask, constantCycles(70))
 }
 
 func operandSizeFromOpmode(opmode uint16) Size {
@@ -98,9 +64,8 @@ func operandSizeFromOpmode(opmode uint16) Size {
 func add(cpu *cpu) error {
 	opmode := (cpu.regs.IR >> 6) & 0x7
 	size := operandSizeFromOpmode(opmode)
-	toEA := opmode >= 4
 
-	if toEA {
+	if opmode >= 4 {
 		// Destination comes from the lower six bits.
 		dst, err := cpu.ResolveSrcEA(size)
 		if err != nil {
@@ -140,9 +105,8 @@ func add(cpu *cpu) error {
 func sub(cpu *cpu) error {
 	opmode := (cpu.regs.IR >> 6) & 0x7
 	size := operandSizeFromOpmode(opmode)
-	toEA := opmode >= 4
 
-	if toEA {
+	if opmode >= 4 {
 		dst, err := cpu.ResolveSrcEA(size)
 		if err != nil {
 			return err
@@ -324,7 +288,7 @@ func subWithFlags(src, dst uint32, size Size) (uint32, uint16) {
 	return res, sr
 }
 
-func addCycleCalculator(opmode uint16, toEA bool) CycleCalculator {
+func addCycleCalculator(opmode uint16, toEA bool) cycleCalculator {
 	return func(opcode uint16) uint32 {
 		mode := (opcode >> 3) & 0x7
 		reg := opcode & 0x7
@@ -335,7 +299,7 @@ func addCycleCalculator(opmode uint16, toEA bool) CycleCalculator {
 	}
 }
 
-func addqSubqCycleCalculator() CycleCalculator {
+func addqSubqCycleCalculator() cycleCalculator {
 	return func(opcode uint16) uint32 {
 		mode := (opcode >> 3) & 0x7
 		reg := opcode & 0x7
@@ -361,7 +325,7 @@ func divu(cpu *cpu) error {
 		return err
 	}
 	if divisor == 0 {
-		return cpu.Exception(XDivByZero)
+		return cpu.exception(XDivByZero)
 	}
 
 	dividend := uint32(*dx(cpu))
@@ -396,7 +360,7 @@ func divs(cpu *cpu) error {
 	}
 	divisor := int32(int16(divisorRaw))
 	if divisor == 0 {
-		return cpu.Exception(XDivByZero)
+		return cpu.exception(XDivByZero)
 	}
 
 	dividend := *dx(cpu)

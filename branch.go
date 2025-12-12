@@ -1,14 +1,10 @@
 package m68kemu
 
 func init() {
-	registerBranches()
-}
-
-func registerBranches() {
 	// BRA/Bcc with 8- or 16-bit displacement (no 32-bit on 68000)
 	for cond := uint16(0); cond < 16; cond++ {
 		match := uint16(0x6000) | (cond << 8)
-		RegisterInstruction(branch, match, 0xff00, 0, branchCycleCalculator)
+		registerInstruction(branch, match, 0xff00, 0, constantCycles(10))
 	}
 }
 
@@ -17,7 +13,7 @@ func branch(cpu *cpu) error {
 	displacement := int32(int8(cpu.regs.IR & 0x00ff))
 
 	if displacement == 0 {
-		ext, err := cpu.PopPc(Word)
+		ext, err := cpu.popPc(Word)
 		if err != nil {
 			return err
 		}
@@ -62,15 +58,11 @@ func branch(cpu *cpu) error {
 
 	if taken {
 		if cond == 0x1 { // BSR pushes return address
-			if err := cpu.Push(Long, cpu.regs.PC); err != nil {
+			if err := cpu.push(Long, cpu.regs.PC); err != nil {
 				return err
 			}
 		}
 		cpu.regs.PC = uint32(int32(cpu.regs.PC) + displacement)
 	}
 	return nil
-}
-
-func branchCycleCalculator(uint16) uint32 {
-	return 10
 }

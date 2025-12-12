@@ -3,7 +3,7 @@ package m68kemu
 import "fmt"
 
 func init() {
-	RegisterInstruction(shiftRotate, 0xe000, 0xf000, 0, shiftRotateCycleCalculator)
+	registerInstruction(shiftRotate, 0xe000, 0xf000, 0, shiftRotateCycleCalculator)
 }
 
 func shiftRotate(cpu *cpu) error {

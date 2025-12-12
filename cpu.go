@@ -41,23 +41,23 @@ const (
 	eaMaskPCIndex         uint16 = 0x0001
 )
 
-var InstructionTable [0x10000]Instruction
-var OpcodeCycleTable [0x10000]uint32
+var opcodeTable [0x10000]instruction
+var opcodeCycleTable [0x10000]uint32
 
 type (
 	Size uint32
 
-	Instruction func(*cpu) error
+	instruction func(*cpu) error
 
 	AddressError uint32
 	BusError     uint32
 
 	BreakpointType int
 
-	// CycleCalculator builds a static cycle count for a given opcode. Results are
+	// cycleCalculator builds a static cycle count for a given opcode. Results are
 	// stored in OpcodeCycleTable during instruction registration and can be looked
 	// up at execution time for fixed-cost instructions.
-	CycleCalculator func(opcode uint16) uint32
+	cycleCalculator func(opcode uint16) uint32
 
 	// AddressBus for accessing address areas
 	AddressBus interface {
@@ -179,7 +179,7 @@ func (bt BreakpointType) String() string {
 	}
 }
 
-func (cpu *cpu) Read(size Size, address uint32) (uint32, error) {
+func (cpu *cpu) read(size Size, address uint32) (uint32, error) {
 	address &= 0xffffff // 24bit address bus of 68000
 	switch size {
 	case Byte, Word, Long:
@@ -194,7 +194,7 @@ func (cpu *cpu) Read(size Size, address uint32) (uint32, error) {
 	}
 }
 
-func (cpu *cpu) Write(size Size, address uint32, value uint32) error {
+func (cpu *cpu) write(size Size, address uint32, value uint32) error {
 	address &= 0xffffff // 24bit address bus of 68000
 	switch size {
 	case Byte, Word, Long:
@@ -247,19 +247,19 @@ func (cpu *cpu) handleBreakpoint(bp Breakpoint, kind BreakpointType, address uin
 func (cpu *cpu) executeInstruction(opcode uint16) error {
 	cpu.regs.IR = opcode
 
-	cpu.addCycles(OpcodeCycleTable[opcode])
+	cpu.addCycles(opcodeCycleTable[opcode])
 
-	handler := InstructionTable[opcode]
+	handler := opcodeTable[opcode]
 	if handler == nil {
-		return cpu.Exception(XIllegal)
+		return cpu.exception(XIllegal)
 	}
 
 	if err := handler(cpu); err != nil {
 		switch err.(type) {
 		case BusError:
-			return cpu.Exception(XBusError)
+			return cpu.exception(XBusError)
 		case AddressError:
-			return cpu.Exception(XAddresError)
+			return cpu.exception(XAddresError)
 		default:
 			return err
 		}
@@ -278,13 +278,13 @@ func (cpu *cpu) raiseException(vector uint32, newSR uint16) error {
 	cpu.setSR(newSR)
 
 	// 68000 format 0 stack frame: vector offset (word), PC (long), SR (word).
-	if err := cpu.Push(Word, vectorOffset); err != nil {
+	if err := cpu.push(Word, vectorOffset); err != nil {
 		return err
 	}
-	if err := cpu.Push(Long, cpu.regs.PC); err != nil {
+	if err := cpu.push(Long, cpu.regs.PC); err != nil {
 		return err
 	}
-	if err := cpu.Push(Word, uint32(originalSR)); err != nil {
+	if err := cpu.push(Word, uint32(originalSR)); err != nil {
 		return err
 	}
 
@@ -297,7 +297,7 @@ func (cpu *cpu) raiseException(vector uint32, newSR uint16) error {
 	return nil
 }
 
-func (cpu *cpu) Exception(vector uint32) error {
+func (cpu *cpu) exception(vector uint32) error {
 	return cpu.raiseException(vector, cpu.regs.SR|srSupervisor)
 }
 
@@ -322,12 +322,12 @@ func (cpu *cpu) readVector(offset uint32) (uint32, error) {
 		return 0, AddressError(offset)
 	}
 
-	address, err := cpu.Read(Long, offset)
+	address, err := cpu.read(Long, offset)
 	if err != nil {
 		return 0, err
 	}
 	if address == 0 {
-		return cpu.Read(Long, XUninitializedInt<<2)
+		return cpu.read(Long, XUninitializedInt<<2)
 	}
 	return address, nil
 }
@@ -426,7 +426,7 @@ func (cpu *cpu) checkAccessBreakpoint(address uint32, kind BreakpointType) error
 }
 
 func (cpu *cpu) fetchOpcode() (uint16, error) {
-	if opcode, err := cpu.Read(Word, cpu.regs.PC); err == nil {
+	if opcode, err := cpu.read(Word, cpu.regs.PC); err == nil {
 		cpu.regs.PC += uint32(Word)
 		return uint16(opcode), nil
 	} else {
@@ -471,18 +471,18 @@ func NewCPU(bus AddressBus) (CPU, error) {
 	return &c, nil
 }
 
-// RegisterInstruction adds an opcode handler to the CPU and records the
+// registerInstruction adds an opcode handler to the CPU and records the
 // precomputed cycle count for each opcode value that matches the mask.
-func RegisterInstruction(ins Instruction, match, mask uint16, eaMask uint16, calc CycleCalculator) {
+func registerInstruction(ins instruction, match, mask uint16, eaMask uint16, calc cycleCalculator) {
 	for value := uint16(0); ; {
 		index := match | value
 		if validEA(index, eaMask) {
-			if InstructionTable[index] != nil {
+			if opcodeTable[index] != nil {
 				panic(fmt.Errorf("instruction 0x%04x already registered", index))
 			}
-			InstructionTable[index] = ins
+			opcodeTable[index] = ins
 			if calc != nil {
-				OpcodeCycleTable[index] = calc(index)
+				opcodeCycleTable[index] = calc(index)
 			}
 		}
 
@@ -527,13 +527,13 @@ func validEA(opcode, mask uint16) bool {
 	return false
 }
 
-func (cpu *cpu) Push(s Size, value uint32) error {
+func (cpu *cpu) push(s Size, value uint32) error {
 	cpu.regs.A[7] -= uint32(s)
-	return cpu.Write(s, cpu.regs.A[7], value)
+	return cpu.write(s, cpu.regs.A[7], value)
 }
 
-func (cpu *cpu) Pop(s Size) (uint32, error) {
-	if res, err := cpu.Read(s, cpu.regs.A[7]); err == nil {
+func (cpu *cpu) pop(s Size) (uint32, error) {
+	if res, err := cpu.read(s, cpu.regs.A[7]); err == nil {
 		cpu.regs.A[7] += uint32(s) // sometimes odd
 		return res, nil
 	} else {
@@ -541,8 +541,8 @@ func (cpu *cpu) Pop(s Size) (uint32, error) {
 	}
 }
 
-func (cpu *cpu) PopPc(s Size) (uint32, error) {
-	if res, err := cpu.Read(s, cpu.regs.PC); err == nil {
+func (cpu *cpu) popPc(s Size) (uint32, error) {
+	if res, err := cpu.read(s, cpu.regs.PC); err == nil {
 		cpu.regs.PC += uint32(s)
 		if cpu.regs.PC&1 != 0 {
 			cpu.regs.PC++ // never odd
@@ -566,7 +566,7 @@ func (cpu *cpu) Cycles() uint64 {
 	return cpu.cycles
 }
 
-func constantCycles(c uint32) CycleCalculator {
+func constantCycles(c uint32) cycleCalculator {
 	return func(uint16) uint32 {
 		return c
 	}

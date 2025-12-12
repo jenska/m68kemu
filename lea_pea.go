@@ -5,8 +5,8 @@ import "fmt"
 func init() {
 	const leaPeaAddressMask = eaMaskIndirect | eaMaskPostIncrement | eaMaskPreDecrement | eaMaskDisplacement | eaMaskIndex | eaMaskAbsoluteShort | eaMaskAbsoluteLong | eaMaskPCDisplacement | eaMaskPCIndex
 
-	RegisterInstruction(lea, 0x41c0, 0xf1c0, leaPeaAddressMask, leaPeaCycleCalculator(4))
-	RegisterInstruction(pea, 0x4840, 0xffc0, leaPeaAddressMask, leaPeaCycleCalculator(8))
+	registerInstruction(lea, 0x41c0, 0xf1c0, leaPeaAddressMask, leaPeaCycleCalculator(4))
+	registerInstruction(pea, 0x4840, 0xffc0, leaPeaAddressMask, leaPeaCycleCalculator(8))
 }
 
 func lea(cpu *cpu) error {
@@ -37,7 +37,7 @@ func pea(cpu *cpu) error {
 		return err
 	}
 
-	return cpu.Push(Long, src.computedAddress())
+	return cpu.push(Long, src.computedAddress())
 }
 
 func leaPeaCycles(ir uint16, base uint32) uint32 {
@@ -46,7 +46,7 @@ func leaPeaCycles(ir uint16, base uint32) uint32 {
 	return base + eaAccessCycles(mode, reg, Long)
 }
 
-func leaPeaCycleCalculator(base uint32) CycleCalculator {
+func leaPeaCycleCalculator(base uint32) cycleCalculator {
 	return func(opcode uint16) uint32 {
 		return leaPeaCycles(opcode, base)
 	}

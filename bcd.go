@@ -1,14 +1,12 @@
 package m68kemu
 
 func init() {
-	RegisterInstruction(abcd, 0xc100, 0xf1f8, 0, abcdCycleCalculator)
-	RegisterInstruction(abcd, 0xc108, 0xf1f8, 0, abcdCycleCalculator)
-
-	RegisterInstruction(sbcd, 0x8100, 0xf1f8, 0, sbcdCycleCalculator)
-	RegisterInstruction(sbcd, 0x8108, 0xf1f8, 0, sbcdCycleCalculator)
-
-	RegisterInstruction(nbcd, 0x4800, 0xfff8, 0, nbcdCycleCalculator)
-	RegisterInstruction(nbcd, 0x4820, 0xfff8, 0, nbcdCycleCalculator)
+	registerInstruction(abcd, 0xc100, 0xf1f8, 0, abcdCycleCalculator)
+	registerInstruction(abcd, 0xc108, 0xf1f8, 0, abcdCycleCalculator)
+	registerInstruction(sbcd, 0x8100, 0xf1f8, 0, sbcdCycleCalculator)
+	registerInstruction(sbcd, 0x8108, 0xf1f8, 0, sbcdCycleCalculator)
+	registerInstruction(nbcd, 0x4800, 0xfff8, 0, nbcdCycleCalculator)
+	registerInstruction(nbcd, 0x4820, 0xfff8, 0, nbcdCycleCalculator)
 }
 
 func abcd(cpu *cpu) error {
@@ -148,11 +146,11 @@ func bcdOperands(cpu *cpu) (bcdOperand, bcdOperand, error) {
 	*ay(cpu) = sourceAddr
 	*ax(cpu) = destAddr
 
-	srcValue, err := cpu.Read(Byte, sourceAddr)
+	srcValue, err := cpu.read(Byte, sourceAddr)
 	if err != nil {
 		return bcdOperand{}, bcdOperand{}, err
 	}
-	dstValue, err := cpu.Read(Byte, destAddr)
+	dstValue, err := cpu.read(Byte, destAddr)
 	if err != nil {
 		return bcdOperand{}, bcdOperand{}, err
 	}
@@ -160,7 +158,7 @@ func bcdOperands(cpu *cpu) (bcdOperand, bcdOperand, error) {
 	return bcdOperand{value: byte(srcValue)}, bcdOperand{
 		value: byte(dstValue),
 		write: func(v byte) error {
-			return cpu.Write(Byte, destAddr, uint32(v))
+			return cpu.write(Byte, destAddr, uint32(v))
 		},
 	}, nil
 }
@@ -183,14 +181,14 @@ func bcdDestination(cpu *cpu) (bcdSourceDest, error) {
 	addr := cpu.regs.A[reg] - 1
 	cpu.regs.A[reg] = addr
 
-	value, err := cpu.Read(Byte, addr)
+	value, err := cpu.read(Byte, addr)
 	if err != nil {
 		return bcdSourceDest{}, err
 	}
 
 	return bcdSourceDest{
 		value: byte(value),
-		write: func(v byte) error { return cpu.Write(Byte, addr, uint32(v)) },
+		write: func(v byte) error { return cpu.write(Byte, addr, uint32(v)) },
 	}, nil
 }
 
