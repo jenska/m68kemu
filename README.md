@@ -28,7 +28,6 @@ The steps below focus on improving m68kemu itself so it can serve as a reliable 
    - Document integration patterns (e.g., how to drive the CPU in lockstep with other chips) to reduce friction for emulator authors.
 
 ## Project layout
-- `internal/emu/` – core emulator types such as the CPU, register file, effective-address resolver, and the basic MOVEA word/long instructions. A minimal RAM implementation in this package satisfies the `AddressBus` interface for quick tests.
 - `doc/M68kOpcodes.pdf` – opcode reference used while implementing and verifying instruction behavior.
 
 ## Supported instructions
@@ -54,20 +53,21 @@ The emulator currently covers a small but growing subset of 68000 opcodes:
 The CPU can be stepped manually once you provide a memory implementation. The snippet below shows how to create a CPU with the built-in RAM helper, attach it to a bus, and execute a single MOVEA instruction:
 
 ```go
-ram := emu.NewRAM(0, 0x10000) // 64 KiB starting at address 0
-bus := emu.NewBus(&ram)
-cpu, _ := emu.NewCPU(bus)
+ram := m68kemu.NewRAM(0, 0x10000) // 64 KiB starting at address 0
+bus := m68kemu.NewBus(&ram)
+cpu, _ := m68kemu.NewCPU(bus)
 
 // Set initial SSP and PC
-_ = ram.Write(emu.Long, 0x0000, 0x00002000)
-_ = ram.Write(emu.Long, 0x0004, 0x00000200)
+_ = ram.Write(m68kemu.Long, 0x0000, 0x00002000)
+_ = ram.Write(m68kemu.Long, 0x0004, 0x00000200)
 
 // Encode MOVEA.L (long) from absolute long address 0x00000400 into A0
-_ = ram.Write(emu.Word, 0x0200, 0x2040)      // opcode for MOVEA.L with absolute long source
-_ = ram.Write(emu.Long, 0x0202, 0x00000400)
-_ = ram.Write(emu.Long, 0x0400, 0xDEADBEEF)  // data at the source address
+_ = ram.Write(m68kemu.Word, 0x0200, 0x2040)      // opcode for MOVEA.L with absolute long source
+_ = ram.Write(m68kemu.Long, 0x0202, 0x00000400)
+_ = ram.Write(m68kemu.Long, 0x0400, 0xDEADBEEF)  // data at the source address
 
 _ = cpu.Step() // executes the single instruction
+// alternatively run for a fixed cycle budget with cpu.RunCycles(4)
 // cpu.Registers().A[0] now contains 0xDEADBEEF
 ```
 
@@ -97,7 +97,7 @@ Running it on the emulator mirrors the MOVEA sample above—load the assembled b
 ```go
 program, _ := asm.AssembleString(fibSource) // see listing above
 for i, b := range program {
-        _ = ram.Write(emu.Byte, 0x2000+uint32(i), uint32(b))
+        _ = ram.Write(m68kemu.Byte, 0x2000+uint32(i), uint32(b))
 }
 for cpu.Registers().PC < 0x2000+uint32(len(program)) {
         _ = cpu.Step()
@@ -134,10 +134,10 @@ main:   LEA $4000,A0
 Tracing can be enabled via the exported API by installing a tracer callback on the CPU. Breakpoints and watchpoints halt execution (or invoke callbacks) when an instruction is executed or when a specific address is read or written:
 
 ```go
-cpu.SetTracer(func(info emu.TraceInfo) {
+cpu.SetTracer(func(info m68kemu.TraceInfo) {
         fmt.Printf("PC=%04x SR=%04x\n", info.PC, info.SR)
 })
 
-cpu.AddBreakpoint(emu.Breakpoint{Address: 0x2000, OnExecute: true, Halt: true})
-cpu.AddBreakpoint(emu.Breakpoint{Address: 0x4000, OnWrite: true, Halt: true})
+cpu.AddBreakpoint(m68kemu.Breakpoint{Address: 0x2000, OnExecute: true, Halt: true})
+cpu.AddBreakpoint(m68kemu.Breakpoint{Address: 0x4000, OnWrite: true, Halt: true})
 ```
