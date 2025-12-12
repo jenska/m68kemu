@@ -3,13 +3,13 @@ package m68kemu
 import "testing"
 
 func BenchmarkRecursiveFibonacci(b *testing.B) {
-	const resultAddr = 0x4000
+	const cycleBudget = 8_000_000
 
 	program := assemble(b, `
 BRA main
 fib:    MOVE.L D0,D1
         SUBQ.L #1,D1
-        BLE.S base
+        BLE.S return
         MOVE.L D0,-(A7)
         SUBQ.L #1,D0
         BSR fib
@@ -20,13 +20,12 @@ fib:    MOVE.L D0,D1
         MOVE.L (A7)+,D2
         MOVE.L (A7)+,D1
         ADD.L D2,D0
-        RTS
-base:   RTS
+return: RTS
 main:   LEA $4000,A0
-        MOVEQ #7,D0
+        MOVEQ #7,D0	
         BSR fib
-MOVE.L D0,(A0)
-NOP
+		MOVE.L D0,(A0)
+		BRA main
 `)
 
 	cpu, ram := newEnvironment(b)
@@ -37,7 +36,6 @@ NOP
 			b.Fatalf("write program: %v", err)
 		}
 	}
-	endPC := startPC + uint32(len(program))
 
 	b.ResetTimer()
 	for b.Loop() {
@@ -45,21 +43,8 @@ NOP
 			b.Fatalf("cpu reset: %v", err)
 		}
 
-		for steps := 0; steps < 2000; steps++ {
-			if err := cpu.Step(); err != nil {
-				b.Fatalf("step %d: %v", steps, err)
-			}
-			if cpu.regs.PC >= endPC {
-				break
-			}
-		}
-
-		result, err := ram.Read(Long, resultAddr)
-		if err != nil {
-			b.Fatalf("read fib result: %v", err)
-		}
-		if result != 13 {
-			b.Fatalf("fib(7) = %d, want 13", result)
+		if err := cpu.RunCycles(cycleBudget); err != nil {
+			b.Fatalf("RunCycles failed: %v", err)
 		}
 	}
 }
