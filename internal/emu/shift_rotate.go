@@ -81,13 +81,13 @@ func shiftRotateMemory(cpu *CPU) error {
 	)
 	switch {
 	case !logical && !left:
-		result, flags = asr(uint32(val), 1, 16, cpu.regs.SR&srExtend != 0)
+		result, flags = asr(uint32(val), 1, 16)
 	case !logical && left:
-		result, flags = asl(uint32(val), 1, 16, cpu.regs.SR&srExtend != 0)
+		result, flags = asl(uint32(val), 1, 16)
 	case logical && !left:
-		result, flags = lsr(uint32(val), 1, 16, cpu.regs.SR&srExtend != 0)
+		result, flags = lsr(uint32(val), 1, 16)
 	case logical && left:
-		result, flags = lsl(uint32(val), 1, 16, cpu.regs.SR&srExtend != 0)
+		result, flags = lsl(uint32(val), 1, 16)
 	}
 
 	if err := ea.write(result); err != nil {
