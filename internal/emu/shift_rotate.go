@@ -274,11 +274,6 @@ func updateShiftRotateFlags(cpu *CPU, result uint32, width int, flags shiftRotat
 	}
 }
 
-func signExtend(value uint32, width int) int32 {
-	shift := 32 - width
-	return int32(value<<shift) >> shift
-}
-
 func b2i(v bool) uint32 {
 	if v {
 		return 1
