@@ -118,6 +118,27 @@ func TestRunCycles(t *testing.T) {
 	}
 }
 
+func TestRunCyclesDetectsStalledCycles(t *testing.T) {
+	cpu, ram := newEnvironment(t)
+
+	code := assemble(t, "NOP")
+	for i, b := range code {
+		addr := cpu.regs.PC + uint32(i)
+		if err := ram.Write(Byte, addr, uint32(b)); err != nil {
+			t.Fatalf("failed to seed program byte at %04x: %v", addr, err)
+		}
+	}
+
+	const nopOpcode = uint16(0x4e71)
+	originalCycles := opcodeCycleTable[nopOpcode]
+	opcodeCycleTable[nopOpcode] = 0
+	defer func() { opcodeCycleTable[nopOpcode] = originalCycles }()
+
+	if err := cpu.RunCycles(1); err == nil {
+		t.Fatalf("RunCycles should fail when cycles do not advance")
+	}
+}
+
 func TestEACycleTable(t *testing.T) {
 	tests := []struct {
 		name           string
