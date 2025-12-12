@@ -375,8 +375,13 @@ func (cpu *cpu) Step() error {
 func (cpu *cpu) RunCycles(budget uint64) error {
 	start := cpu.cycles
 	for cpu.cycles-start < budget {
+		before := cpu.cycles
 		if err := cpu.Step(); err != nil {
 			return err
+		}
+
+		if cpu.cycles == before {
+			return fmt.Errorf("execution stalled at %04x: cycles not advancing", cpu.regs.PC)
 		}
 	}
 	return nil
