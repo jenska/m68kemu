@@ -6,8 +6,8 @@ import (
 	asm "github.com/jenska/m68kasm"
 )
 
-func newEnvironment(t *testing.T) (*cpu, *RAM) {
-	t.Helper()
+func newEnvironment(tb testing.TB) (*cpu, *RAM) {
+	tb.Helper()
 
 	memory := NewRAM(0, 1024*64)
 	bus := NewBus(&memory)
@@ -15,21 +15,21 @@ func newEnvironment(t *testing.T) (*cpu, *RAM) {
 	memory.Write(Long, 4, 0x2000)
 	processor, err := NewCPU(bus)
 	if err != nil {
-		t.Fatalf("Failed to create CPU: %v", err)
+		tb.Fatalf("Failed to create CPU: %v", err)
 	}
 	impl, ok := processor.(*cpu)
 	if !ok {
-		t.Fatalf("CPU implementation has unexpected type %T", processor)
+		tb.Fatalf("CPU implementation has unexpected type %T", processor)
 	}
 	return impl, &memory
 }
 
-func assemble(t *testing.T, instruction string) []byte {
-	t.Helper()
+func assemble(tb testing.TB, instruction string) []byte {
+	tb.Helper()
 
 	code, err := asm.AssembleString(instruction)
 	if err != nil {
-		t.Fatalf("Assembler failed: %v", err)
+		tb.Fatalf("Assembler failed: %v", err)
 	}
 	return code
 }
