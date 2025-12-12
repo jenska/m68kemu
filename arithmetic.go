@@ -2,7 +2,10 @@ package m68kemu
 
 func init() {
 	registerAdd()
+	registerSub()
+	registerAddq()
 	registerSubq()
+	registerMulDiv()
 }
 
 func registerAdd() {
@@ -28,10 +31,55 @@ func registerAdd() {
 	}
 }
 
+func registerSub() {
+	subEAMask := eaMaskDataRegister | eaMaskIndirect | eaMaskPostIncrement |
+		eaMaskPreDecrement | eaMaskDisplacement | eaMaskIndex |
+		eaMaskAbsoluteShort | eaMaskAbsoluteLong | eaMaskImmediate |
+		eaMaskPCDisplacement | eaMaskPCIndex
+
+	subAlterableMask := eaMaskDataRegister | eaMaskIndirect | eaMaskPostIncrement |
+		eaMaskPreDecrement | eaMaskDisplacement | eaMaskIndex |
+		eaMaskAbsoluteShort | eaMaskAbsoluteLong
+
+	// SUB <ea>,Dn
+	for opmode := uint16(0); opmode <= 2; opmode++ {
+		match := uint16(0x9000) | (opmode << 6)
+		RegisterInstruction(sub, match, 0xf1c0, subEAMask, addCycleCalculator(opmode, false))
+	}
+
+	// SUB Dn,<ea>
+	for opmode := uint16(4); opmode <= 6; opmode++ {
+		match := uint16(0x9000) | (opmode << 6)
+		RegisterInstruction(sub, match, 0xf1c0, subAlterableMask, addCycleCalculator(opmode, true))
+	}
+}
+
+func registerAddq() {
+	alterableMask := eaMaskDataRegister | eaMaskAddressRegister | eaMaskIndirect |
+		eaMaskPostIncrement | eaMaskPreDecrement | eaMaskDisplacement |
+		eaMaskIndex | eaMaskAbsoluteShort | eaMaskAbsoluteLong
+	RegisterInstruction(addq, 0x5000, 0xf100, alterableMask, addqSubqCycleCalculator())
+}
+
 func registerSubq() {
-	// SUBQ on 68000 supports alterable destinations; we keep it to data registers
-	// for now to cover loop counters and keep flag behavior simple.
-	RegisterInstruction(subq, 0x5100, 0xf100, eaMaskDataRegister, subqCycleCalculator())
+	alterableMask := eaMaskDataRegister | eaMaskAddressRegister | eaMaskIndirect |
+		eaMaskPostIncrement | eaMaskPreDecrement | eaMaskDisplacement |
+		eaMaskIndex | eaMaskAbsoluteShort | eaMaskAbsoluteLong
+	RegisterInstruction(subq, 0x5100, 0xf100, alterableMask, addqSubqCycleCalculator())
+}
+
+func registerMulDiv() {
+	divMask := eaMaskDataRegister | eaMaskIndirect | eaMaskPostIncrement |
+		eaMaskPreDecrement | eaMaskDisplacement | eaMaskIndex |
+		eaMaskAbsoluteShort | eaMaskAbsoluteLong | eaMaskPCDisplacement | eaMaskPCIndex
+	RegisterInstruction(divu, 0x80c0, 0xf1c0, divMask, constantCycles(140))
+	RegisterInstruction(divs, 0x81c0, 0xf1c0, divMask, constantCycles(158))
+
+	mulMask := eaMaskDataRegister | eaMaskIndirect | eaMaskPostIncrement |
+		eaMaskPreDecrement | eaMaskDisplacement | eaMaskIndex |
+		eaMaskAbsoluteShort | eaMaskAbsoluteLong | eaMaskPCDisplacement | eaMaskPCIndex
+	RegisterInstruction(mulu, 0xc0c0, 0xf1c0, mulMask, constantCycles(70))
+	RegisterInstruction(muls, 0xc1c0, 0xf1c0, mulMask, constantCycles(70))
 }
 
 func operandSizeFromOpmode(opmode uint16) Size {
@@ -89,20 +137,122 @@ func add(cpu *cpu) error {
 	return nil
 }
 
-func subq(cpu *cpu) error {
-	size := (cpu.regs.IR >> 6) & 0x3
-	destReg := cpu.regs.IR & 0x7
-	decrement := uint32(cpu.regs.IR>>9) & 0x7
-	if decrement == 0 {
-		decrement = 8
+func sub(cpu *cpu) error {
+	opmode := (cpu.regs.IR >> 6) & 0x7
+	size := operandSizeFromOpmode(opmode)
+	toEA := opmode >= 4
+
+	if toEA {
+		dst, err := cpu.ResolveSrcEA(size)
+		if err != nil {
+			return err
+		}
+		dstVal, err := dst.read()
+		if err != nil {
+			return err
+		}
+
+		src := *udx(cpu) & maskForSize(size)
+		result, flags := subWithFlags(src, dstVal, size)
+		if err := dst.write(result); err != nil {
+			return err
+		}
+		cpu.regs.SR = (cpu.regs.SR &^ (srNegative | srZero | srOverflow | srCarry | srExtend)) | flags
+		return nil
 	}
 
-	value := uint32(cpu.regs.D[destReg])
-	mask := maskForSize(Size(size))
-	result, flags := subWithFlags(decrement, value&mask, Size(size))
-	cpu.regs.D[destReg] = int32((value & ^mask) | result)
+	src, err := cpu.ResolveSrcEA(size)
+	if err != nil {
+		return err
+	}
+	srcVal, err := src.read()
+	if err != nil {
+		return err
+	}
+
+	dst := udx(cpu)
+	result, flags := subWithFlags(srcVal, *dst&maskForSize(size), size)
+	*dst = (*dst & ^maskForSize(size)) | result
+
 	cpu.regs.SR = (cpu.regs.SR &^ (srNegative | srZero | srOverflow | srCarry | srExtend)) | flags
 	return nil
+}
+
+func addq(cpu *cpu) error {
+	size := sizeFromQuick(cpu.regs.IR)
+	quick := uint32((cpu.regs.IR >> 9) & 0x7)
+	if quick == 0 {
+		quick = 8
+	}
+
+	mode := (cpu.regs.IR >> 3) & 0x7
+	reg := cpu.regs.IR & 0x7
+
+	if mode == 1 { // address register direct
+		value := cpu.regs.A[reg]
+		cpu.regs.A[reg] = value + quick
+		return nil
+	}
+
+	dst, err := cpu.ResolveSrcEA(size)
+	if err != nil {
+		return err
+	}
+	dstVal, err := dst.read()
+	if err != nil {
+		return err
+	}
+
+	result, flags := addWithFlags(quick, dstVal, size)
+	if err := dst.write(result); err != nil {
+		return err
+	}
+	cpu.regs.SR = (cpu.regs.SR &^ (srNegative | srZero | srOverflow | srCarry | srExtend)) | flags
+	return nil
+}
+
+func subq(cpu *cpu) error {
+	size := sizeFromQuick(cpu.regs.IR)
+	quick := uint32((cpu.regs.IR >> 9) & 0x7)
+	if quick == 0 {
+		quick = 8
+	}
+
+	mode := (cpu.regs.IR >> 3) & 0x7
+	reg := cpu.regs.IR & 0x7
+
+	if mode == 1 { // address register direct
+		value := cpu.regs.A[reg]
+		cpu.regs.A[reg] = value - quick
+		return nil
+	}
+
+	dst, err := cpu.ResolveSrcEA(size)
+	if err != nil {
+		return err
+	}
+	dstVal, err := dst.read()
+	if err != nil {
+		return err
+	}
+
+	result, flags := subWithFlags(quick, dstVal, size)
+	if err := dst.write(result); err != nil {
+		return err
+	}
+	cpu.regs.SR = (cpu.regs.SR &^ (srNegative | srZero | srOverflow | srCarry | srExtend)) | flags
+	return nil
+}
+
+func sizeFromQuick(opcode uint16) Size {
+	switch (opcode >> 6) & 0x3 {
+	case 0:
+		return Byte
+	case 1:
+		return Word
+	default:
+		return Long
+	}
 }
 
 func maskForSize(size Size) uint32 {
@@ -185,15 +335,135 @@ func addCycleCalculator(opmode uint16, toEA bool) CycleCalculator {
 	}
 }
 
-func subqCycleCalculator() CycleCalculator {
+func addqSubqCycleCalculator() CycleCalculator {
 	return func(opcode uint16) uint32 {
 		mode := (opcode >> 3) & 0x7
 		reg := opcode & 0x7
 		size := Size((opcode >> 6) & 0x3)
-		base := uint32(4)
-		if mode != 0 {
-			base = 8
+
+		if mode == 0 {
+			return 4 + eaAccessCycles(mode, reg, size)
 		}
-		return base + eaAccessCycles(mode, reg, size)
+		if mode == 1 {
+			return 8 + eaAccessCycles(mode, reg, size)
+		}
+		return 8 + eaAccessCycles(mode, reg, size)
 	}
+}
+
+func divu(cpu *cpu) error {
+	src, err := cpu.ResolveSrcEA(Word)
+	if err != nil {
+		return err
+	}
+	divisor, err := src.read()
+	if err != nil {
+		return err
+	}
+	if divisor == 0 {
+		return cpu.Exception(XDivByZero)
+	}
+
+	dividend := uint32(*dx(cpu))
+	quotient := dividend / divisor
+	if quotient > 0xffff {
+		cpu.regs.SR = (cpu.regs.SR & ^uint16(srCarry)) | srOverflow
+		return nil
+	}
+	remainder := dividend % divisor
+	result := (remainder << 16) | (quotient & 0xffff)
+	*dx(cpu) = int32(result)
+
+	var flags uint16
+	if quotient == 0 {
+		flags |= srZero
+	}
+	if quotient&0x8000 != 0 {
+		flags |= srNegative
+	}
+	cpu.regs.SR = (cpu.regs.SR &^ (srNegative | srZero | srOverflow | srCarry | srExtend)) | flags
+	return nil
+}
+
+func divs(cpu *cpu) error {
+	src, err := cpu.ResolveSrcEA(Word)
+	if err != nil {
+		return err
+	}
+	divisorRaw, err := src.read()
+	if err != nil {
+		return err
+	}
+	divisor := int32(int16(divisorRaw))
+	if divisor == 0 {
+		return cpu.Exception(XDivByZero)
+	}
+
+	dividend := *dx(cpu)
+	quotient := dividend / divisor
+	if quotient > 0x7fff || quotient < -0x8000 {
+		cpu.regs.SR = (cpu.regs.SR & ^uint16(srCarry)) | srOverflow
+		return nil
+	}
+	remainder := dividend % divisor
+	result := (uint32(uint16(remainder)) << 16) | (uint32(uint16(quotient)) & 0xffff)
+	*dx(cpu) = int32(result)
+
+	var flags uint16
+	if quotient == 0 {
+		flags |= srZero
+	}
+	if quotient&0x8000 != 0 {
+		flags |= srNegative
+	}
+	cpu.regs.SR = (cpu.regs.SR &^ (srNegative | srZero | srOverflow | srCarry | srExtend)) | flags
+	return nil
+}
+
+func mulu(cpu *cpu) error {
+	src, err := cpu.ResolveSrcEA(Word)
+	if err != nil {
+		return err
+	}
+	op, err := src.read()
+	if err != nil {
+		return err
+	}
+
+	result := uint32(uint16(op)) * uint32(uint16(*dx(cpu)))
+	*dx(cpu) = int32(result)
+
+	var flags uint16
+	if result == 0 {
+		flags |= srZero
+	}
+	if uint32(result)&0x80000000 != 0 {
+		flags |= srNegative
+	}
+	cpu.regs.SR = (cpu.regs.SR &^ (srNegative | srZero | srOverflow | srCarry | srExtend)) | flags
+	return nil
+}
+
+func muls(cpu *cpu) error {
+	src, err := cpu.ResolveSrcEA(Word)
+	if err != nil {
+		return err
+	}
+	opRaw, err := src.read()
+	if err != nil {
+		return err
+	}
+
+	result := int32(int16(opRaw)) * int32(int16(*dx(cpu)))
+	*dx(cpu) = result
+
+	var flags uint16
+	if result == 0 {
+		flags |= srZero
+	}
+	if uint32(result)&0x80000000 != 0 {
+		flags |= srNegative
+	}
+	cpu.regs.SR = (cpu.regs.SR &^ (srNegative | srZero | srOverflow | srCarry | srExtend)) | flags
+	return nil
 }
