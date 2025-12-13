@@ -125,6 +125,8 @@ type (
 		trap       TraceCallback
 		interrupts *InterruptController
 
+		stopped bool
+
 		breakpoints map[uint32]Breakpoint
 	}
 )
@@ -343,11 +345,26 @@ func (cpu *cpu) checkInterrupts() error {
 		return nil
 	}
 
+	cpu.stopped = false
+
 	return cpu.interrupt(level, vector)
 }
 
 // Step fetches the next opcode at the program counter and executes it.
 func (cpu *cpu) Step() error {
+	if cpu.stopped {
+		wasStopped := true
+		if err := cpu.checkInterrupts(); err != nil {
+			return err
+		}
+		if cpu.stopped {
+			return nil
+		}
+		if wasStopped {
+			return nil
+		}
+	}
+
 	if err := cpu.checkExecuteBreakpoint(cpu.regs.PC); err != nil {
 		return err
 	}
@@ -442,6 +459,7 @@ func (cpu *cpu) fetchOpcode() (uint16, error) {
 func (cpu *cpu) Reset() error {
 	cpu.regs = Registers{SR: 0x2700}
 	cpu.interrupts = NewInterruptController()
+	cpu.stopped = false
 	ssp, err := cpu.bus.Read(Long, 0)
 	if err != nil {
 		return err
