@@ -122,15 +122,8 @@ func (b *Bus) findDevice(address uint32) Device {
 }
 
 func (b *Bus) validateAlignment(address uint32, s Size) error {
-	switch s {
-	case Byte:
-		return nil
-	case Word, Long:
-		if address&1 != 0 {
-			return BusError(address)
-		}
-		return nil
-	default:
+	if (s == Word || s == Long) && address&1 != 0 {
 		return BusError(address)
 	}
+	return nil
 }

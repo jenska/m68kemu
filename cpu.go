@@ -45,8 +45,6 @@ var opcodeTable [0x10000]instruction
 var opcodeCycleTable [0x10000]uint32
 
 type (
-	Size uint32
-
 	instruction func(*cpu) error
 
 	AddressError uint32

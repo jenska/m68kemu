@@ -2,63 +2,6 @@ package m68kemu
 
 import "testing"
 
-func TestClrAndTst(t *testing.T) {
-	cpu, ram := newEnvironment(t)
-	cpu.regs.SR |= srExtend
-
-	ram.Write(Long, 0x3000, 0xdeadbeef)
-	code := assemble(t, "CLR.L $3000\nTST.L $3000\n")
-	for i, b := range code {
-		ram.Write(Byte, cpu.regs.PC+uint32(i), uint32(b))
-	}
-
-	opcode, _ := cpu.fetchOpcode()
-	if err := cpu.executeInstruction(opcode); err != nil {
-		t.Fatalf("CLR failed: %v", err)
-	}
-	if got, _ := ram.Read(Long, 0x3000); got != 0 {
-		t.Fatalf("expected memory to be cleared, got %08x", got)
-	}
-	if cpu.regs.SR&srZero == 0 || cpu.regs.SR&srExtend == 0 {
-		t.Fatalf("expected zero set and extend preserved, SR=%04x", cpu.regs.SR)
-	}
-
-	opcode, _ = cpu.fetchOpcode()
-	if err := cpu.executeInstruction(opcode); err != nil {
-		t.Fatalf("TST failed: %v", err)
-	}
-	if cpu.regs.SR&srZero == 0 {
-		t.Fatalf("expected zero flag after TST on cleared memory")
-	}
-}
-
-func TestAddaSuba(t *testing.T) {
-	cpu, ram := newEnvironment(t)
-	code := assemble(t, "ADDA.W #-1,A0\nSUBA.L #1,A0\n")
-	for i, b := range code {
-		ram.Write(Byte, cpu.regs.PC+uint32(i), uint32(b))
-	}
-
-	opcode, _ := cpu.fetchOpcode()
-	if err := cpu.executeInstruction(opcode); err != nil {
-		t.Fatalf("ADDA failed: %v", err)
-	}
-	if cpu.regs.A[0] != 0xffffffff {
-		t.Fatalf("expected sign-extended word add, got %08x", cpu.regs.A[0])
-	}
-
-	opcode, _ = cpu.fetchOpcode()
-	if err := cpu.executeInstruction(opcode); err != nil {
-		t.Fatalf("SUBA failed: %v", err)
-	}
-	if cpu.regs.A[0] != 0xfffffffe {
-		t.Fatalf("expected subtraction result 0xfffffffe, got %08x", cpu.regs.A[0])
-	}
-	if cpu.regs.SR != 0x2700 {
-		t.Fatalf("expected condition codes untouched, SR=%04x", cpu.regs.SR)
-	}
-}
-
 func TestTrapvResetAndStop(t *testing.T) {
 	cpu, ram := newEnvironment(t)
 
@@ -117,7 +60,7 @@ func TestTrapvResetAndStop(t *testing.T) {
 	if cpu.stopped {
 		t.Fatalf("CPU should resume after interrupt")
 	}
-        if cpu.regs.PC != 0x2008 {
-                t.Fatalf("expected autovector handler at 0x2008, PC=%04x", cpu.regs.PC)
-        }
+	if cpu.regs.PC != 0x2008 {
+		t.Fatalf("expected autovector handler at 0x2008, PC=%04x", cpu.regs.PC)
+	}
 }

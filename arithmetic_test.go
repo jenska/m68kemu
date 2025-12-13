@@ -146,3 +146,30 @@ func TestMulDivInstructions(t *testing.T) {
 	step(0x00020006) // DIVS => quotient 6 remainder 2
 	step(-12)        // MULS => 6 * -2 = -12
 }
+
+func TestAddaSuba(t *testing.T) {
+	cpu, ram := newEnvironment(t)
+	code := assemble(t, "ADDA.W #-1,A0\nSUBA.L #1,A0\n")
+	for i, b := range code {
+		ram.Write(Byte, cpu.regs.PC+uint32(i), uint32(b))
+	}
+
+	opcode, _ := cpu.fetchOpcode()
+	if err := cpu.executeInstruction(opcode); err != nil {
+		t.Fatalf("ADDA failed: %v", err)
+	}
+	if cpu.regs.A[0] != 0xffffffff {
+		t.Fatalf("expected sign-extended word add, got %08x", cpu.regs.A[0])
+	}
+
+	opcode, _ = cpu.fetchOpcode()
+	if err := cpu.executeInstruction(opcode); err != nil {
+		t.Fatalf("SUBA failed: %v", err)
+	}
+	if cpu.regs.A[0] != 0xfffffffe {
+		t.Fatalf("expected subtraction result 0xfffffffe, got %08x", cpu.regs.A[0])
+	}
+	if cpu.regs.SR != 0x2700 {
+		t.Fatalf("expected condition codes untouched, SR=%04x", cpu.regs.SR)
+	}
+}

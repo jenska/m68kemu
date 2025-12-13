@@ -33,6 +33,17 @@ func init() {
 		registerInstruction(sub, match, 0xf1c0, addSubAlterableMask, addCycleCalculator(opmode, true))
 	}
 
+	addaSubaMask := eaMaskDataRegister | eaMaskIndirect | eaMaskPostIncrement |
+		eaMaskPreDecrement | eaMaskDisplacement | eaMaskIndex |
+		eaMaskAbsoluteShort | eaMaskAbsoluteLong | eaMaskPCDisplacement | eaMaskPCIndex | eaMaskImmediate
+	for opmode := uint16(3); opmode <= 7; opmode += 4 { // 3=word, 7=long
+		match := uint16(0xd000) | (opmode << 6)
+		registerInstruction(adda, match, 0xf1c0, addaSubaMask, addaSubaCycleCalculator())
+
+		match = uint16(0x9000) | (opmode << 6)
+		registerInstruction(suba, match, 0xf1c0, addaSubaMask, addaSubaCycleCalculator())
+	}
+
 	alterableMask := eaMaskDataRegister | eaMaskAddressRegister | eaMaskIndirect |
 		eaMaskPostIncrement | eaMaskPreDecrement | eaMaskDisplacement |
 		eaMaskIndex | eaMaskAbsoluteShort | eaMaskAbsoluteLong
@@ -46,19 +57,6 @@ func init() {
 	registerInstruction(divs, 0x81c0, 0xf1c0, divMulMask, constantCycles(158))
 	registerInstruction(mulu, 0xc0c0, 0xf1c0, divMulMask, constantCycles(70))
 	registerInstruction(muls, 0xc1c0, 0xf1c0, divMulMask, constantCycles(70))
-}
-
-func operandSizeFromOpmode(opmode uint16) Size {
-	switch opmode {
-	case 0, 4:
-		return Byte
-	case 1, 5:
-		return Word
-	case 2, 6:
-		return Long
-	default:
-		return Byte
-	}
 }
 
 func add(cpu *cpu) error {
@@ -76,7 +74,7 @@ func add(cpu *cpu) error {
 			return err
 		}
 
-		src := *udx(cpu) & maskForSize(size)
+		src := *udx(cpu) & size.mask()
 		result, flags := addWithFlags(src, dstVal, size)
 		if err := dst.write(result); err != nil {
 			return err
@@ -95,8 +93,8 @@ func add(cpu *cpu) error {
 	}
 
 	dst := udx(cpu)
-	result, flags := addWithFlags(srcVal, *dst&maskForSize(size), size)
-	*dst = (*dst & ^maskForSize(size)) | result
+	result, flags := addWithFlags(srcVal, *dst&size.mask(), size)
+	*dst = (*dst & ^size.mask()) | result
 
 	cpu.regs.SR = (cpu.regs.SR &^ (srNegative | srZero | srOverflow | srCarry | srExtend)) | flags
 	return nil
@@ -116,7 +114,7 @@ func sub(cpu *cpu) error {
 			return err
 		}
 
-		src := *udx(cpu) & maskForSize(size)
+		src := *udx(cpu) & size.mask()
 		result, flags := subWithFlags(src, dstVal, size)
 		if err := dst.write(result); err != nil {
 			return err
@@ -135,15 +133,15 @@ func sub(cpu *cpu) error {
 	}
 
 	dst := udx(cpu)
-	result, flags := subWithFlags(srcVal, *dst&maskForSize(size), size)
-	*dst = (*dst & ^maskForSize(size)) | result
+	result, flags := subWithFlags(srcVal, *dst&size.mask(), size)
+	*dst = (*dst & ^size.mask()) | result
 
 	cpu.regs.SR = (cpu.regs.SR &^ (srNegative | srZero | srOverflow | srCarry | srExtend)) | flags
 	return nil
 }
 
 func addq(cpu *cpu) error {
-	size := sizeFromQuick(cpu.regs.IR)
+	size := operandSizeFromOpcode(cpu.regs.IR)
 	quick := uint32((cpu.regs.IR >> 9) & 0x7)
 	if quick == 0 {
 		quick = 8
@@ -176,7 +174,7 @@ func addq(cpu *cpu) error {
 }
 
 func subq(cpu *cpu) error {
-	size := sizeFromQuick(cpu.regs.IR)
+	size := operandSizeFromOpcode(cpu.regs.IR)
 	quick := uint32((cpu.regs.IR >> 9) & 0x7)
 	if quick == 0 {
 		quick = 8
@@ -208,43 +206,9 @@ func subq(cpu *cpu) error {
 	return nil
 }
 
-func sizeFromQuick(opcode uint16) Size {
-	switch (opcode >> 6) & 0x3 {
-	case 0:
-		return Byte
-	case 1:
-		return Word
-	default:
-		return Long
-	}
-}
-
-func maskForSize(size Size) uint32 {
-	switch size {
-	case Byte:
-		return 0xff
-	case Word:
-		return 0xffff
-	case Long:
-		return 0xffffffff
-	}
-	return 0xffffffff
-}
-
-func signBit(size Size) uint32 {
-	switch size {
-	case Byte:
-		return 0x80
-	case Word:
-		return 0x8000
-	default:
-		return 0x80000000
-	}
-}
-
 func addWithFlags(src, dst uint32, size Size) (uint32, uint16) {
-	mask := maskForSize(size)
-	sign := signBit(size)
+	mask := size.mask()
+	sign := size.signBit()
 	src &= mask
 	dst &= mask
 	res := (src + dst) & mask
@@ -266,8 +230,8 @@ func addWithFlags(src, dst uint32, size Size) (uint32, uint16) {
 }
 
 func subWithFlags(src, dst uint32, size Size) (uint32, uint16) {
-	mask := maskForSize(size)
-	sign := signBit(size)
+	mask := size.mask()
+	sign := size.signBit()
 	src &= mask
 	dst &= mask
 	res := (dst - src) & mask
@@ -430,4 +394,60 @@ func muls(cpu *cpu) error {
 	}
 	cpu.regs.SR = (cpu.regs.SR &^ (srNegative | srZero | srOverflow | srCarry | srExtend)) | flags
 	return nil
+}
+
+func adda(cpu *cpu) error {
+	size := Word
+	if (cpu.regs.IR>>6)&0x7 == 7 {
+		size = Long
+	}
+
+	src, err := cpu.ResolveSrcEA(size)
+	if err != nil {
+		return err
+	}
+	value, err := src.read()
+	if err != nil {
+		return err
+	}
+
+	if size == Word {
+		value = uint32(int32(int16(value)))
+	}
+
+	*ax(cpu) += value
+	return nil
+}
+
+func suba(cpu *cpu) error {
+	size := Word
+	if (cpu.regs.IR>>6)&0x7 == 7 {
+		size = Long
+	}
+
+	src, err := cpu.ResolveSrcEA(size)
+	if err != nil {
+		return err
+	}
+
+	value, err := src.read()
+	if err != nil {
+		return err
+	}
+
+	if size == Word {
+		value = uint32(int32(int16(value)))
+	}
+
+	*ax(cpu) -= value
+	return nil
+}
+
+func addaSubaCycleCalculator() cycleCalculator {
+	return func(opcode uint16) uint32 {
+		mode := (opcode >> 3) & 0x7
+		reg := opcode & 0x7
+		size := operandSizeFromOpcode(opcode)
+		return 8 + eaAccessCycles(mode, reg, size)
+	}
 }

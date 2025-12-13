@@ -10,7 +10,7 @@ func TestRecursiveFibonacciProgram(t *testing.T) {
         BRA main
 fib:    MOVE.L D0,D1
         SUBQ.L #1,D1
-        BLE.S base
+        BLE.S return
         MOVE.L D0,-(A7)
         SUBQ.L #1,D0
         BSR fib
@@ -21,8 +21,7 @@ fib:    MOVE.L D0,D1
         MOVE.L (A7)+,D2
         MOVE.L (A7)+,D1
         ADD.L D2,D0
-        RTS
-base:   RTS
+return: RTS
 main:   LEA $4000,A0
         MOVEQ #7,D0
         BSR fib
