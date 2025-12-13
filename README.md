@@ -22,9 +22,10 @@ A small Motorola 68000 emulator written in Go. The emulator exposes a CPU core w
 The emulator currently implements the following opcode families with proper condition-code updates and addressing modes appropriate to each instruction:
 
 - **Data movement**: `MOVE.{B/W/L}`, `MOVEA.{W/L}`, `MOVEQ`
-- **Address calculation / stack / flow**: `LEA`, `PEA`, `JSR`, `RTS`, `TRAP #n`, `NOP`, `BRA`, `BSR`, `Bcc`
+- **Address calculation / stack / flow**: `LEA`, `PEA`, `ADDA.{W/L}`, `SUBA.{W/L}`, `JSR`, `RTS`, `TRAP #n`, `TRAPV`, `RESET`, `STOP`, `NOP`, `BRA`, `BSR`, `Bcc`
 - **Arithmetic and loops**: `ADD.{B/W/L}` (both `<ea>,Dn` and `Dn,<ea>` forms), `SUBQ.{B/W/L}`
 - **BCD arithmetic**: `ABCD`, `SBCD`, `NBCD` (register and predecrement memory forms)
+- **Logic and flags**: `CLR.{B/W/L}`, `TST.{B/W/L}`
 - **Shifts and rotates**: `ASL/ASR`, `LSL/LSR`, `ROL/ROR`, `ROXL/ROXR` (register and memory variants with full condition code updates)
 
 ## Roadmap for m68kemu as a computer-emulator core
