@@ -56,6 +56,8 @@ The steps below focus on improving m68kemu itself so it can serve as a reliable 
 
 ## Project layout
 - `doc/M68kOpcodes.pdf` – opcode reference used while implementing and verifying instruction behavior.
+- Instruction handlers are grouped by opcode family in files prefixed with `op_` (for example `op_arithmetic.go` and
+  `op_branch.go`), with matching `op_*_test.go` suites covering their behavior.
 
 ## Development
 1. Ensure you have Go 1.25 or newer installed (see `go.mod`).
