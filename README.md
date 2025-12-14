@@ -26,6 +26,7 @@ The emulator currently implements the following opcode families with proper cond
 - **Arithmetic and loops**: `ADD.{B/W/L}` (both `<ea>,Dn` and `Dn,<ea>` forms), `SUBQ.{B/W/L}`
 - **BCD arithmetic**: `ABCD`, `SBCD`, `NBCD` (register and predecrement memory forms)
 - **Logic and flags**: `CLR.{B/W/L}`, `TST.{B/W/L}`
+- **Bit operations**: `BTST`, `BCHG`, `BCLR`, `BSET`
 - **Shifts and rotates**: `ASL/ASR`, `LSL/LSR`, `ROL/ROR`, `ROXL/ROXR` (register and memory variants with full condition code updates)
 
 ## Roadmap for m68kemu as a computer-emulator core
