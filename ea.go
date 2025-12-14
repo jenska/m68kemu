@@ -339,9 +339,16 @@ func (ea *eaAbsolute) computedAddress() uint32 {
 // immediate
 
 func (ea *eaImmediate) init(cpu *cpu, o Size) (modifier, error) {
-	value, err := cpu.popPc(o)
+	readSize := o
+	if o == Byte {
+		readSize = Word
+	}
+	value, err := cpu.popPc(readSize)
 	if err != nil {
 		return nil, err
+	}
+	if o == Byte {
+		value &= 0xff
 	}
 	ea.value = value
 	return ea, nil
