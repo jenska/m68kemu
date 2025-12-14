@@ -43,3 +43,7 @@ var opSizes = []Size{Byte, Word, Long, Byte, Byte, Word, Long}
 func operandSizeFromOpmode(opmode uint16) Size {
 	return opSizes[opmode&0x7]
 }
+
+func operandSizeFromOpcode(ir uint16) Size {
+	return opSizes[(ir>>6)&0x3]
+}

@@ -60,17 +60,6 @@ func stop(cpu *cpu) error {
 	return nil
 }
 
-func operandSizeFromOpcode(ir uint16) Size {
-	switch (ir >> 6) & 0x3 {
-	case 0:
-		return Byte
-	case 1:
-		return Word
-	default:
-		return Long
-	}
-}
-
 func clrTstCycleCalculator() cycleCalculator {
 	return func(opcode uint16) uint32 {
 		size := operandSizeFromOpcode(opcode)
