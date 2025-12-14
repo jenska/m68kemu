@@ -94,7 +94,7 @@ func bcdAdd(src, dst byte, extend bool) (byte, bool) {
 		sum += 0x60
 	}
 
-	return byte(sum & 0xff), carry
+	return byte(sum), carry
 }
 
 func bcdSub(src, dst byte, extend bool) (byte, bool) {
@@ -115,7 +115,7 @@ func bcdSub(src, dst byte, extend bool) (byte, bool) {
 		diff -= 0x60
 	}
 
-	return byte(diff & 0xff), borrow
+	return byte(diff), borrow
 }
 
 type bcdOperand struct {

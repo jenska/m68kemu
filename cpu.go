@@ -5,10 +5,6 @@ import (
 )
 
 const (
-	Byte Size = 1
-	Word Size = 2
-	Long Size = 4
-
 	XBusError         = 2
 	XAddresError      = 3
 	XIllegal          = 4

@@ -10,7 +10,7 @@ func init() {
 
 func branch(cpu *cpu) error {
 	cond := (cpu.regs.IR >> 8) & 0xf
-	displacement := int32(int8(cpu.regs.IR & 0x00ff))
+	displacement := int32(int8(cpu.regs.IR))
 
 	if displacement == 0 {
 		ext, err := cpu.popPc(Word)

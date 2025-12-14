@@ -2,6 +2,12 @@ package m68kemu
 
 type Size uint32
 
+const (
+	Byte Size = 1
+	Word Size = 2
+	Long Size = 4
+)
+
 func (s Size) mask() uint32 {
 	switch s {
 	case Byte:

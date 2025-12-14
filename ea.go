@@ -1,7 +1,6 @@
 package m68kemu
 
 import (
-	"fmt"
 	"unsafe"
 )
 
@@ -174,27 +173,13 @@ func (ea *eaRegister) init(cpu *cpu, o Size) (modifier, error) {
 }
 
 func (ea *eaRegister) read() (uint32, error) {
-	switch ea.size {
-	case Byte:
-		return *ea.areg(ea.cpu) & 0xff, nil
-	case Word:
-		return *ea.areg(ea.cpu) & 0xffff, nil
-	case Long:
-		return *ea.areg(ea.cpu), nil
-	}
-	return 0, fmt.Errorf("unkown size %d", ea.size)
+	return *ea.areg(ea.cpu) & ea.size.mask(), nil
 }
 
 func (ea *eaRegister) write(v uint32) error {
 	reg := ea.areg(ea.cpu)
-	switch ea.size {
-	case Byte:
-		*reg = (*reg & 0xffffff00) | (v & 0xff)
-	case Word:
-		*reg = (*reg & 0xffff0000) | (v & 0xffff)
-	case Long:
-		*reg = v
-	}
+	mask := ea.size.mask()
+	*reg = (*reg & ^mask) | (v & mask)
 	return nil
 }
 
@@ -375,18 +360,12 @@ func (ea *eaStatusRegister) init(cpu *cpu, o Size) (modifier, error) {
 }
 
 func (ea *eaStatusRegister) read() (uint32, error) {
-	if ea.size == Byte {
-		return uint32(*ea.sr & 0xff), nil
-	}
-	return uint32(*ea.sr), nil
+	return uint32(*ea.sr) & ea.size.mask(), nil
 }
 
 func (ea *eaStatusRegister) write(v uint32) error {
-	if ea.size == Byte {
-		*ea.sr = (*ea.sr & 0xff00) | (uint16(v) & 0xff)
-	} else {
-		*ea.sr = uint16(v)
-	}
+	mask := uint16(ea.size.mask())
+	*ea.sr = (*ea.sr & ^mask) | (uint16(v) & mask)
 	return nil
 }
 
