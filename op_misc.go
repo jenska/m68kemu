@@ -19,6 +19,9 @@ func init() {
 	registerExgInstruction(0xc140, constantCycles(6))
 	registerExgInstruction(0xc148, constantCycles(6))
 	registerExgInstruction(0xc188, constantCycles(8))
+
+	// ILLEGAL
+	registerInstruction(illegalInstruction, 0x4afc, 0xffff, 0, constantCycles(4))
 }
 
 func negInstruction(cpu *cpu) error {
@@ -146,4 +149,8 @@ func registerExgInstruction(match uint16, calc cycleCalculator) {
 			}
 		}
 	}
+}
+
+func illegalInstruction(cpu *cpu) error {
+	return cpu.exception(XIllegal)
 }

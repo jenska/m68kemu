@@ -3,7 +3,7 @@ package m68kemu
 import "testing"
 
 func TestTrapvResetAndStop(t *testing.T) {
-	cpu, ram := newEnvironment(t)
+        cpu, ram := newEnvironment(t)
 
 	ram.Write(Long, 7<<2, 0x2222)
 	ram.Write(Long, (autoVectorBase+2)<<2, 0x2008)
@@ -60,7 +60,39 @@ func TestTrapvResetAndStop(t *testing.T) {
 	if cpu.stopped {
 		t.Fatalf("CPU should resume after interrupt")
 	}
-	if cpu.regs.PC != 0x2008 {
-		t.Fatalf("expected autovector handler at 0x2008, PC=%04x", cpu.regs.PC)
-	}
+        if cpu.regs.PC != 0x2008 {
+                t.Fatalf("expected autovector handler at 0x2008, PC=%04x", cpu.regs.PC)
+        }
+}
+
+func TestRtrRestoresPcAndCcr(t *testing.T) {
+        cpu, ram := newEnvironment(t)
+
+        cpu.regs.SR = srSupervisor | 0x0700
+        stackBase := cpu.regs.A[7]
+
+        returnCCR := uint16(0x0033)
+        returnPC := uint32(0x004000)
+
+        ram.Write(Word, stackBase, uint32(returnCCR))
+        ram.Write(Long, stackBase+uint32(Word), returnPC)
+
+        code := assemble(t, "RTR")
+        for i, b := range code {
+                ram.Write(Byte, cpu.regs.PC+uint32(i), uint32(b))
+        }
+
+        if err := cpu.Step(); err != nil {
+                t.Fatalf("RTR failed: %v", err)
+        }
+        if cpu.regs.PC != returnPC {
+                t.Fatalf("RTR should restore PC, got %08x want %08x", cpu.regs.PC, returnPC)
+        }
+        expectedSR := uint16(0x2733)
+        if cpu.regs.SR != expectedSR {
+                t.Fatalf("RTR should restore CCR and preserve upper SR bits, got %04x want %04x", cpu.regs.SR, expectedSR)
+        }
+        if cpu.regs.A[7] != stackBase+uint32(Word+Long) {
+                t.Fatalf("RTR should advance SP, got %04x want %04x", cpu.regs.A[7], stackBase+uint32(Word+Long))
+        }
 }
