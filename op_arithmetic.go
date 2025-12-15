@@ -47,8 +47,11 @@ func init() {
 	alterableMask := eaMaskDataRegister | eaMaskAddressRegister | eaMaskIndirect |
 		eaMaskPostIncrement | eaMaskPreDecrement | eaMaskDisplacement |
 		eaMaskIndex | eaMaskAbsoluteShort | eaMaskAbsoluteLong
-	registerInstruction(addq, 0x5000, 0xf100, alterableMask, addqSubqCycleCalculator())
-	registerInstruction(subq, 0x5100, 0xf100, alterableMask, addqSubqCycleCalculator())
+
+	for size := uint16(0); size < 3; size++ {
+		registerInstruction(addq, 0x5000|(size<<6), 0xf1c0, alterableMask, addqSubqCycleCalculator())
+		registerInstruction(subq, 0x5100|(size<<6), 0xf1c0, alterableMask, addqSubqCycleCalculator())
+	}
 
 	divMulMask := eaMaskDataRegister | eaMaskIndirect | eaMaskPostIncrement |
 		eaMaskPreDecrement | eaMaskDisplacement | eaMaskIndex |
