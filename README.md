@@ -21,11 +21,11 @@ A small Motorola 68000 emulator written in Go. The emulator exposes a CPU core w
 ## Supported instructions
 The emulator currently implements the following opcode families with proper condition-code updates and addressing modes appropriate to each instruction:
 
-- **Data movement**: `MOVE.{B/W/L}`, `MOVEA.{W/L}`, `MOVEQ`, `MOVEM.{W/L}`
-- **Address calculation / stack / flow**: `LEA`, `PEA`, `ADDA.{W/L}`, `SUBA.{W/L}`, `JSR`, `RTS`, `TRAP #n`, `TRAPV`, `RESET`, `STOP`, `NOP`, `BRA`, `BSR`, `Bcc`, `DBcc`
+- **Data movement**: `MOVE.{B/W/L}`, `MOVEA.{W/L}`, `MOVEQ`, `MOVEM.{W/L}`, `MOVE USP`
+- **Address calculation / stack / flow**: `LEA`, `PEA`, `ADDA.{W/L}`, `SUBA.{W/L}`, `JSR`, `JMP`, `LINK`, `UNLK`, `RTS`, `TRAP #n`, `TRAPV`, `RESET`, `STOP`, `NOP`, `BRA`, `BSR`, `Bcc`, `DBcc`
 - **Arithmetic and loops**: `ADD.{B/W/L}` (both `<ea>,Dn` and `Dn,<ea>` forms), `SUBQ.{B/W/L}`
 - **BCD arithmetic**: `ABCD`, `SBCD`, `NBCD` (register and predecrement memory forms)
-- **Logic and flags**: `CLR.{B/W/L}`, `TST.{B/W/L}`, `EXT.W`, `EXT.L`, `TAS`
+- **Logic and flags**: `CLR.{B/W/L}`, `TST.{B/W/L}`, `EXT.W`, `EXT.L`, `TAS`, `CHK`
 - **Bit operations**: `BTST`, `BCHG`, `BCLR`, `BSET`
 - **Shifts and rotates**: `ASL/ASR`, `LSL/LSR`, `ROL/ROR`, `ROXL/ROXR` (register and memory variants with full condition code updates)
 
