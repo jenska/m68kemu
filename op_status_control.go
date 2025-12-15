@@ -8,9 +8,9 @@ func init() {
 	registerInstruction(oriToCcr, 0x003c, 0xffff, 0, constantCycles(20))
 	registerInstruction(oriToSr, 0x007c, 0xffff, 0, constantCycles(20))
 	registerInstruction(andiToCcr, 0x023c, 0xffff, 0, constantCycles(20))
-        registerInstruction(andiToSr, 0x027c, 0xffff, 0, constantCycles(20))
-        registerInstruction(eoriToCcr, 0x0a3c, 0xffff, 0, constantCycles(20))
-        registerInstruction(eoriToSr, 0x0a7c, 0xffff, 0, constantCycles(20))
+	registerInstruction(andiToSr, 0x027c, 0xffff, 0, constantCycles(20))
+	registerInstruction(eoriToCcr, 0x0a3c, 0xffff, 0, constantCycles(20))
+	registerInstruction(eoriToSr, 0x0a7c, 0xffff, 0, constantCycles(20))
 
 	const controlSourceMask = eaMaskDataRegister | eaMaskIndirect | eaMaskPostIncrement |
 		eaMaskPreDecrement | eaMaskDisplacement | eaMaskIndex |
@@ -24,8 +24,8 @@ func init() {
 	registerInstruction(moveToCcr, 0x44c0, 0xffc0, controlSourceMask, moveControlCycleCalculator(Byte))
 	registerInstruction(moveToSr, 0x46c0, 0xffc0, controlSourceMask, moveControlCycleCalculator(Word))
 
-        registerInstruction(rte, 0x4e73, 0xffff, 0, constantCycles(20))
-        registerInstruction(rtr, 0x4e77, 0xffff, 0, constantCycles(20))
+	registerInstruction(rte, 0x4e73, 0xffff, 0, constantCycles(20))
+	registerInstruction(rtr, 0x4e77, 0xffff, 0, constantCycles(20))
 }
 
 func trapv(cpu *cpu) error {
@@ -147,10 +147,10 @@ func moveToSr(cpu *cpu) error {
 }
 
 func rte(cpu *cpu) error {
-        if cpu.regs.SR&srSupervisor == 0 {
-                return cpu.exception(XPrivViolation)
-        }
-        newSR, err := cpu.pop(Word)
+	if cpu.regs.SR&srSupervisor == 0 {
+		return cpu.exception(XPrivViolation)
+	}
+	newSR, err := cpu.pop(Word)
 	if err != nil {
 		return err
 	}
@@ -161,22 +161,22 @@ func rte(cpu *cpu) error {
 	if _, err := cpu.pop(Word); err != nil {
 		return err
 	}
-        cpu.setSR(uint16(newSR))
-        cpu.regs.PC = pc
-        return nil
+	cpu.setSR(uint16(newSR))
+	cpu.regs.PC = pc
+	return nil
 }
 
 func rtr(cpu *cpu) error {
-        ccr, err := cpu.pop(Word)
-        if err != nil {
-                return err
-        }
-        pc, err := cpu.pop(Long)
-        if err != nil {
-                return err
-        }
-        preserved := cpu.regs.SR & 0xff00
-        cpu.setSR(preserved | uint16(ccr&0xff))
-        cpu.regs.PC = pc
-        return nil
+	ccr, err := cpu.pop(Word)
+	if err != nil {
+		return err
+	}
+	pc, err := cpu.pop(Long)
+	if err != nil {
+		return err
+	}
+	preserved := cpu.regs.SR & 0xff00
+	cpu.setSR(preserved | uint16(ccr&0xff))
+	cpu.regs.PC = pc
+	return nil
 }

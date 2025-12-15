@@ -494,9 +494,9 @@ func registerInstruction(ins instruction, match, mask uint16, eaMask uint16, cal
 	for value := uint16(0); ; {
 		index := match | value
 		if validEA(index, eaMask) {
-                        if opcodeTable[index] != nil {
-                                panic(fmt.Errorf("instruction 0x%04x already registered (existing %p new %p)", index, opcodeTable[index], ins))
-                        }
+			if opcodeTable[index] != nil {
+				panic(fmt.Errorf("instruction 0x%04x already registered (existing %p new %p)", index, opcodeTable[index], ins))
+			}
 			opcodeTable[index] = ins
 			if calc != nil {
 				opcodeCycleTable[index] = calc(index)

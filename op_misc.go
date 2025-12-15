@@ -1,15 +1,6 @@
 package m68kemu
 
 func init() {
-	alterableNoAddr := eaMaskDataRegister | eaMaskIndirect | eaMaskPostIncrement |
-		eaMaskPreDecrement | eaMaskDisplacement | eaMaskIndex |
-		eaMaskAbsoluteShort | eaMaskAbsoluteLong
-
-	for size := uint16(0); size < 3; size++ {
-		match := uint16(0x4400) | (size << 6)
-		registerInstruction(negInstruction, match, 0xffc0, alterableNoAddr, clrTstCycleCalculator())
-	}
-
 	registerInstruction(swapInstruction, 0x4840, 0xfff8, 0, constantCycles(4))
 	registerInstruction(extInstruction, 0x4880, 0xfff8, 0, constantCycles(4))
 	registerInstruction(extInstruction, 0x48c0, 0xfff8, 0, constantCycles(4))
@@ -20,28 +11,13 @@ func init() {
 	registerExgInstruction(0xc148, constantCycles(6))
 	registerExgInstruction(0xc188, constantCycles(8))
 
-	// ILLEGAL
 	registerInstruction(illegalInstruction, 0x4afc, 0xffff, 0, constantCycles(4))
+	registerInstruction(nop, 0x4e71, 0xffff, 0, constantCycles(4))
 }
 
-func negInstruction(cpu *cpu) error {
-	size := operandSizeFromOpcode(cpu.regs.IR)
-
-	dst, err := cpu.ResolveSrcEA(size)
-	if err != nil {
-		return err
-	}
-	value, err := dst.read()
-	if err != nil {
-		return err
-	}
-
-	result, flags := subWithFlags(value, 0, size)
-	if err := dst.write(result); err != nil {
-		return err
-	}
-
-	cpu.regs.SR = (cpu.regs.SR &^ (srNegative | srZero | srOverflow | srCarry | srExtend)) | flags
+// nop implements the 68000 NOP instruction (opcode 0x4E71).
+// It performs no operation and leaves all condition codes unchanged.
+func nop(cpu *cpu) error {
 	return nil
 }
 

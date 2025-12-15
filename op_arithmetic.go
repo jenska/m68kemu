@@ -60,6 +60,15 @@ func init() {
 	registerInstruction(divs, 0x81c0, 0xf1c0, divMulMask, constantCycles(158))
 	registerInstruction(mulu, 0xc0c0, 0xf1c0, divMulMask, constantCycles(70))
 	registerInstruction(muls, 0xc1c0, 0xf1c0, divMulMask, constantCycles(70))
+
+	alterableNoAddr := eaMaskDataRegister | eaMaskIndirect | eaMaskPostIncrement |
+		eaMaskPreDecrement | eaMaskDisplacement | eaMaskIndex |
+		eaMaskAbsoluteShort | eaMaskAbsoluteLong
+
+	for size := uint16(0); size < 3; size++ {
+		match := uint16(0x4400) | (size << 6)
+		registerInstruction(negInstruction, match, 0xffc0, alterableNoAddr, clrTstCycleCalculator())
+	}
 }
 
 func add(cpu *cpu) error {
@@ -453,4 +462,25 @@ func addaSubaCycleCalculator() cycleCalculator {
 		size := operandSizeFromOpcode(opcode)
 		return 8 + eaAccessCycles(mode, reg, size)
 	}
+}
+
+func negInstruction(cpu *cpu) error {
+	size := operandSizeFromOpcode(cpu.regs.IR)
+
+	dst, err := cpu.ResolveSrcEA(size)
+	if err != nil {
+		return err
+	}
+	value, err := dst.read()
+	if err != nil {
+		return err
+	}
+
+	result, flags := subWithFlags(value, 0, size)
+	if err := dst.write(result); err != nil {
+		return err
+	}
+
+	cpu.regs.SR = (cpu.regs.SR &^ (srNegative | srZero | srOverflow | srCarry | srExtend)) | flags
+	return nil
 }
