@@ -11,6 +11,11 @@ func init() {
 		match := uint16(0x50c8) | (cond << 8)
 		registerInstruction(dbcc, match, 0xfff8, 0, constantCycles(12))
 	}
+
+	// Scc
+	registerInstruction(scc, 0x50c0, 0xf0c0, eaMaskDataRegister|eaMaskIndirect|
+		eaMaskPostIncrement|eaMaskPreDecrement|eaMaskDisplacement|eaMaskIndex|
+		eaMaskAbsoluteShort|eaMaskAbsoluteLong, sccCycleCalculator())
 }
 
 func branch(cpu *cpu) error {
@@ -25,7 +30,7 @@ func branch(cpu *cpu) error {
 		displacement = int32(int16(ext))
 	}
 
-        taken := cond == 0x0 || cond == 0x1 || conditionTrue(cpu, cond)
+	taken := cond == 0x0 || cond == 0x1 || conditionTrue(cpu, cond)
 
 	if taken {
 		if cond == 0x1 { // BSR pushes return address
@@ -98,4 +103,30 @@ func conditionTrue(cpu *cpu, cond uint16) bool {
 	}
 
 	return false
+}
+
+func scc(cpu *cpu) error {
+	cond := (cpu.regs.IR >> 8) & 0xf
+
+	dst, err := cpu.ResolveSrcEA(Byte)
+	if err != nil {
+		return err
+	}
+
+	if cond == 0 || conditionTrue(cpu, cond) {
+		return dst.write(0xff)
+	}
+
+	return dst.write(0x00)
+}
+
+func sccCycleCalculator() cycleCalculator {
+	return func(opcode uint16) uint32 {
+		mode := (opcode >> 3) & 0x7
+		reg := opcode & 0x7
+		if mode == 0 {
+			return 6
+		}
+		return 8 + eaAccessCycles(mode, reg, Byte)
+	}
 }
