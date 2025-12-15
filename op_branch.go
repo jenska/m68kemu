@@ -6,6 +6,11 @@ func init() {
 		match := uint16(0x6000) | (cond << 8)
 		registerInstruction(branch, match, 0xff00, 0, constantCycles(10))
 	}
+
+	for cond := uint16(0); cond < 16; cond++ {
+		match := uint16(0x50c8) | (cond << 8)
+		registerInstruction(dbcc, match, 0xfff8, 0, constantCycles(12))
+	}
 }
 
 func branch(cpu *cpu) error {
@@ -20,41 +25,7 @@ func branch(cpu *cpu) error {
 		displacement = int32(int16(ext))
 	}
 
-	taken := false
-	switch cond {
-	case 0x0: // BRA
-		taken = true
-	case 0x1: // BSR
-		taken = true
-	case 0x2: // BHI (C=0 and Z=0)
-		taken = (cpu.regs.SR & (srCarry | srZero)) == 0
-	case 0x3: // BLS (C=1 or Z=1)
-		taken = (cpu.regs.SR & (srCarry | srZero)) != 0
-	case 0x4: // BCC
-		taken = (cpu.regs.SR & srCarry) == 0
-	case 0x5: // BCS
-		taken = (cpu.regs.SR & srCarry) != 0
-	case 0x6: // BNE
-		taken = (cpu.regs.SR & srZero) == 0
-	case 0x7: // BEQ
-		taken = (cpu.regs.SR & srZero) != 0
-	case 0x8: // BVC
-		taken = (cpu.regs.SR & srOverflow) == 0
-	case 0x9: // BVS
-		taken = (cpu.regs.SR & srOverflow) != 0
-	case 0xa: // BPL
-		taken = (cpu.regs.SR & srNegative) == 0
-	case 0xb: // BMI
-		taken = (cpu.regs.SR & srNegative) != 0
-	case 0xc: // BGE
-		taken = ((cpu.regs.SR & srNegative) >> 3) == ((cpu.regs.SR & srOverflow) >> 1)
-	case 0xd: // BLT
-		taken = ((cpu.regs.SR & srNegative) >> 3) != ((cpu.regs.SR & srOverflow) >> 1)
-	case 0xe: // BGT
-		taken = (cpu.regs.SR&srZero) == 0 && ((cpu.regs.SR&srNegative)>>3) == ((cpu.regs.SR&srOverflow)>>1)
-	case 0xf: // BLE
-		taken = (cpu.regs.SR&srZero) != 0 || ((cpu.regs.SR&srNegative)>>3) != ((cpu.regs.SR&srOverflow)>>1)
-	}
+        taken := cond == 0x0 || cond == 0x1 || conditionTrue(cpu, cond)
 
 	if taken {
 		if cond == 0x1 { // BSR pushes return address
@@ -65,4 +36,66 @@ func branch(cpu *cpu) error {
 		cpu.regs.PC = uint32(int32(cpu.regs.PC) + displacement)
 	}
 	return nil
+}
+
+func dbcc(cpu *cpu) error {
+	cond := (cpu.regs.IR >> 8) & 0xf
+
+	displacement, err := cpu.popPc(Word)
+	if err != nil {
+		return err
+	}
+
+	if conditionTrue(cpu, cond) {
+		return nil
+	}
+
+	reg := cpu.regs.IR & 0x7
+	counter := uint16(cpu.regs.D[reg]) - 1
+	cpu.regs.D[reg] = (cpu.regs.D[reg] &^ 0xffff) | int32(counter)
+
+	if counter != 0xffff {
+		cpu.regs.PC = uint32(int32(cpu.regs.PC) + int32(int16(displacement)))
+	}
+
+	return nil
+}
+
+func conditionTrue(cpu *cpu, cond uint16) bool {
+	switch cond {
+	case 0x0: // True (BRA/BSR)
+		return true
+	case 0x1: // False
+		return false
+	case 0x2: // HI (C=0 and Z=0)
+		return (cpu.regs.SR & (srCarry | srZero)) == 0
+	case 0x3: // LS (C=1 or Z=1)
+		return (cpu.regs.SR & (srCarry | srZero)) != 0
+	case 0x4: // CC
+		return (cpu.regs.SR & srCarry) == 0
+	case 0x5: // CS
+		return (cpu.regs.SR & srCarry) != 0
+	case 0x6: // NE
+		return (cpu.regs.SR & srZero) == 0
+	case 0x7: // EQ
+		return (cpu.regs.SR & srZero) != 0
+	case 0x8: // VC
+		return (cpu.regs.SR & srOverflow) == 0
+	case 0x9: // VS
+		return (cpu.regs.SR & srOverflow) != 0
+	case 0xa: // PL
+		return (cpu.regs.SR & srNegative) == 0
+	case 0xb: // MI
+		return (cpu.regs.SR & srNegative) != 0
+	case 0xc: // GE
+		return ((cpu.regs.SR & srNegative) >> 3) == ((cpu.regs.SR & srOverflow) >> 1)
+	case 0xd: // LT
+		return ((cpu.regs.SR & srNegative) >> 3) != ((cpu.regs.SR & srOverflow) >> 1)
+	case 0xe: // GT
+		return (cpu.regs.SR&srZero) == 0 && ((cpu.regs.SR&srNegative)>>3) == ((cpu.regs.SR&srOverflow)>>1)
+	case 0xf: // LE
+		return (cpu.regs.SR&srZero) != 0 || ((cpu.regs.SR&srNegative)>>3) != ((cpu.regs.SR&srOverflow)>>1)
+	}
+
+	return false
 }

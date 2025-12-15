@@ -13,6 +13,8 @@ func init() {
 	registerInstruction(swapInstruction, 0x4840, 0xfff8, 0, constantCycles(4))
 	registerInstruction(extInstruction, 0x4880, 0xfff8, 0, constantCycles(4))
 	registerInstruction(extInstruction, 0x48c0, 0xfff8, 0, constantCycles(4))
+	registerInstruction(tasInstruction, 0x4ac0, 0xffc0, eaMaskDataRegister|eaMaskIndirect|eaMaskPostIncrement|
+		eaMaskPreDecrement|eaMaskDisplacement|eaMaskIndex|eaMaskAbsoluteShort|eaMaskAbsoluteLong, clrTstCycleCalculator())
 
 	registerExgInstruction(0xc140, constantCycles(6))
 	registerExgInstruction(0xc148, constantCycles(6))
@@ -107,6 +109,22 @@ func exgInstruction(cpu *cpu) error {
 	}
 
 	return nil
+}
+
+func tasInstruction(cpu *cpu) error {
+	dst, err := cpu.ResolveSrcEA(Byte)
+	if err != nil {
+		return err
+	}
+
+	value, err := dst.read()
+	if err != nil {
+		return err
+	}
+
+	updateNzClearVc(cpu, value, Byte)
+
+	return dst.write(value | 0x80)
 }
 
 func updateNzClearVc(cpu *cpu, result uint32, size Size) {
