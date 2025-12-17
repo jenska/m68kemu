@@ -1,6 +1,6 @@
 # m68kemu
 
-A small Motorola 68000 emulator written in Go. The emulator exposes a CPU core with a programmable memory bus, effective-address helpers, a level-aware interrupt controller (including autovectors), and a growing set of instructions for experimenting with 68k code. Everything is packaged as a Go library so it can be embedded inside a larger machine emulator or used directly in tests and small tools.
+A small Motorola 68000 emulator written in Go. The emulator exposes a CPU core with a programmable memory bus, effective-address helpers, a level-aware interrupt controller (including autovectors), and a complete implementation of the 68000 instruction set for experimenting with 68k code. Everything is packaged as a Go library so it can be embedded inside a larger machine emulator or used directly in tests and small tools.
 
 ## Features
 - **Accurate CPU core**
@@ -19,15 +19,7 @@ A small Motorola 68000 emulator written in Go. The emulator exposes a CPU core w
   - Reset behavior that clears memory devices and initializes stack pointers from the reset vector in memory.
 
 ## Supported instructions
-The emulator currently implements the following opcode families with proper condition-code updates and addressing modes appropriate to each instruction:
-
-- **Data movement**: `MOVE.{B/W/L}`, `MOVEA.{W/L}`, `MOVEQ`, `MOVEM.{W/L}`, `MOVE USP`
-- **Address calculation / stack / flow**: `LEA`, `PEA`, `ADDA.{W/L}`, `SUBA.{W/L}`, `JSR`, `JMP`, `LINK`, `UNLK`, `RTS`, `TRAP #n`, `TRAPV`, `RESET`, `STOP`, `NOP`, `BRA`, `BSR`, `Bcc`, `DBcc`
-- **Arithmetic and loops**: `ADD.{B/W/L}` (both `<ea>,Dn` and `Dn,<ea>` forms), `SUBQ.{B/W/L}`
-- **BCD arithmetic**: `ABCD`, `SBCD`, `NBCD` (register and predecrement memory forms)
-- **Logic and flags**: `CLR.{B/W/L}`, `TST.{B/W/L}`, `EXT.W`, `EXT.L`, `TAS`, `CHK`
-- **Bit operations**: `BTST`, `BCHG`, `BCLR`, `BSET`
-- **Shifts and rotates**: `ASL/ASR`, `LSL/LSR`, `ROL/ROR`, `ROXL/ROXR` (register and memory variants with full condition code updates)
+The emulator implements the full 68000 instruction set with accurate condition-code updates, status register transitions, privilege enforcement, addressing modes, and exception behavior. All arithmetic, logic, control-flow, bit manipulation, BCD, shift/rotate, and data-movement opcodes are present.
 
 ## Roadmap for m68kemu as a computer-emulator core
 The steps below focus on improving m68kemu itself so it can serve as a reliable 68000 subsystem inside a broader computer emulator.
@@ -147,6 +139,9 @@ main:   LEA $4000,A0
         BSR fib
         MOVE.L D0,(A0)
 ```
+
+### Quicksort demo
+`testdata/qsort.s` contains a longer 68000 example that performs an in-place quicksort of a longword array using a recursive `qsort` routine. The program starts at `$2000`, sorts the array defined at the bottom of the file, and then loops forever. Assemble the source, load it into RAM at the reset vector, and let the emulator step until the idle loop to verify the sorted output.
 
 ### Tracing and breakpoints
 Tracing can be enabled via the exported API by installing a tracer callback on the CPU. Breakpoints and watchpoints halt execution (or invoke callbacks) when an instruction is executed or when a specific address is read or written:
