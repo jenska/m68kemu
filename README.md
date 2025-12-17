@@ -143,6 +143,14 @@ main:   LEA $4000,A0
 ### Quicksort demo
 `testdata/qsort.s` contains a longer 68000 example that performs an in-place quicksort of a longword array using a recursive `qsort` routine. The program starts at `$2000`, sorts the array defined at the bottom of the file, and then loops forever. Assemble the source, load it into RAM at the reset vector, and let the emulator step until the idle loop to verify the sorted output.
 
+You can run the sample end-to-end with the included helper application:
+
+```sh
+go run ./cmd/qsortdemo
+```
+
+The program assembles `testdata/qsort.s`, loads it at `$2000`, and executes until it falls into the idle `BRA halt` loop. The sorted longwords are printed from the base address left in `A0` alongside the total instruction and cycle counts.
+
 ### Tracing and breakpoints
 Tracing can be enabled via the exported API by installing a tracer callback on the CPU. Breakpoints and watchpoints halt execution (or invoke callbacks) when an instruction is executed or when a specific address is read or written:
 
