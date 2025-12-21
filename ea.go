@@ -425,17 +425,22 @@ func ix68000(c *cpu, a uint32) (uint32, error) {
 		return 0, err
 	}
 
-	var xn int32
-	index := ext >> 12
-	if index < 8 {
-		xn = c.regs.D[index]
+	indexReg := (ext >> 12) & 0x7
+	useAddressReg := (ext & 0x8000) != 0
+	useLong := (ext & 0x0800) != 0
+	displacement := int32(int8(ext))
+
+	var index int32
+	if useAddressReg {
+		index = int32(c.regs.A[indexReg])
 	} else {
-		xn = int32(c.regs.A[index-8])
+		index = c.regs.D[indexReg]
 	}
-	if (ext & 0x800) == 0 {
-		xn = int32(int16(ext))
+	if !useLong {
+		index = int32(int16(index))
 	}
-	return uint32(int32(a) + xn + int32(int8(ext))), nil
+
+	return uint32(int32(a) + index + displacement), nil
 }
 
 func eaAccessCycles(mode, reg uint16, size Size) uint32 {
