@@ -1,8 +1,8 @@
         ; Quick sort demo for m68kemu
         ; Sorts the longword array defined at the end of the file in place
 
-        ORG     $2000
-start:  LEA     array,A0           ; A0 points to the start of the array
+        .ORG     $2000
+start:  LEA     array(PC),A0           ; A0 points to the start of the array
         MOVEQ   #0,D6              ; low index
         MOVE.L  #(array_end-array)/4-1,D7
         BSR     qsort
@@ -78,5 +78,5 @@ qreturn:
         RTS
 
         EVEN
-array:  DC.L    9,1,7,3,8,2,6,5,4,0
+array:  LONG    9,1,7,3,8,2,6,5,4,0
 array_end:
