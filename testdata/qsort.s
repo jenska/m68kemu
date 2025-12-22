@@ -1,8 +1,8 @@
         ; Quick sort demo for m68kemu
         ; Sorts the longword array defined at the end of the file in place
 
-        .ORG     $2000
-start:  LEA     array(PC),A0           ; A0 points to the start of the array
+.ORG     $2000
+start:  LEA     array,A0               ; A0 points to the start of the array
         MOVEQ   #0,D6              ; low index
         MOVE.L  #(array_end-array)/4-1,D7
         BSR     qsort
@@ -63,13 +63,13 @@ right_done:
 partition_exit:
         MOVE.L  D7,-(A7)           ; save original high for the right branch
         CMP.L   D4,D6
-        BLE.S   skip_left
+        BGE.S   skip_left
         MOVE.L  D4,D7              ; high = j
         BSR     qsort              ; sort the left partition
 skip_left:
         MOVE.L  (A7)+,D7
         CMP.L   D7,D3
-        BLE.S   skip_right
+        BGE.S   skip_right
         MOVE.L  D3,D6              ; low = i
         BSR     qsort              ; sort the right partition
 skip_right:

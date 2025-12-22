@@ -1,7 +1,7 @@
 package m68kemu
 
 func init() {
-	cmpEAMask := eaMaskDataRegister | eaMaskIndirect | eaMaskPostIncrement |
+	cmpEAMask := eaMaskDataRegister | eaMaskAddressRegister | eaMaskIndirect | eaMaskPostIncrement |
 		eaMaskPreDecrement | eaMaskDisplacement | eaMaskIndex |
 		eaMaskAbsoluteShort | eaMaskAbsoluteLong | eaMaskImmediate |
 		eaMaskPCDisplacement | eaMaskPCIndex
