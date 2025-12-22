@@ -123,7 +123,7 @@ func (b *Bus) findDevice(address uint32) Device {
 
 func (b *Bus) validateAlignment(address uint32, s Size) error {
 	if (s == Word || s == Long) && address&1 != 0 {
-		return BusError(address)
+		return AddressError(address)
 	}
 	return nil
 }

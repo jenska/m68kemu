@@ -80,12 +80,12 @@ func updateBCDFlags(cpu *cpu, result byte, carry bool, prevZero bool, propagateZ
 }
 
 func bcdAdd(src, dst byte, extend bool) (byte, bool) {
-	sum := int(src) + int(dst)
-	if extend {
-		sum++
-	}
+	// Calculate binary sum of low nibbles to detect half-carry
+	lo := (int(src) & 0x0F) + (int(dst) & 0x0F) + int(boolToUint32(extend))
+	sum := int(src) + int(dst) + int(boolToUint32(extend))
 
-	if (sum & 0x0f) > 9 {
+	// Adjust if low nibble overflowed (>9) or half-carry occurred
+	if lo > 9 {
 		sum += 0x06
 	}
 

@@ -18,10 +18,10 @@ func TestBusAlignmentErrors(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			_, err := bus.Read(tt.size, tt.address)
-			expectBusError(t, err)
+			expectAddressError(t, err)
 
 			err = bus.Write(tt.size, tt.address, 0xFF)
-			expectBusError(t, err)
+			expectAddressError(t, err)
 		})
 	}
 

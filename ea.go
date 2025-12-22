@@ -212,7 +212,11 @@ func (ea *eaRegisterIndirect) computedAddress() uint32 {
 
 func (ea *eaPostIncrement) init(cpu *cpu, o Size) (modifier, error) {
 	ea.cpu, ea.size, ea.address = cpu, o, *ea.areg(cpu)
-	*ea.areg(cpu) += uint32(o)
+	incr := uint32(o)
+	if o == Byte && ea.areg(cpu) == &cpu.regs.A[7] {
+		incr = 2
+	}
+	*ea.areg(cpu) += incr
 	return ea, nil
 }
 
@@ -228,7 +232,11 @@ func (ea *eaPostIncrement) write(v uint32) error {
 // Pre decrement
 
 func (ea *eaPreDecrement) init(cpu *cpu, o Size) (modifier, error) {
-	*ea.areg(cpu) -= uint32(o)
+	decr := uint32(o)
+	if o == Byte && ea.areg(cpu) == &cpu.regs.A[7] {
+		decr = 2
+	}
+	*ea.areg(cpu) -= decr
 	ea.cpu, ea.size, ea.address = cpu, o, *ea.areg(cpu)
 	return ea, nil
 }
