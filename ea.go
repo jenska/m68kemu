@@ -128,7 +128,6 @@ var (
 	}
 )
 
-// TODO add cycles
 func (cpu *cpu) ResolveSrcEA(o Size) (modifier, error) {
 	mode := (cpu.regs.IR >> 3) & 0x07
 	if mode < 7 {
@@ -137,7 +136,6 @@ func (cpu *cpu) ResolveSrcEA(o Size) (modifier, error) {
 	return eaSrc[mode+y(cpu.regs.IR)].init(cpu, o)
 }
 
-// TODO add cycless
 func (cpu *cpu) ResolveSrcEA2(o Size) (modifier, error) {
 	mode := (cpu.regs.IR >> 3) & 0x07
 	if mode < 7 {

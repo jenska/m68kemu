@@ -5,6 +5,7 @@ import (
 )
 
 const (
+	Version           = "1.0.0"
 	XBusError         = 2
 	XAddressError     = 3
 	XIllegal          = 4
@@ -132,8 +133,7 @@ const (
 )
 
 func (regs *Registers) String() string {
-	// TODO show IR as disassembly
-	result := fmt.Sprintf("SR %04x PC %08x USP %08x SSP %08x SP %08x\n", regs.SR, regs.PC, regs.USP, regs.SSP, regs.A[7])
+	result := fmt.Sprintf("SR %04x PC %08x USP %08x SSP %08x SP %08x IR %04x\n", regs.SR, regs.PC, regs.USP, regs.SSP, regs.A[7], regs.IR)
 	for i := range regs.D {
 		result += fmt.Sprintf("D%d %08x ", i, uint32(regs.D[i]))
 	}
