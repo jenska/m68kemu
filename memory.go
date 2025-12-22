@@ -1,7 +1,6 @@
 package m68kemu
 
 import (
-	"encoding/binary"
 	"fmt"
 )
 
@@ -32,9 +31,11 @@ func (ram *RAM) Read(s Size, address uint32) (uint32, error) {
 	case Byte:
 		return uint32(ram.mem[address-ram.offset]), nil
 	case Word:
-		return uint32(binary.BigEndian.Uint16(ram.mem[address-ram.offset:])), nil
+		idx := address - ram.offset
+		return uint32(ram.mem[idx])<<8 | uint32(ram.mem[idx+1]), nil
 	case Long:
-		return binary.BigEndian.Uint32(ram.mem[address-ram.offset:]), nil
+		idx := address - ram.offset
+		return uint32(ram.mem[idx])<<24 | uint32(ram.mem[idx+1])<<16 | uint32(ram.mem[idx+2])<<8 | uint32(ram.mem[idx+3]), nil
 	}
 	return 0, fmt.Errorf("unknown size %d", s)
 }
@@ -47,9 +48,15 @@ func (ram *RAM) Write(s Size, address uint32, value uint32) error {
 	case Byte:
 		ram.mem[address-ram.offset] = uint8(value)
 	case Word:
-		binary.BigEndian.PutUint16(ram.mem[address-ram.offset:], uint16(value))
+		idx := address - ram.offset
+		ram.mem[idx] = uint8(value >> 8)
+		ram.mem[idx+1] = uint8(value)
 	case Long:
-		binary.BigEndian.PutUint32(ram.mem[address-ram.offset:], value)
+		idx := address - ram.offset
+		ram.mem[idx] = uint8(value >> 24)
+		ram.mem[idx+1] = uint8(value >> 16)
+		ram.mem[idx+2] = uint8(value >> 8)
+		ram.mem[idx+3] = uint8(value)
 	}
 	return nil
 }

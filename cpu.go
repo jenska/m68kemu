@@ -382,9 +382,41 @@ func (cpu *cpu) Step() error {
 // cost pushes the cycle count past the requested amount.
 func (cpu *cpu) RunCycles(budget uint64) error {
 	start := cpu.cycles
-	for cpu.cycles-start < budget {
+	target := start + budget
+
+	for cpu.cycles < target {
 		before := cpu.cycles
-		if err := cpu.Step(); err != nil {
+
+		// Inline Step() for performance
+		if cpu.stopped {
+			if err := cpu.checkInterrupts(); err != nil {
+				return err
+			}
+			if cpu.stopped {
+				// If still stopped, consume cycles to prevent infinite tight loop without progress
+				cpu.addCycles(4)
+				continue
+			}
+		}
+
+		if cpu.breakpoints != nil {
+			if err := cpu.checkExecuteBreakpoint(cpu.regs.PC); err != nil {
+				return err
+			}
+		}
+
+		pc := cpu.regs.PC
+		if opcode, err := cpu.fetchOpcode(); err == nil {
+			if err := cpu.executeInstruction(opcode); err != nil {
+				return err
+			}
+
+			if err := cpu.checkInterrupts(); err != nil {
+				return err
+			}
+
+			cpu.sendTrace(pc)
+		} else {
 			return err
 		}
 
