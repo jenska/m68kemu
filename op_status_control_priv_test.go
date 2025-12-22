@@ -108,11 +108,9 @@ func TestRteRestoresExceptionFrame(t *testing.T) {
 
 	returnSR := uint16(0x0000)
 	returnPC := uint32(0x002000)
-	vectorOffset := uint32(0x0010)
 
 	ram.Write(Word, stackBase, uint32(returnSR))
 	ram.Write(Long, stackBase+uint32(Word), returnPC)
-	ram.Write(Word, stackBase+uint32(Word+Long), vectorOffset)
 
 	code := assemble(t, "RTE")
 	for i, b := range code {

@@ -111,7 +111,11 @@ func doShiftRotate(value uint32, count int, width int, operation int, left bool,
 	value &= mask
 
 	if count == 0 {
-		return value, shiftRotateFlags{carryOut: ^uint32(0), extendOut: extend}
+		c := uint32(0)
+		if operation == 2 { // ROXL/ROXR sets C=X
+			c = b2i(extend)
+		}
+		return value, shiftRotateFlags{carryOut: c, changeCarry: true, extendOut: extend}
 	}
 
 	switch operation {
@@ -144,17 +148,21 @@ func asl(value uint32, count, width int) (uint32, shiftRotateFlags) {
 	mask := uint32((1 << width) - 1)
 	value &= mask
 	var carry uint32
+	overflow := false
 	for i := 0; i < count; i++ {
 		carry = (value >> (width - 1)) & 1
 		value = (value << 1) & mask
+		newMsb := (value >> (width - 1)) & 1
+		if carry != newMsb {
+			overflow = true
+		}
 	}
-	newMsb := (value >> (width - 1)) & 1
 	return value, shiftRotateFlags{
 		carryOut:     carry,
 		changeCarry:  true,
 		extendOut:    carry != 0,
 		changeExtend: true,
-		overflow:     (carry ^ newMsb) != 0,
+		overflow:     overflow,
 	}
 }
 

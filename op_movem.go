@@ -146,6 +146,9 @@ func movemToRegisters(cpu *cpu) error {
 	}
 
 	regs := movemRegisterOrder(uint16(mask), false)
+	// 12 cycles base + 4 cycles per register transferred
+	cpu.addCycles(12 + 4*uint32(len(regs)))
+
 	sizeBytes := uint32(size)
 
 	for _, r := range regs {
@@ -201,6 +204,9 @@ func movemToMemory(cpu *cpu) error {
 
 	reverse := mode == 4
 	regs := movemRegisterOrder(uint16(mask), reverse)
+	// 8 cycles base + 4 cycles per register transferred
+	cpu.addCycles(8 + 4*uint32(len(regs)))
+
 	sizeBytes := uint32(size)
 
 	for _, r := range regs {

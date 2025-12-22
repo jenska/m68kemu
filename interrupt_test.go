@@ -71,15 +71,6 @@ func TestInterruptRespectsMaskAndTriggersWhenUnmasked(t *testing.T) {
 		t.Fatalf("stacked PC mismatch: got %08x want %08x", stackedPC, expectedStackedPC)
 	}
 
-	stackedVector, err := ram.Read(Word, expectedSP+uint32(Word+Long))
-	if err != nil {
-		t.Fatalf("failed to read stacked vector: %v", err)
-	}
-
-	if stackedVector != vectorOffset {
-		t.Fatalf("stacked vector mismatch: got %04x want %04x", stackedVector, vectorOffset)
-	}
-
 	if cpu.regs.PC != handler {
 		t.Fatalf("interrupt did not jump to handler: got %08x want %08x", cpu.regs.PC, handler)
 	}
@@ -124,15 +115,6 @@ func TestInterruptUsesProvidedVectorWhenAvailable(t *testing.T) {
 	expectedSP := initialSP - exceptionFrameSize
 	if cpu.regs.A[7] != expectedSP {
 		t.Fatalf("unexpected SP after interrupt: got %08x want %08x", cpu.regs.A[7], expectedSP)
-	}
-
-	stackedVector, err := ram.Read(Word, expectedSP+uint32(Word+Long))
-	if err != nil {
-		t.Fatalf("failed to read stacked vector: %v", err)
-	}
-
-	if stackedVector != vectorOffset {
-		t.Fatalf("stacked vector mismatch: got %04x want %04x", stackedVector, vectorOffset)
 	}
 
 	stackedPC, err := ram.Read(Long, expectedSP+uint32(Word))

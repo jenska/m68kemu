@@ -34,7 +34,7 @@ func TestTrapStacksExceptionFrameAndJumps(t *testing.T) {
 		t.Fatalf("failed to execute TRAP: %v", err)
 	}
 
-	expectedSP := uint32(0x1000 - (Word + Long + Word))
+	expectedSP := uint32(0x1000 - (Word + Long))
 	if cpu.regs.A[7] != expectedSP {
 		t.Fatalf("unexpected SP after trap: got %08x want %08x", cpu.regs.A[7], expectedSP)
 	}
@@ -53,14 +53,6 @@ func TestTrapStacksExceptionFrameAndJumps(t *testing.T) {
 	}
 	if stackedPC != returnPC {
 		t.Fatalf("stacked PC mismatch: got %08x want %08x", stackedPC, returnPC)
-	}
-
-	stackedSR, err := ram.Read(Word, expectedSP+uint32(Word+Long))
-	if err != nil {
-		t.Fatalf("failed reading stacked vector: %v", err)
-	}
-	if stackedSR != vectorAddress {
-		t.Fatalf("stacked vector mismatch: got %04x want %04x", stackedSR, uint16(vectorAddress))
 	}
 
 	if cpu.regs.PC != handler {

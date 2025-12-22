@@ -321,7 +321,7 @@ func divu(cpu *cpu) error {
 	if quotient&0x8000 != 0 {
 		flags |= srNegative
 	}
-	cpu.regs.SR = (cpu.regs.SR &^ (srNegative | srZero | srOverflow | srCarry | srExtend)) | flags
+	cpu.regs.SR = (cpu.regs.SR &^ (srNegative | srZero | srOverflow | srCarry)) | flags
 	return nil
 }
 
@@ -356,7 +356,7 @@ func divs(cpu *cpu) error {
 	if quotient&0x8000 != 0 {
 		flags |= srNegative
 	}
-	cpu.regs.SR = (cpu.regs.SR &^ (srNegative | srZero | srOverflow | srCarry | srExtend)) | flags
+	cpu.regs.SR = (cpu.regs.SR &^ (srNegative | srZero | srOverflow | srCarry)) | flags
 	return nil
 }
 
@@ -380,7 +380,7 @@ func mulu(cpu *cpu) error {
 	if uint32(result)&0x80000000 != 0 {
 		flags |= srNegative
 	}
-	cpu.regs.SR = (cpu.regs.SR &^ (srNegative | srZero | srOverflow | srCarry | srExtend)) | flags
+	cpu.regs.SR = (cpu.regs.SR &^ (srNegative | srZero | srOverflow | srCarry)) | flags
 	return nil
 }
 
@@ -404,7 +404,7 @@ func muls(cpu *cpu) error {
 	if uint32(result)&0x80000000 != 0 {
 		flags |= srNegative
 	}
-	cpu.regs.SR = (cpu.regs.SR &^ (srNegative | srZero | srOverflow | srCarry | srExtend)) | flags
+	cpu.regs.SR = (cpu.regs.SR &^ (srNegative | srZero | srOverflow | srCarry)) | flags
 	return nil
 }
 

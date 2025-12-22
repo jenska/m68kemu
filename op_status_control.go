@@ -158,9 +158,6 @@ func rte(cpu *cpu) error {
 	if err != nil {
 		return err
 	}
-	if _, err := cpu.pop(Word); err != nil {
-		return err
-	}
 	cpu.setSR(uint16(newSR))
 	cpu.regs.PC = pc
 	return nil

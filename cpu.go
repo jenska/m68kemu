@@ -6,7 +6,7 @@ import (
 
 const (
 	XBusError         = 2
-	XAddresError      = 3
+	XAddressError     = 3
 	XIllegal          = 4
 	XDivByZero        = 5
 	XPrivViolation    = 8
@@ -151,11 +151,11 @@ func (cpu *cpu) String() string {
 }
 
 func (ae AddressError) Error() string {
-	return fmt.Sprintln("AddressError at %08x", uint32(ae))
+	return fmt.Sprintf("AddressError at %08x", uint32(ae))
 }
 
 func (be BusError) Error() string {
-	return fmt.Sprintln("BusError at %08x", uint32(be))
+	return fmt.Sprintf("BusError at %08x", uint32(be))
 }
 
 func (bh BreakpointHit) Error() string {
@@ -255,7 +255,7 @@ func (cpu *cpu) executeInstruction(opcode uint16) error {
 		case BusError:
 			return cpu.exception(XBusError)
 		case AddressError:
-			return cpu.exception(XAddresError)
+			return cpu.exception(XAddressError)
 		default:
 			return err
 		}
@@ -273,10 +273,7 @@ func (cpu *cpu) raiseException(vector uint32, newSR uint16) error {
 	originalSR := cpu.regs.SR
 	cpu.setSR(newSR)
 
-	// 68000 format 0 stack frame: vector offset (word), PC (long), SR (word).
-	if err := cpu.push(Word, vectorOffset); err != nil {
-		return err
-	}
+	// 68000 stack frame: PC (long), SR (word).
 	if err := cpu.push(Long, cpu.regs.PC); err != nil {
 		return err
 	}

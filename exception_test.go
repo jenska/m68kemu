@@ -2,7 +2,7 @@ package m68kemu
 
 import "testing"
 
-const exceptionFrameSize = uint32(Word + Long + Word)
+const exceptionFrameSize = uint32(Long + Word)
 
 func TestExceptionSwitchesToSupervisorStackFromUser(t *testing.T) {
 	cpu, ram := newEnvironment(t)
@@ -49,14 +49,6 @@ func TestExceptionSwitchesToSupervisorStackFromUser(t *testing.T) {
 	}
 	if stackedPC != originalPC {
 		t.Fatalf("stacked PC mismatch: got %08x want %08x", stackedPC, originalPC)
-	}
-
-	stackedVector, err := ram.Read(Word, expectedSP+uint32(Word+Long))
-	if err != nil {
-		t.Fatalf("failed reading stacked vector: %v", err)
-	}
-	if stackedVector != uint32(vectorOffset) {
-		t.Fatalf("stacked vector mismatch: got %04x want %04x", stackedVector, vectorOffset)
 	}
 
 	if cpu.regs.PC != handler {
@@ -114,14 +106,6 @@ func TestExceptionUsesCurrentSupervisorStack(t *testing.T) {
 		t.Fatalf("stacked PC mismatch: got %08x want %08x", stackedPC, originalPC)
 	}
 
-	stackedVector, err := ram.Read(Word, expectedSP+uint32(Word+Long))
-	if err != nil {
-		t.Fatalf("failed reading stacked vector: %v", err)
-	}
-	if stackedVector != uint32(vectorOffset) {
-		t.Fatalf("stacked vector mismatch: got %04x want %04x", stackedVector, vectorOffset)
-	}
-
 	if cpu.regs.PC != handler {
 		t.Fatalf("PC did not jump to handler: got %08x want %08x", cpu.regs.PC, handler)
 	}
@@ -169,14 +153,6 @@ func TestExecuteInstructionTriggersIllegalVector(t *testing.T) {
 	}
 	if stackedPC != originalPC+uint32(Word) {
 		t.Fatalf("stacked PC mismatch: got %08x want %08x", stackedPC, originalPC+uint32(Word))
-	}
-
-	stackedVector, err := ram.Read(Word, expectedSP+uint32(Word+Long))
-	if err != nil {
-		t.Fatalf("failed reading stacked vector: %v", err)
-	}
-	if stackedVector != illegalVectorOffset {
-		t.Fatalf("stacked vector mismatch: got %04x want %04x", stackedVector, illegalVectorOffset)
 	}
 
 	if cpu.regs.PC != handler {
