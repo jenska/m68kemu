@@ -9,9 +9,9 @@ import (
 func init() {
 	// Register-to-memory: MOVEM.<size> <register list>,<ea>
 	for _, sizeBits := range []uint16{2 << 6, 3 << 6} {
-		registerMovemInstruction(0x4800, sizeBits, movemToMemory, eaMaskIndirect|eaMaskPostIncrement|eaMaskPreDecrement|eaMaskDisplacement|
+		registerMovemInstruction(0x4800, sizeBits, movemToMemory, eaMaskIndirect|eaMaskPreDecrement|eaMaskDisplacement|
 			eaMaskIndex|eaMaskAbsoluteShort|eaMaskAbsoluteLong)
-		registerMovemInstruction(0x4c00, sizeBits, movemToRegisters, eaMaskIndirect|eaMaskPostIncrement|eaMaskPreDecrement|
+		registerMovemInstruction(0x4c00, sizeBits, movemToRegisters, eaMaskIndirect|eaMaskPostIncrement|
 			eaMaskDisplacement|eaMaskIndex|eaMaskAbsoluteShort|eaMaskAbsoluteLong|eaMaskPCDisplacement|eaMaskPCIndex)
 	}
 }
@@ -170,8 +170,11 @@ func movemToRegisters(cpu *cpu) error {
 		}
 	}
 
-	if mode == 3 || mode == 4 {
-		cpu.regs.A[reg] = addr
+	if mode == 3 {
+		// If the base register was loaded from memory, it must not be overwritten by the incremented address.
+		if (mask>>uint(8+reg))&1 == 0 {
+			cpu.regs.A[reg] = addr
+		}
 	}
 
 	return nil
