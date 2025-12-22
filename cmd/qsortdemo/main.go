@@ -20,7 +20,7 @@ func main() {
 	}
 
 	ram := m68kemu.NewRAM(0, 0x10000)
-	bus := m68kemu.NewBus(&ram)
+	bus := m68kemu.NewBus(ram)
 
 	if err := ram.Write(m68kemu.Long, 0, stackPointer); err != nil {
 		log.Fatalf("failed to write stack pointer: %v", err)

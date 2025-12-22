@@ -10,7 +10,7 @@ func newEnvironment(tb testing.TB) (*cpu, *RAM) {
 	tb.Helper()
 
 	memory := NewRAM(0, 1024*64)
-	bus := NewBus(&memory)
+	bus := NewBus(memory)
 	memory.Write(Long, 0, 0x1000)
 	memory.Write(Long, 4, 0x2000)
 	processor, err := NewCPU(bus)
@@ -21,7 +21,7 @@ func newEnvironment(tb testing.TB) (*cpu, *RAM) {
 	if !ok {
 		tb.Fatalf("CPU implementation has unexpected type %T", processor)
 	}
-	return impl, &memory
+	return impl, memory
 }
 
 func assemble(tb testing.TB, instruction string) []byte {

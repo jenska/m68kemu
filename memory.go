@@ -60,6 +60,6 @@ func (ram *RAM) Reset() {
 	}
 }
 
-func NewRAM(offset, size uint32) RAM {
-	return RAM{offset: offset, mem: make([]byte, size)}
+func NewRAM(offset, size uint32) *RAM {
+	return &RAM{offset: offset, mem: make([]byte, size)}
 }

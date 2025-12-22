@@ -51,7 +51,7 @@ func TestCycleCounterMemoryMove(t *testing.T) {
 
 func TestCycleCounterWaitStates(t *testing.T) {
 	ram := NewRAM(0, 0x1000)
-	bus := NewBus(&ram)
+	bus := NewBus(ram)
 	bus.SetWaitStates(2)
 	if err := ram.Write(Long, 0, 0x100); err != nil {
 		t.Fatalf("failed to seed SSP: %v", err)

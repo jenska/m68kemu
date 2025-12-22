@@ -4,7 +4,7 @@ import "testing"
 
 func TestBusAlignmentErrors(t *testing.T) {
 	ram := NewRAM(0x0000, 0x0010)
-	bus := NewBus(&ram)
+	bus := NewBus(ram)
 
 	tests := []struct {
 		name    string
@@ -44,7 +44,7 @@ func TestBusUnmappedAddress(t *testing.T) {
 
 func TestBusWaitHook(t *testing.T) {
 	ram := NewRAM(0x0000, 0x0004)
-	bus := NewBus(&ram)
+	bus := NewBus(ram)
 	bus.SetWaitStates(3)
 	var waited uint32
 	bus.SetWaitHook(func(states uint32) { waited += states })
