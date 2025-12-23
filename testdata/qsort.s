@@ -1,7 +1,7 @@
         ; Quick sort demo for m68kemu
         ; Sorts the longword array defined at the end of the file in place
 
-.ORG     $2000
+        .ORG     $2000
 start:  LEA     array,A0               ; A0 points to the start of the array
         MOVEQ   #0,D6              ; low index
         MOVE.L  #(array_end-array)/4-1,D7
@@ -77,6 +77,6 @@ skip_right:
 qreturn:
         RTS
 
-        EVEN
-array:  LONG    9,1,7,3,8,2,6,5,4,0
+        .EVEN
+array:  .LONG    91,21,73,13,38,12,16,51,43,0
 array_end:

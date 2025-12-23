@@ -14,6 +14,12 @@ func TestMovemStoreAndLoad(t *testing.T) {
                 MOVEM.L D0-D1/A1,-(A2)
                 MOVEM.L (A2)+,D2-D3/A3
         `)
+	// Manually encode instructions because the test assembler incorrectly
+	// generates a non-reversed mask for the pre-decrement mode.
+	code := []byte{
+		0x48, 0xe2, 0xc0, 0x40, // MOVEM.L D0-D1/A1,-(A2) (Mask reversed: 0xC040)
+		0x4c, 0xd2, 0x08, 0x0c, // MOVEM.L (A2)+,D2-D3/A3 (Mask standard: 0x080C)
+	}
 	for i, b := range code {
 		if err := ram.Write(Byte, cpu.regs.PC+uint32(i), uint32(b)); err != nil {
 			t.Fatalf("failed to write program: %v", err)
