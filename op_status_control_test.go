@@ -41,6 +41,10 @@ func TestTrapvResetAndStop(t *testing.T) {
 	for i, b := range stopCode {
 		ram.Write(Byte, cpu.regs.PC+uint32(i), uint32(b))
 	}
+	handler := assemble(t, "NOP")
+	for i, b := range handler {
+		ram.Write(Byte, 0x2008+uint32(i), uint32(b))
+	}
 
 	// Execute STOP and resume via interrupt
 	opcode, _ = cpu.fetchOpcode()
@@ -60,8 +64,48 @@ func TestTrapvResetAndStop(t *testing.T) {
 	if cpu.stopped {
 		t.Fatalf("CPU should resume after interrupt")
 	}
-	if cpu.regs.PC != 0x2008 {
-		t.Fatalf("expected autovector handler at 0x2008, PC=%04x", cpu.regs.PC)
+	if cpu.regs.PC != 0x200a {
+		t.Fatalf("expected autovector handler to execute, PC=%04x", cpu.regs.PC)
+	}
+}
+
+func TestStopInterruptRunsHandlerInstruction(t *testing.T) {
+	cpu, ram := newEnvironment(t)
+
+	handlerAddr := uint32(0x2010)
+	ram.Write(Long, (autoVectorBase+2)<<2, handlerAddr)
+
+	code := assemble(t, "STOP #$2000\n")
+	for i, b := range code {
+		ram.Write(Byte, cpu.regs.PC+uint32(i), uint32(b))
+	}
+
+	handler := assemble(t, "MOVEQ #1,D0\n")
+	for i, b := range handler {
+		ram.Write(Byte, handlerAddr+uint32(i), uint32(b))
+	}
+
+	if err := cpu.Step(); err != nil {
+		t.Fatalf("STOP failed: %v", err)
+	}
+	if !cpu.stopped {
+		t.Fatalf("CPU should be stopped")
+	}
+
+	if err := cpu.RequestInterrupt(2, nil); err != nil {
+		t.Fatalf("failed to request interrupt: %v", err)
+	}
+	if err := cpu.Step(); err != nil {
+		t.Fatalf("failed to resume from STOP: %v", err)
+	}
+	if cpu.stopped {
+		t.Fatalf("CPU should resume after interrupt")
+	}
+	if cpu.regs.D[0] != 1 {
+		t.Fatalf("expected handler to execute MOVEQ, got D0=%d", cpu.regs.D[0])
+	}
+	if cpu.regs.PC != handlerAddr+uint32(Word) {
+		t.Fatalf("expected PC to advance past handler, got %04x", cpu.regs.PC)
 	}
 }
 

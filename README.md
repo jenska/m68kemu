@@ -16,6 +16,7 @@ This project provides a cycle-accurate Motorola 68000 CPU emulator, suitable for
 ## Getting Started
 
 This package is designed to be used as a library in your own projects.
+It requires Go 1.25.1 or newer due to the assembler dependency.
 
 ### Installation
 

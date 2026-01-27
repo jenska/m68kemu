@@ -62,9 +62,7 @@ func (ram *RAM) Write(s Size, address uint32, value uint32) error {
 }
 
 func (ram *RAM) Reset() {
-	for i := range ram.mem {
-		ram.mem[i] = 0
-	}
+	clear(ram.mem)
 }
 
 func NewRAM(offset, size uint32) *RAM {
