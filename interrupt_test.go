@@ -135,3 +135,37 @@ func TestInterruptUsesProvidedVectorWhenAvailable(t *testing.T) {
 		t.Fatalf("interrupt mask not updated to level: SR=%04x", cpu.regs.SR)
 	}
 }
+
+func TestInterruptControllerQueuesRequestsPerLevel(t *testing.T) {
+	ic := NewInterruptController()
+
+	firstVector := uint8(50)
+	secondVector := uint8(60)
+
+	if err := ic.Request(3, &firstVector); err != nil {
+		t.Fatalf("failed to request first interrupt: %v", err)
+	}
+	if err := ic.Request(3, &secondVector); err != nil {
+		t.Fatalf("failed to request second interrupt: %v", err)
+	}
+
+	level, vector, ok := ic.Pending(0)
+	if !ok {
+		t.Fatalf("expected pending interrupt")
+	}
+	if level != 3 || vector != uint32(firstVector) {
+		t.Fatalf("unexpected first interrupt: level=%d vector=%d", level, vector)
+	}
+
+	level, vector, ok = ic.Pending(0)
+	if !ok {
+		t.Fatalf("expected second pending interrupt")
+	}
+	if level != 3 || vector != uint32(secondVector) {
+		t.Fatalf("unexpected second interrupt: level=%d vector=%d", level, vector)
+	}
+
+	if _, _, ok = ic.Pending(0); ok {
+		t.Fatalf("expected no further interrupts")
+	}
+}

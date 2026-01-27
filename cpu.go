@@ -344,14 +344,10 @@ func (cpu *cpu) checkInterrupts() error {
 // Step fetches the next opcode at the program counter and executes it.
 func (cpu *cpu) Step() error {
 	if cpu.stopped {
-		wasStopped := true
 		if err := cpu.checkInterrupts(); err != nil {
 			return err
 		}
 		if cpu.stopped {
-			return nil
-		}
-		if wasStopped {
 			return nil
 		}
 	}
