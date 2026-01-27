@@ -1,5 +1,5 @@
 module github.com/jenska/m68kemu
 
-go 1.25.1
+go 1.25
 
-require github.com/jenska/m68kasm v1.1.4
+require github.com/jenska/m68kasm v1.1.5
