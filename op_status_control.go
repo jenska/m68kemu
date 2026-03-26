@@ -33,29 +33,28 @@ func trapv(cpu *cpu) error {
 		return nil
 	}
 
-	return cpu.exception(7)
+	return cpu.exceptionWithCycles(7, exceptionCyclesTrapV)
 }
 
 func resetInstruction(cpu *cpu) error {
-	if cpu.regs.SR&srSupervisor == 0 {
-		return cpu.exception(XPrivViolation)
+	if ok, err := cpu.requireSupervisor(); err != nil || !ok {
+		return err
 	}
 
 	cpu.bus.Reset()
-	cpu.interrupts = NewInterruptController()
+	cpu.interrupts.Reset()
 	return nil
 }
 
 func stop(cpu *cpu) error {
-	if cpu.regs.SR&srSupervisor == 0 {
-		return cpu.exception(XPrivViolation)
+	if ok, err := cpu.requireSupervisor(); err != nil || !ok {
+		return err
 	}
 
-	newSR, err := cpu.read(Word, cpu.regs.PC)
+	newSR, err := cpu.popPc(Word)
 	if err != nil {
 		return err
 	}
-	cpu.regs.PC += uint32(Word)
 	cpu.setSR(uint16(newSR))
 	cpu.stopped = true
 	return nil
@@ -82,8 +81,8 @@ func logicalCcrOp(cpu *cpu, op func(uint16, uint16) uint16) error {
 }
 
 func logicalSrOp(cpu *cpu, op func(uint16, uint16) uint16) error {
-	if cpu.regs.SR&srSupervisor == 0 {
-		return cpu.exception(XPrivViolation)
+	if ok, err := cpu.requireSupervisor(); err != nil || !ok {
+		return err
 	}
 	imm, err := cpu.popPc(Word)
 	if err != nil {
@@ -131,8 +130,8 @@ func moveToCcr(cpu *cpu) error {
 }
 
 func moveToSr(cpu *cpu) error {
-	if cpu.regs.SR&srSupervisor == 0 {
-		return cpu.exception(XPrivViolation)
+	if ok, err := cpu.requireSupervisor(); err != nil || !ok {
+		return err
 	}
 	src, err := cpu.ResolveSrcEA(Word)
 	if err != nil {
@@ -147,9 +146,12 @@ func moveToSr(cpu *cpu) error {
 }
 
 func rte(cpu *cpu) error {
-	if cpu.regs.SR&srSupervisor == 0 {
-		return cpu.exception(XPrivViolation)
+	if ok, err := cpu.requireSupervisor(); err != nil || !ok {
+		return err
 	}
+	// On a 68000, RTE restores the standard SR+PC exception frame.
+	// Bus/address error handlers must first discard or rewrite the extra
+	// group-0 fault information before executing RTE.
 	newSR, err := cpu.pop(Word)
 	if err != nil {
 		return err
