@@ -41,8 +41,8 @@ func registerMoveUsp() {
 }
 
 func moveToUsp(cpu *cpu) error {
-	if cpu.regs.SR&srSupervisor == 0 {
-		return cpu.exception(XPrivViolation)
+	if ok, err := cpu.requireSupervisor(); err != nil || !ok {
+		return err
 	}
 	reg := cpu.regs.IR & 0x7
 	cpu.regs.USP = cpu.regs.A[reg]
@@ -50,8 +50,8 @@ func moveToUsp(cpu *cpu) error {
 }
 
 func moveFromUsp(cpu *cpu) error {
-	if cpu.regs.SR&srSupervisor == 0 {
-		return cpu.exception(XPrivViolation)
+	if ok, err := cpu.requireSupervisor(); err != nil || !ok {
+		return err
 	}
 	reg := cpu.regs.IR & 0x7
 	cpu.regs.A[reg] = cpu.regs.USP
@@ -114,12 +114,12 @@ func chkInstruction(cpu *cpu) error {
 
 	if value < 0 {
 		cpu.regs.SR |= srNegative
-		return cpu.exception(6)
+		return cpu.exceptionWithCycles(6, chkExceptionCycles(cpu.regs.IR))
 	}
 
 	if value > upper {
 		cpu.regs.SR |= srCarry
-		return cpu.exception(6)
+		return cpu.exceptionWithCycles(6, chkExceptionCycles(cpu.regs.IR))
 	}
 
 	if value == upper {
@@ -134,4 +134,10 @@ func chkCycleCalculator() cycleCalculator {
 		reg := opcode & 0x7
 		return 10 + eaAccessCycles(mode, reg, Word)
 	}
+}
+
+func chkExceptionCycles(opcode uint16) uint32 {
+	mode := (opcode >> 3) & 0x7
+	reg := opcode & 0x7
+	return exceptionCyclesCHK + eaAccessCycles(mode, reg, Word)
 }

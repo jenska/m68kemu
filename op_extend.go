@@ -98,10 +98,12 @@ func extendOperands(cpu *cpu, size Size) (extendOperand, extendOperand, error) {
 		}, nil
 	}
 
-	srcAddr := *ay(cpu) - uint32(size)
-	dstAddr := *ax(cpu) - uint32(size)
-	*ay(cpu) = srcAddr
-	*ax(cpu) = dstAddr
+	srcReg := y(cpu.regs.IR)
+	dstReg := x(cpu.regs.IR)
+	srcAddr := cpu.regs.A[srcReg] - addressRegisterStep(srcReg, size)
+	dstAddr := cpu.regs.A[dstReg] - addressRegisterStep(dstReg, size)
+	cpu.regs.A[srcReg] = srcAddr
+	cpu.regs.A[dstReg] = dstAddr
 
 	srcVal, err := cpu.read(size, srcAddr)
 	if err != nil {

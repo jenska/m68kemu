@@ -129,31 +129,22 @@ var (
 )
 
 func (cpu *cpu) ResolveSrcEA(o Size) (modifier, error) {
-	mode := (cpu.regs.IR >> 3) & 0x07
-	if mode < 7 {
-		return eaSrc[mode].init(cpu, o)
-	}
-	return eaSrc[mode+y(cpu.regs.IR)].init(cpu, o)
+	meta := opcodeMetaTable[cpu.regs.IR]
+	return eaSrc[meta.srcIndex].init(cpu, o)
 }
 
 func (cpu *cpu) ResolveSrcEA2(o Size) (modifier, error) {
-	mode := (cpu.regs.IR >> 3) & 0x07
-	if mode < 7 {
-		return eaSrc2[mode].init(cpu, o)
-	}
-	return eaSrc2[mode+y(cpu.regs.IR)].init(cpu, o)
+	meta := opcodeMetaTable[cpu.regs.IR]
+	return eaSrc2[meta.srcIndex].init(cpu, o)
 }
 
 func (cpu *cpu) ResolveDstEA(o Size) (modifier, error) {
-	mode := (cpu.regs.IR >> 6) & 0x07
-	if mode < 7 {
-		return eaDst[mode].init(cpu, o)
-	}
-	return eaDst[mode+x(cpu.regs.IR)].init(cpu, o)
+	meta := opcodeMetaTable[cpu.regs.IR]
+	return eaDst[meta.dstIndex].init(cpu, o)
 }
 
-func x(ir uint16) uint16 { return (ir >> 9) & 0x7 }
-func y(ir uint16) uint16 { return ir & 0x7 }
+func x(ir uint16) uint16 { return uint16(opcodeMetaTable[ir].x) }
+func y(ir uint16) uint16 { return uint16(opcodeMetaTable[ir].y) }
 
 func udx(cpu *cpu) *uint32 { return (*uint32)(unsafe.Pointer(&cpu.regs.D[x(cpu.regs.IR)])) }
 func dx(cpu *cpu) *int32   { return &cpu.regs.D[x(cpu.regs.IR)] }

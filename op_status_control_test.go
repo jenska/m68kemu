@@ -31,15 +31,8 @@ func TestTrapvResetAndStop(t *testing.T) {
 	if cpu.regs.SR != 0x2702 {
 		t.Fatalf("RESET should preserve SR bits, got %04x", cpu.regs.SR)
 	}
-	if val, _ := ram.Read(Long, 0x3000); val != 0 {
-		t.Fatalf("expected memory reset to clear RAM, got %08x", val)
-	}
-
-	// Reinstall STOP instruction and autovector handler after reset cleared RAM.
-	ram.Write(Long, (autoVectorBase+2)<<2, 0x2008)
-	stopCode := assemble(t, "STOP #$2000\nNOP")
-	for i, b := range stopCode {
-		ram.Write(Byte, cpu.regs.PC+uint32(i), uint32(b))
+	if val, _ := ram.Read(Word, 0x2004); val != 0x4e72 {
+		t.Fatalf("RESET should not clear guest RAM, STOP opcode missing: %04x", val)
 	}
 	handler := assemble(t, "NOP")
 	for i, b := range handler {

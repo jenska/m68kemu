@@ -1,52 +1,84 @@
 # Benchmark Report
 
-## Benchmark Run
-- Command: `go test -bench=RunEightMillionCycles -benchmem`
-- Result: `BenchmarkRunEightMillionCycles-2 21 50900486 ns/op 1003 B/op 0 allocs/op`
-- Duration: ~51 ms per run, ~1.23 s total for benchmark suite.
+## Current Results
 
-## CPU Profile Bottlenecks
-CPU profile collected with `go test -bench=RunEightMillionCycles -benchmem -cpuprofile cpu.out` and analyzed via `go tool pprof -top cpu.out` highlighted:
+Benchmarks were run on March 25, 2026 on an Apple M1 (`darwin/arm64`) with:
 
-| Function | Flat % | Cumulative % | Notes |
-| --- | --- | --- | --- |
-| `(*cpu).Step` | 10.91% | 94.55% | Central per-instruction driver; dominates total time. |
-| `(*cpu).executeInstruction` | 7.27% | 41.82% | Core decoding/execution logic. |
-| `(*cpu).fetchOpcode` | 5.45% | 31.82% | Opcode fetch path, includes bus reads. |
-| `(*Bus).wait` | 11.82% | 14.55% | Wait-state handling; overhead per memory access. |
-| `(*cpu).ResolveDstEA` | 5.45% | 5.45% | Effective address resolution for destination operands. |
-| `(*cpu).ResolveSrcEA` | 4.55% | 8.18% | Effective address resolution for source operands. |
+```sh
+go test -run '^$' -bench 'BenchmarkRecursiveFibonacci|BenchmarkBubbleSort|BenchmarkPrimeSieve' -benchmem
+```
 
-## Observations
-- Execution hot path is the CPU stepping pipeline (`Step` → `executeInstruction` → `fetchOpcode`). Optimizing instruction dispatch (e.g., reducing branching or using table-driven decoding) could yield broad gains.
-- Bus wait-state calculations consume noticeable time; consider caching device lookups or minimizing wait checks for contiguous accesses.
-- Effective address resolution for both source and destination operands is a recurring cost; memoizing addressing mode metadata or streamlining `eaRegister` operations may reduce overhead.
+Results:
 
-## Next Steps
-- Profile with larger instruction mixes and compare with realistic workloads to ensure hotspot consistency.
-- Experiment with optimizing bus/device lookup and EA resolution paths, then rerun benchmarks to measure impact.
+| Benchmark | Result | Allocations |
+| --- | --- | --- |
+| `BenchmarkBubbleSort` | `3078764 ns/op` | `0 B/op, 0 allocs/op` |
+| `BenchmarkPrimeSieve` | `5836703 ns/op` | `4 B/op, 1 allocs/op` |
+| `BenchmarkRecursiveFibonacci` | `28598799 ns/op` | `0 B/op, 0 allocs/op` |
 
-## Recursive Fibonacci Benchmark (call-heavy workload)
-- Command: `./bench.test -test.run=^$ -test.bench=BenchmarkRecursiveFibonacci -test.benchmem -test.count=1`
-- Result: `BenchmarkRecursiveFibonacci-2 42184 31050 ns/op 1 B/op 0 allocs/op`
-- Duration: ~31 µs per run over ~42k iterations (≈1.3 s total for the benchmark).
+## What Improved
 
-### CPU Profile Bottlenecks
-CPU profile collected with `./bench.test ... -test.cpuprofile=fib_cpu.out` and analyzed via `PPROF_PAGER=cat go tool pprof -top ./bench.test fib_cpu.out` highlighted:
+Compared with the earlier benchmark notes in this repository, the current core is materially faster and cleaner in the common execution path:
 
-| Function | Flat % | Cumulative % | Notes |
-| --- | --- | --- | --- |
-| `runtime.futex` | 23.02% | 23.02% | Kernel futex waits show runtime synchronization overhead from frequent timer start/stop boundaries inside the benchmark harness. |
-| `(*cpu).Step` | 2.16% | 29.50% | Per-instruction stepping dominates cumulative time along the interpreter hot path. |
-| `(*cpu).executeInstruction` | 1.68% | 17.51% | Instruction dispatch/decoding continues to be a significant portion of total cycles. |
-| `(*Bus).wait` | 2.64% | 3.12% | Wait-state handling remains a visible per-memory-access cost. |
-| `testing.(*B).StopTimer/StartTimer` | 0% | 69.54% | Benchmark harness timer toggling is the majority of cumulative samples because the benchmark reloads the program every iteration under a stopped timer. |
+* bus access now has direct fast paths for single-device setups
+* fixed-range device mappings can be indexed efficiently by 24-bit address pages
+* RAM no longer advertises zero wait states through the dynamic wait-state interface, which removes unnecessary bookkeeping
+* reset / benchmark loops no longer allocate in the common CPU path
+* opcode metadata used by EA decoding is precomputed once up front
 
-### Observations
-- The hot path remains the CPU stepping pipeline (Step → executeInstruction), similar to the earlier instruction-mix benchmark.
-- Synchronization and timer toggling within the benchmark harness account for a large portion of samples; reducing timer on/off transitions or reusing preloaded memory could lower runtime overhead unrelated to emulator logic.
-- Bus wait-state checks and address resolution still contribute measurable cost in the interpreter loop.
+These changes were made while also improving correctness:
 
-### Next Steps
-- Rework the benchmark to preload the Fibonacci program once (or use `b.ResetTimer` after setup) to measure emulator performance without harness synchronization noise.
-- Investigate optimizing instruction dispatch and effective-address resolution to further cut per-step overhead.
+* CPU `RESET` no longer clears RAM
+* bus / address faults now use the richer 68000 group 0 exception frame
+* several `A7` byte-sized edge cases were corrected
+* `MOVEM.W` register loads now sign-extend properly
+
+## Profiling Snapshot
+
+Representative profiles were collected with:
+
+```sh
+go test -run '^$' -bench BenchmarkRecursiveFibonacci -cpuprofile /tmp/m68kemu_after.cpu.out
+go test -run '^$' -bench BenchmarkBubbleSort -cpuprofile /tmp/m68kemu_after.bubble.cpu.out
+go tool pprof -top /tmp/m68kemu_after.cpu.out
+go tool pprof -top /tmp/m68kemu_after.bubble.cpu.out
+```
+
+### Recursive Fibonacci
+
+Top remaining costs were still concentrated in the interpreter core:
+
+* `(*Bus).wait`
+* `(*Bus).Read`
+* `(*cpu).read`
+* `movel`
+* `(*cpu).fetchOpcode`
+* `ResolveSrcEA` / `ResolveDstEA`
+
+This means the project has already harvested some of the easy structural wins, and future speed work is likely to come from deeper fetch / decode specialization rather than small local cleanup.
+
+### Bubble Sort
+
+The hot path is now dominated by:
+
+* `(*cpu).RunCycles`
+* `(*cpu).fetchOpcode`
+* `branch`
+* `(*cpu).executeInstruction`
+* `(*Bus).Read`
+* `(*RAM).Read`
+
+Notably, device lookup no longer dominates the profile the way it did before the fixed-range and single-device fast paths were added.
+
+## Current Optimization Priorities
+
+If performance becomes the main focus again, the highest-value next steps are:
+
+1. Add a direct program-fetch fast path for RAM / ROM regions.
+2. Push opcode predecode further so more handlers can avoid repeated mode / register extraction.
+3. Reduce interface-heavy EA setup on common register and simple memory forms.
+4. Move from generic bus timing to machine-specific ST memory / MMIO timing tables as the chipset comes online.
+
+## Notes
+
+The benchmark numbers above reflect the current CPU core, not a full Atari ST machine. Once video, MFP, ACIA, DMA, and MMIO timing are integrated through the scheduler, overall machine throughput will need to be re-measured under more realistic workloads.

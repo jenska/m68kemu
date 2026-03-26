@@ -15,6 +15,11 @@ func NewInterruptController() *InterruptController {
 	return &InterruptController{}
 }
 
+func (ic *InterruptController) Reset() {
+	ic.requests = [8][]uint8{}
+	ic.maxLevel = 0
+}
+
 func (ic *InterruptController) Request(level uint8, vector *uint8) error {
 	if level > 7 {
 		return fmt.Errorf("invalid interrupt level %d", level)
@@ -67,4 +72,8 @@ func (ic *InterruptController) Pending(mask uint16) (uint8, uint32, bool) {
 	}
 
 	return 0, 0, false
+}
+
+func (ic *InterruptController) HasPending(mask uint16) bool {
+	return ic.maxLevel > uint8((mask&srInterruptMask)>>8)
 }

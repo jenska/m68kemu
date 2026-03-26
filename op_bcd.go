@@ -141,10 +141,12 @@ func bcdOperands(cpu *cpu) (bcdOperand, bcdOperand, error) {
 		}, nil
 	}
 
-	sourceAddr := *ay(cpu) - 1
-	destAddr := *ax(cpu) - 1
-	*ay(cpu) = sourceAddr
-	*ax(cpu) = destAddr
+	sourceReg := y(cpu.regs.IR)
+	destReg := x(cpu.regs.IR)
+	sourceAddr := cpu.regs.A[sourceReg] - addressRegisterStep(sourceReg, Byte)
+	destAddr := cpu.regs.A[destReg] - addressRegisterStep(destReg, Byte)
+	cpu.regs.A[sourceReg] = sourceAddr
+	cpu.regs.A[destReg] = destAddr
 
 	srcValue, err := cpu.read(Byte, sourceAddr)
 	if err != nil {
@@ -164,7 +166,7 @@ func bcdOperands(cpu *cpu) (bcdOperand, bcdOperand, error) {
 }
 
 func bcdDestination(cpu *cpu) (bcdSourceDest, error) {
-	mode := (cpu.regs.IR >> 3) & 0x1
+	mode := (cpu.regs.IR >> 3) & 0x7
 	reg := y(cpu.regs.IR)
 
 	if mode == 0 {
@@ -178,7 +180,11 @@ func bcdDestination(cpu *cpu) (bcdSourceDest, error) {
 		}, nil
 	}
 
-	addr := cpu.regs.A[reg] - 1
+	if mode != 4 {
+		return bcdSourceDest{}, cpu.exception(XIllegal)
+	}
+
+	addr := cpu.regs.A[reg] - addressRegisterStep(reg, Byte)
 	cpu.regs.A[reg] = addr
 
 	value, err := cpu.read(Byte, addr)

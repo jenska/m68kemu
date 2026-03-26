@@ -128,5 +128,5 @@ func registerExgInstruction(match uint16, calc cycleCalculator) {
 }
 
 func illegalInstruction(cpu *cpu) error {
-	return cpu.exception(XIllegal)
+	return cpu.exceptionWithCycles(XIllegal, exceptionCyclesIllegal)
 }

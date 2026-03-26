@@ -172,3 +172,21 @@ func TestNBCDZeroAndExtend(t *testing.T) {
 		t.Fatalf("carry/extend should remain clear without borrow, SR=%04x", cpu.regs.SR)
 	}
 }
+
+func TestNbcdByteUsesWordStepForA7(t *testing.T) {
+	cpu, ram := newEnvironment(t)
+	cpu.regs.A[7] = 0x3002
+
+	if err := ram.Write(Byte, 0x3000, 0x01); err != nil {
+		t.Fatalf("seed memory: %v", err)
+	}
+
+	runSingleInstruction(t, cpu, ram, "NBCD -(A7)")
+
+	if cpu.regs.A[7] != 0x3000 {
+		t.Fatalf("A7 should predecrement by 2 for byte NBCD, got %04x", cpu.regs.A[7])
+	}
+	if got, _ := ram.Read(Byte, 0x3000); got != 0x99 {
+		t.Fatalf("unexpected NBCD result %02x", got)
+	}
+}

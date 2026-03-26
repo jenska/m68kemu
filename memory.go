@@ -10,12 +10,15 @@ type RAM struct {
 	mem    []byte
 }
 
-// WaitStates allows RAM to satisfy WaitStateDevice while imposing no additional
-// delay.
-func (ram *RAM) WaitStates(Size, uint32) uint32 { return 0 }
-
 func (ram *RAM) Contains(address uint32) bool {
 	return address >= ram.offset && address < ram.offset+uint32(len(ram.mem))
+}
+
+func (ram *RAM) AddressRange() (uint32, uint32) {
+	if len(ram.mem) == 0 {
+		return ram.offset, ram.offset
+	}
+	return ram.offset, ram.offset + uint32(len(ram.mem)) - 1
 }
 
 func (ram *RAM) rangeCheck(address uint32, s Size) bool {
@@ -40,6 +43,10 @@ func (ram *RAM) Read(s Size, address uint32) (uint32, error) {
 	return 0, fmt.Errorf("unknown size %d", s)
 }
 
+func (ram *RAM) Peek(s Size, address uint32) (uint32, error) {
+	return ram.Read(s, address)
+}
+
 func (ram *RAM) Write(s Size, address uint32, value uint32) error {
 	if !ram.rangeCheck(address, s) {
 		return BusError(address)
@@ -62,7 +69,7 @@ func (ram *RAM) Write(s Size, address uint32, value uint32) error {
 }
 
 func (ram *RAM) Reset() {
-	clear(ram.mem)
+	// CPU RESET does not erase system RAM on a 68000-based machine such as the Atari ST.
 }
 
 func NewRAM(offset, size uint32) *RAM {

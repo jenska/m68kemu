@@ -45,5 +45,12 @@ func operandSizeFromOpmode(opmode uint16) Size {
 }
 
 func operandSizeFromOpcode(ir uint16) Size {
-	return opSizes[(ir>>6)&0x3]
+	return opcodeMetaTable[ir].opSize
+}
+
+func addressRegisterStep(reg uint16, size Size) uint32 {
+	if size == Byte && reg == 7 {
+		return 2
+	}
+	return uint32(size)
 }

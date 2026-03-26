@@ -98,3 +98,36 @@ func TestTas(t *testing.T) {
 		t.Fatalf("TAS flags incorrect: SR=%04x", cpu.regs.SR)
 	}
 }
+
+func TestMovemWordLoadsSignExtendRegisters(t *testing.T) {
+	cpu, ram := newEnvironment(t)
+	cpu.regs.A[2] = 0x3000
+
+	if err := ram.Write(Word, 0x3000, 0x8001); err != nil {
+		t.Fatalf("seed D0 source: %v", err)
+	}
+	if err := ram.Write(Word, 0x3002, 0xfffe); err != nil {
+		t.Fatalf("seed A1 source: %v", err)
+	}
+
+	code := assemble(t, "MOVEM.W (A2)+,D0/A1")
+	for i, b := range code {
+		if err := ram.Write(Byte, cpu.regs.PC+uint32(i), uint32(b)); err != nil {
+			t.Fatalf("failed to write program: %v", err)
+		}
+	}
+
+	if err := cpu.Step(); err != nil {
+		t.Fatalf("step failed: %v", err)
+	}
+
+	if cpu.regs.D[0] != -32767 {
+		t.Fatalf("D0 should be sign-extended, got %08x", uint32(cpu.regs.D[0]))
+	}
+	if cpu.regs.A[1] != 0xfffffffe {
+		t.Fatalf("A1 should be sign-extended, got %08x", cpu.regs.A[1])
+	}
+	if cpu.regs.A[2] != 0x3004 {
+		t.Fatalf("A2 should postincrement by 4, got %08x", cpu.regs.A[2])
+	}
+}

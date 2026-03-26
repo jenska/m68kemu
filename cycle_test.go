@@ -94,6 +94,67 @@ func TestExecuteInstructionAddsOpcodeCycles(t *testing.T) {
 	}
 }
 
+func TestIllegalInstructionUsesExceptionCycles(t *testing.T) {
+	cpu, ram := newEnvironment(t)
+	if err := ram.Write(Long, uint32(XIllegal<<2), 0x2200); err != nil {
+		t.Fatalf("failed to seed vector: %v", err)
+	}
+	if err := ram.Write(Word, cpu.regs.PC, 0x4afc); err != nil {
+		t.Fatalf("failed to write ILLEGAL: %v", err)
+	}
+
+	if err := cpu.Step(); err != nil {
+		t.Fatalf("Step failed: %v", err)
+	}
+	if cpu.Cycles() != uint64(exceptionCyclesIllegal) {
+		t.Fatalf("unexpected cycles for ILLEGAL: got %d want %d", cpu.Cycles(), exceptionCyclesIllegal)
+	}
+}
+
+func TestPrivilegeViolationUsesExceptionCycles(t *testing.T) {
+	cpu, ram := newEnvironment(t)
+	cpu.regs.SR &^= srSupervisor
+
+	if err := ram.Write(Long, uint32(XPrivViolation<<2), 0x2200); err != nil {
+		t.Fatalf("failed to seed vector: %v", err)
+	}
+	if err := ram.Write(Word, cpu.regs.PC, 0x4e70); err != nil { // RESET
+		t.Fatalf("failed to write RESET: %v", err)
+	}
+
+	if err := cpu.Step(); err != nil {
+		t.Fatalf("Step failed: %v", err)
+	}
+	if cpu.Cycles() != uint64(exceptionCyclesPrivilege) {
+		t.Fatalf("unexpected cycles for privilege violation: got %d want %d", cpu.Cycles(), exceptionCyclesPrivilege)
+	}
+}
+
+func TestInterruptAddsExceptionCycles(t *testing.T) {
+	cpu, ram := newEnvironment(t)
+	cpu.regs.SR = srSupervisor
+	if err := ram.Write(Long, uint32((autoVectorBase+2)<<2), 0x2200); err != nil {
+		t.Fatalf("failed to seed vector: %v", err)
+	}
+	if err := ram.Write(Word, cpu.regs.PC, 0x4e71); err != nil { // NOP
+		t.Fatalf("failed to write NOP: %v", err)
+	}
+	if err := ram.Write(Word, 0x2200, 0x4e71); err != nil {
+		t.Fatalf("failed to write handler NOP: %v", err)
+	}
+	if err := cpu.RequestInterrupt(2, nil); err != nil {
+		t.Fatalf("failed to request interrupt: %v", err)
+	}
+
+	if err := cpu.Step(); err != nil {
+		t.Fatalf("Step failed: %v", err)
+	}
+	expected := uint64(4 + exceptionCyclesInterrupt)
+	if cpu.Cycles() != expected {
+		t.Fatalf("unexpected cycles with interrupt: got %d want %d", cpu.Cycles(), expected)
+	}
+}
+
 func TestRunCycles(t *testing.T) {
 	cpu, ram := newEnvironment(t)
 

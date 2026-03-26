@@ -162,10 +162,17 @@ func movemToRegisters(cpu *cpu) error {
 		}
 
 		if r < 8 {
-			mask := size.mask()
-			cpu.regs.D[r] = (cpu.regs.D[r] & ^int32(mask)) | int32(value&mask)
+			if size == Word {
+				cpu.regs.D[r] = int32(int16(value))
+			} else {
+				cpu.regs.D[r] = int32(value)
+			}
 		} else {
-			cpu.regs.A[r-8] = value
+			if size == Word {
+				cpu.regs.A[r-8] = uint32(int32(int16(value)))
+			} else {
+				cpu.regs.A[r-8] = value
+			}
 		}
 
 		if mode == 3 { // postincrement source

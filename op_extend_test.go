@@ -165,3 +165,41 @@ func TestIllegalInstructionTriggersException(t *testing.T) {
 		t.Fatalf("expected PC to jump to handler %08x got %08x", handler, cpu.regs.PC)
 	}
 }
+
+func TestAddxByteUsesWordStepForA7(t *testing.T) {
+	cpu, ram := newEnvironment(t)
+	cpu.regs.A[7] = 0x3002
+	cpu.regs.A[0] = 0x4001
+
+	if err := ram.Write(Byte, 0x3000, 0x01); err != nil {
+		t.Fatalf("seed src: %v", err)
+	}
+	if err := ram.Write(Byte, 0x4000, 0x02); err != nil {
+		t.Fatalf("seed dst: %v", err)
+	}
+
+	code := assemble(t, "ADDX.B -(A7),-(A0)\n")
+	for i, b := range code {
+		if err := ram.Write(Byte, cpu.regs.PC+uint32(i), uint32(b)); err != nil {
+			t.Fatalf("write code: %v", err)
+		}
+	}
+
+	opcode, err := cpu.fetchOpcode()
+	if err != nil {
+		t.Fatalf("fetch: %v", err)
+	}
+	if err := cpu.executeInstruction(opcode); err != nil {
+		t.Fatalf("exec: %v", err)
+	}
+
+	if cpu.regs.A[7] != 0x3000 {
+		t.Fatalf("A7 should predecrement by 2 for byte ADDX, got %04x", cpu.regs.A[7])
+	}
+	if cpu.regs.A[0] != 0x4000 {
+		t.Fatalf("A0 should predecrement by 1 for byte ADDX, got %04x", cpu.regs.A[0])
+	}
+	if got, _ := ram.Read(Byte, 0x4000); got != 0x03 {
+		t.Fatalf("unexpected result byte %02x", got)
+	}
+}

@@ -88,8 +88,8 @@ func cmpm(cpu *cpu) error {
 		return err
 	}
 
-	cpu.regs.A[srcReg] += uint32(size)
-	cpu.regs.A[dstReg] += uint32(size)
+	cpu.regs.A[srcReg] += addressRegisterStep(srcReg, size)
+	cpu.regs.A[dstReg] += addressRegisterStep(dstReg, size)
 
 	_, flags := subWithFlags(srcVal, dstVal, size)
 	cpu.regs.SR = (cpu.regs.SR &^ (srNegative | srZero | srOverflow | srCarry)) | (flags & (srNegative | srZero | srOverflow | srCarry))

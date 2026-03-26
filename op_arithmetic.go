@@ -264,6 +264,12 @@ func subWithFlags(src, dst uint32, size Size) (uint32, uint16) {
 	return res, sr
 }
 
+func divExceptionCycles(opcode uint16) uint32 {
+	mode := (opcode >> 3) & 0x7
+	reg := opcode & 0x7
+	return exceptionCyclesDivByZero + eaAccessCycles(mode, reg, Word)
+}
+
 func addCycleCalculator(opmode uint16, toEA bool) cycleCalculator {
 	return func(opcode uint16) uint32 {
 		mode := (opcode >> 3) & 0x7
@@ -301,7 +307,7 @@ func divu(cpu *cpu) error {
 		return err
 	}
 	if divisor == 0 {
-		return cpu.exception(XDivByZero)
+		return cpu.exceptionWithCycles(XDivByZero, divExceptionCycles(cpu.regs.IR))
 	}
 
 	dividend := uint32(*dx(cpu))
@@ -336,7 +342,7 @@ func divs(cpu *cpu) error {
 	}
 	divisor := int32(int16(divisorRaw))
 	if divisor == 0 {
-		return cpu.exception(XDivByZero)
+		return cpu.exceptionWithCycles(XDivByZero, divExceptionCycles(cpu.regs.IR))
 	}
 
 	dividend := *dx(cpu)
