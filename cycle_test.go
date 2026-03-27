@@ -111,6 +111,36 @@ func TestIllegalInstructionUsesExceptionCycles(t *testing.T) {
 	}
 }
 
+func TestLineExceptionUsesExceptionCycles(t *testing.T) {
+	tests := []struct {
+		name   string
+		opcode uint16
+		vector uint32
+	}{
+		{name: "LineA", opcode: 0xa000, vector: XLineA},
+		{name: "LineF", opcode: 0xf000, vector: XLineF},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cpu, ram := newEnvironment(t)
+			if err := ram.Write(Long, tt.vector<<2, 0x2200); err != nil {
+				t.Fatalf("failed to seed vector: %v", err)
+			}
+			if err := ram.Write(Word, cpu.regs.PC, uint32(tt.opcode)); err != nil {
+				t.Fatalf("failed to write opcode: %v", err)
+			}
+
+			if err := cpu.Step(); err != nil {
+				t.Fatalf("Step failed: %v", err)
+			}
+			if cpu.Cycles() != uint64(exceptionCyclesIllegal) {
+				t.Fatalf("unexpected cycles for line exception: got %d want %d", cpu.Cycles(), exceptionCyclesIllegal)
+			}
+		})
+	}
+}
+
 func TestPrivilegeViolationUsesExceptionCycles(t *testing.T) {
 	cpu, ram := newEnvironment(t)
 	cpu.regs.SR &^= srSupervisor

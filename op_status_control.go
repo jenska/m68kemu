@@ -4,6 +4,8 @@ func init() {
 	registerInstruction(trapv, 0x4e76, 0xffff, 0, constantCycles(4))
 	registerInstruction(resetInstruction, 0x4e70, 0xffff, 0, constantCycles(132))
 	registerInstruction(stop, 0x4e72, 0xffff, 0, constantCycles(4))
+	registerInstruction(movec68000, 0x4e7a, 0xffff, 0, constantCycles(4))
+	registerInstruction(movec68000, 0x4e7b, 0xffff, 0, constantCycles(4))
 
 	registerInstruction(oriToCcr, 0x003c, 0xffff, 0, constantCycles(20))
 	registerInstruction(oriToSr, 0x007c, 0xffff, 0, constantCycles(20))
@@ -26,6 +28,12 @@ func init() {
 
 	registerInstruction(rte, 0x4e73, 0xffff, 0, constantCycles(20))
 	registerInstruction(rtr, 0x4e77, 0xffff, 0, constantCycles(20))
+}
+
+// MOVEC is not implemented on a plain 68000. The opcode traps immediately as
+// ILLEGAL before consuming the extension word that names the control register.
+func movec68000(cpu *cpu) error {
+	return cpu.exceptionWithCycles(XIllegal, exceptionCyclesIllegal)
 }
 
 func trapv(cpu *cpu) error {

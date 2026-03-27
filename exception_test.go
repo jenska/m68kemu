@@ -121,8 +121,8 @@ func TestExecuteInstructionTriggersIllegalVector(t *testing.T) {
 	if err := ram.Write(Long, illegalVectorOffset, handler); err != nil {
 		t.Fatalf("failed to write illegal instruction vector: %v", err)
 	}
-	if err := ram.Write(Word, cpu.regs.PC, 0xffff); err != nil {
-		t.Fatalf("failed to write illegal opcode: %v", err)
+	if err := ram.Write(Word, cpu.regs.PC, 0x4afc); err != nil {
+		t.Fatalf("failed to write ILLEGAL opcode: %v", err)
 	}
 
 	opcode, err := cpu.fetchOpcode()
@@ -157,6 +157,67 @@ func TestExecuteInstructionTriggersIllegalVector(t *testing.T) {
 
 	if cpu.regs.PC != handler {
 		t.Fatalf("PC did not jump to illegal instruction handler: got %08x want %08x", cpu.regs.PC, handler)
+	}
+}
+
+func TestExecuteInstructionTriggersLineExceptionVector(t *testing.T) {
+	tests := []struct {
+		name    string
+		opcode  uint16
+		vector  uint32
+		handler uint32
+	}{
+		{name: "LineA", opcode: 0xa000, vector: XLineA, handler: 0x00aa00},
+		{name: "LineF", opcode: 0xf000, vector: XLineF, handler: 0x00ff00},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cpu, ram := newEnvironment(t)
+			vectorOffset := tt.vector << 2
+			originalPC := cpu.regs.PC
+
+			if err := ram.Write(Long, vectorOffset, tt.handler); err != nil {
+				t.Fatalf("failed to write line exception vector: %v", err)
+			}
+			if err := ram.Write(Word, cpu.regs.PC, uint32(tt.opcode)); err != nil {
+				t.Fatalf("failed to write opcode: %v", err)
+			}
+
+			opcode, err := cpu.fetchOpcode()
+			if err != nil {
+				t.Fatalf("failed to fetch opcode: %v", err)
+			}
+
+			if err := cpu.executeInstruction(opcode); err != nil {
+				t.Fatalf("line exception handler returned error: %v", err)
+			}
+
+			expectedSP := cpu.regs.SSP - exceptionFrameSize
+			if cpu.regs.A[7] != expectedSP {
+				t.Fatalf("unexpected SP after line exception: got %08x want %08x", cpu.regs.A[7], expectedSP)
+			}
+
+			stackedSR, err := ram.Read(Word, expectedSP)
+			if err != nil {
+				t.Fatalf("failed reading stacked SR: %v", err)
+			}
+			if stackedSR != 0x2700 {
+				t.Fatalf("stacked SR mismatch: got %04x want %04x", stackedSR, 0x2700)
+			}
+
+			stackedPC, err := ram.Read(Long, expectedSP+uint32(Word))
+			if err != nil {
+				t.Fatalf("failed reading stacked PC: %v", err)
+			}
+			if stackedPC != originalPC+uint32(Word) {
+				t.Fatalf("stacked PC mismatch: got %08x want %08x", stackedPC, originalPC+uint32(Word))
+			}
+
+			if cpu.regs.PC != tt.handler {
+				t.Fatalf("PC did not jump to line exception handler: got %08x want %08x", cpu.regs.PC, tt.handler)
+			}
+		})
 	}
 }
 

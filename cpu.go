@@ -14,6 +14,8 @@ const (
 	XIllegal          = 4
 	XDivByZero        = 5
 	XPrivViolation    = 8
+	XLineA            = 10
+	XLineF            = 11
 	XUninitializedInt = 15
 	XTrap             = 32
 
@@ -157,6 +159,7 @@ type (
 		regs       Registers
 		cycles     uint64
 		bus        AddressBus
+		busFast    *Bus
 		trap       TraceCallback
 		scheduler  *CycleScheduler
 		interrupts *InterruptController
@@ -255,6 +258,12 @@ func (cpu *cpu) readContext(size Size, address uint32, ctx accessContext) (uint3
 				return 0, err
 			}
 		}
+		if result, ok, err := cpu.fastRAMRead(size, address); ok {
+			if err != nil {
+				cpu.recordFault(faultAddress(address, err), ctx)
+			}
+			return result, err
+		}
 		result, err := cpu.bus.Read(size, address)
 		if err != nil {
 			cpu.recordFault(faultAddress(address, err), ctx)
@@ -283,6 +292,12 @@ func (cpu *cpu) writeContext(size Size, address uint32, value uint32, ctx access
 				return err
 			}
 		}
+		if ok, err := cpu.fastRAMWrite(size, address, value); ok {
+			if err != nil {
+				cpu.recordFault(faultAddress(address, err), ctx)
+			}
+			return err
+		}
 		if err := cpu.bus.Write(size, address, value); err != nil {
 			cpu.recordFault(faultAddress(address, err), ctx)
 			return err
@@ -291,6 +306,110 @@ func (cpu *cpu) writeContext(size Size, address uint32, value uint32, ctx access
 	default:
 		return fmt.Errorf("unknown operand size")
 
+	}
+}
+
+func (cpu *cpu) fastRAMDevice() *RAM {
+	if cpu.busFast == nil {
+		return nil
+	}
+	if cpu.busFast.waitStates != 0 || cpu.busFast.hasWaitStateDevices {
+		return nil
+	}
+	return cpu.busFast.singleRAM
+}
+
+func (cpu *cpu) fastRAMRead(size Size, address uint32) (uint32, bool, error) {
+	ram := cpu.fastRAMDevice()
+	if ram == nil {
+		return 0, false, nil
+	}
+
+	memLen := uint32(len(ram.mem))
+	if address < ram.offset {
+		return 0, true, BusError(address)
+	}
+	idx := address - ram.offset
+
+	switch size {
+	case Byte:
+		if idx >= memLen {
+			return 0, true, BusError(address)
+		}
+		return uint32(ram.mem[idx]), true, nil
+	case Word:
+		if address&1 != 0 {
+			return 0, true, AddressError(address)
+		}
+		if idx+1 >= memLen {
+			return 0, true, BusError(address)
+		}
+		return uint32(ram.mem[idx])<<8 | uint32(ram.mem[idx+1]), true, nil
+	case Long:
+		if address&1 != 0 {
+			return 0, true, AddressError(address)
+		}
+		if idx+1 >= memLen {
+			return 0, true, BusError(address)
+		}
+		if idx+3 >= memLen {
+			return 0, true, BusError((address + uint32(Word)) & 0xffffff)
+		}
+		return uint32(ram.mem[idx])<<24 |
+			uint32(ram.mem[idx+1])<<16 |
+			uint32(ram.mem[idx+2])<<8 |
+			uint32(ram.mem[idx+3]), true, nil
+	default:
+		return 0, false, nil
+	}
+}
+
+func (cpu *cpu) fastRAMWrite(size Size, address uint32, value uint32) (bool, error) {
+	ram := cpu.fastRAMDevice()
+	if ram == nil {
+		return false, nil
+	}
+
+	memLen := uint32(len(ram.mem))
+	if address < ram.offset {
+		return true, BusError(address)
+	}
+	idx := address - ram.offset
+
+	switch size {
+	case Byte:
+		if idx >= memLen {
+			return true, BusError(address)
+		}
+		ram.mem[idx] = uint8(value)
+		return true, nil
+	case Word:
+		if address&1 != 0 {
+			return true, AddressError(address)
+		}
+		if idx+1 >= memLen {
+			return true, BusError(address)
+		}
+		ram.mem[idx] = uint8(value >> 8)
+		ram.mem[idx+1] = uint8(value)
+		return true, nil
+	case Long:
+		if address&1 != 0 {
+			return true, AddressError(address)
+		}
+		if idx+1 >= memLen {
+			return true, BusError(address)
+		}
+		ram.mem[idx] = uint8(value >> 24)
+		ram.mem[idx+1] = uint8(value >> 16)
+		if idx+3 >= memLen {
+			return true, BusError((address + uint32(Word)) & 0xffffff)
+		}
+		ram.mem[idx+2] = uint8(value >> 8)
+		ram.mem[idx+3] = uint8(value)
+		return true, nil
+	default:
+		return false, nil
 	}
 }
 
@@ -355,13 +474,24 @@ func (cpu *cpu) executeInstruction(opcode uint16) error {
 
 	handler := opcodeTable[opcode]
 	if handler == nil {
-		return cpu.exceptionWithCycles(XIllegal, exceptionCyclesIllegal)
+		return cpu.exceptionWithCycles(exceptionVectorForOpcode(opcode), exceptionCyclesIllegal)
 	}
 
 	if err := handler(cpu); err != nil {
 		return cpu.handleFaultError(err, true)
 	}
 	return nil
+}
+
+func exceptionVectorForOpcode(opcode uint16) uint32 {
+	switch opcode & 0xf000 {
+	case 0xa000:
+		return XLineA
+	case 0xf000:
+		return XLineF
+	default:
+		return XIllegal
+	}
 }
 
 func (cpu *cpu) raiseException(vector uint32, newSR uint16) error {
@@ -665,6 +795,7 @@ func NewCPU(bus AddressBus) (CPU, error) {
 	c := cpu{bus: bus}
 
 	if b, ok := bus.(*Bus); ok {
+		c.busFast = b
 		previous := b.waitHook
 		b.SetWaitHook(func(states uint32) {
 			if previous != nil {

@@ -133,3 +133,67 @@ func TestRteRestoresExceptionFrame(t *testing.T) {
 		t.Fatalf("RTE should switch to USP after clearing S bit, SP=%04x USP=%04x", cpu.regs.A[7], cpu.regs.USP)
 	}
 }
+
+func TestMovecProbesTrapAsIllegalOn68000(t *testing.T) {
+	tests := []struct {
+		name   string
+		opcode uint16
+	}{
+		{name: "MoveFromControl", opcode: 0x4e7a},
+		{name: "MoveToControl", opcode: 0x4e7b},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cpu, ram := newEnvironment(t)
+			illegalHandler := uint32(0x4000)
+			privHandler := uint32(0x5000)
+			startPC := cpu.regs.PC
+
+			cpu.regs.SR &^= srSupervisor
+
+			if err := ram.Write(Long, uint32(XIllegal<<2), illegalHandler); err != nil {
+				t.Fatalf("failed to seed illegal vector: %v", err)
+			}
+			if err := ram.Write(Long, uint32(XPrivViolation<<2), privHandler); err != nil {
+				t.Fatalf("failed to seed privilege vector: %v", err)
+			}
+
+			if err := ram.Write(Word, startPC, uint32(tt.opcode)); err != nil {
+				t.Fatalf("failed to write MOVEC opcode: %v", err)
+			}
+			if err := ram.Write(Word, startPC+uint32(Word), 0x0001); err != nil {
+				t.Fatalf("failed to write MOVEC extension: %v", err)
+			}
+
+			if err := cpu.Step(); err != nil {
+				t.Fatalf("MOVEC probe failed: %v", err)
+			}
+
+			if cpu.regs.PC != illegalHandler {
+				t.Fatalf("MOVEC probe should trap to illegal handler, PC=%08x want %08x", cpu.regs.PC, illegalHandler)
+			}
+
+			expectedSP := cpu.regs.SSP - exceptionFrameSize
+			if cpu.regs.A[7] != expectedSP {
+				t.Fatalf("unexpected SP after MOVEC probe: got %08x want %08x", cpu.regs.A[7], expectedSP)
+			}
+
+			stackedPC, err := ram.Read(Long, expectedSP+uint32(Word))
+			if err != nil {
+				t.Fatalf("failed to read stacked PC: %v", err)
+			}
+			if stackedPC != startPC+uint32(Word) {
+				t.Fatalf("MOVEC probe should fault before extension word: stacked PC=%08x want %08x", stackedPC, startPC+uint32(Word))
+			}
+
+			if cpu.Cycles() != uint64(exceptionCyclesIllegal) {
+				t.Fatalf("unexpected cycles for MOVEC probe: got %d want %d", cpu.Cycles(), exceptionCyclesIllegal)
+			}
+
+			if cpu.regs.PC == privHandler {
+				t.Fatalf("MOVEC probe should not raise privilege violation")
+			}
+		})
+	}
+}
