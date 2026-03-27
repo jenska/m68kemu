@@ -248,10 +248,6 @@ func (b *Bus) findDevice(address uint32) Device {
 		}
 	}
 
-	if b.lastDevice != nil && b.lastDevice.Contains(address) {
-		return b.lastDevice
-	}
-
 	for _, dev := range b.devices {
 		if dev.Contains(address) {
 			b.lastDevice = dev
