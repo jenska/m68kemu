@@ -10,6 +10,10 @@ func init() {
 		match := uint16(0xb000) | (opmode << 6)
 		registerInstruction(cmpInstruction, match, 0xf1c0, cmpEAMask, addCycleCalculator(opmode, false))
 	}
+	for _, opmode := range []uint16{3, 7} {
+		match := uint16(0xb000) | (opmode << 6)
+		registerInstruction(cmpa, match, 0xf1c0, cmpEAMask, cmpaCycleCalculator())
+	}
 
 	cmpiMask := eaMaskDataRegister | eaMaskIndirect | eaMaskPostIncrement |
 		eaMaskPreDecrement | eaMaskDisplacement | eaMaskIndex |
@@ -39,6 +43,27 @@ func cmpInstruction(cpu *cpu) error {
 
 	dst := udx(cpu)
 	_, flags := subWithFlags(srcVal, *dst&size.mask(), size)
+	cpu.regs.SR = (cpu.regs.SR &^ (srNegative | srZero | srOverflow | srCarry)) | (flags & (srNegative | srZero | srOverflow | srCarry))
+	return nil
+}
+
+func cmpa(cpu *cpu) error {
+	size := cmpaOperandSize(cpu.regs.IR)
+
+	src, err := cpu.ResolveSrcEA(size)
+	if err != nil {
+		return err
+	}
+	srcVal, err := src.read()
+	if err != nil {
+		return err
+	}
+	if size == Word {
+		srcVal = uint32(int32(int16(srcVal)))
+	}
+
+	dst := *ax(cpu)
+	_, flags := subWithFlags(srcVal, dst, Long)
 	cpu.regs.SR = (cpu.regs.SR &^ (srNegative | srZero | srOverflow | srCarry)) | (flags & (srNegative | srZero | srOverflow | srCarry))
 	return nil
 }
@@ -115,5 +140,21 @@ func cmpmCycleCalculator() cycleCalculator {
 		default:
 			return 0
 		}
+	}
+}
+
+func cmpaOperandSize(opcode uint16) Size {
+	if (opcode>>6)&0x7 == 7 {
+		return Long
+	}
+	return Word
+}
+
+func cmpaCycleCalculator() cycleCalculator {
+	return func(opcode uint16) uint32 {
+		mode := (opcode >> 3) & 0x7
+		reg := opcode & 0x7
+		size := cmpaOperandSize(opcode)
+		return 8 + eaAccessCycles(mode, reg, size)
 	}
 }

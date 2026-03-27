@@ -67,6 +67,39 @@ func TestCmpiImmediate(t *testing.T) {
 	}
 }
 
+func TestCmpiLongAbsoluteDestination(t *testing.T) {
+	cpu, ram := newEnvironment(t)
+	cpu.regs.SR |= srExtend
+	if err := ram.Write(Long, 0x3000, 3); err != nil {
+		t.Fatalf("write dst: %v", err)
+	}
+
+	code := assemble(t, "CMPI.L #2,$3000\n")
+	for i, b := range code {
+		if err := ram.Write(Byte, cpu.regs.PC+uint32(i), uint32(b)); err != nil {
+			t.Fatalf("write code: %v", err)
+		}
+	}
+
+	opcode, err := cpu.fetchOpcode()
+	if err != nil {
+		t.Fatalf("fetch: %v", err)
+	}
+	if err := cpu.executeInstruction(opcode); err != nil {
+		t.Fatalf("exec: %v", err)
+	}
+
+	if got, err := ram.Read(Long, 0x3000); err != nil || got != 3 {
+		t.Fatalf("CMPI modified destination memory: %08x err=%v", got, err)
+	}
+	if cpu.regs.SR&srExtend == 0 {
+		t.Fatalf("CMPI should leave extend bit unchanged")
+	}
+	if got := cpu.regs.SR & (srNegative | srZero | srOverflow | srCarry); got != 0 {
+		t.Fatalf("unexpected condition codes %04x", got)
+	}
+}
+
 func TestCmpmPostIncrement(t *testing.T) {
 	cpu, ram := newEnvironment(t)
 	cpu.regs.A[0] = 0x3000
@@ -98,6 +131,66 @@ func TestCmpmPostIncrement(t *testing.T) {
 		t.Fatalf("address registers not incremented correctly: A0=%04x A1=%04x", cpu.regs.A[0], cpu.regs.A[1])
 	}
 	expected := uint16(0)
+	if got := cpu.regs.SR & (srNegative | srZero | srOverflow | srCarry); got != expected {
+		t.Fatalf("unexpected condition codes %04x", got)
+	}
+}
+
+func TestCmpaWordSignExtendsSource(t *testing.T) {
+	cpu, ram := newEnvironment(t)
+	cpu.regs.A[0] = 0xffffffff
+	cpu.regs.SR |= srExtend
+
+	code := assemble(t, "CMPA.W #-1,A0\n")
+	for i, b := range code {
+		if err := ram.Write(Byte, cpu.regs.PC+uint32(i), uint32(b)); err != nil {
+			t.Fatalf("write code: %v", err)
+		}
+	}
+
+	opcode, err := cpu.fetchOpcode()
+	if err != nil {
+		t.Fatalf("fetch: %v", err)
+	}
+	if err := cpu.executeInstruction(opcode); err != nil {
+		t.Fatalf("exec: %v", err)
+	}
+
+	if cpu.regs.A[0] != 0xffffffff {
+		t.Fatalf("CMPA modified address register: %08x", cpu.regs.A[0])
+	}
+	if cpu.regs.SR&srExtend == 0 {
+		t.Fatalf("CMPA should leave extend bit unchanged")
+	}
+	expected := uint16(srZero)
+	if got := cpu.regs.SR & (srNegative | srZero | srOverflow | srCarry); got != expected {
+		t.Fatalf("unexpected condition codes %04x", got)
+	}
+}
+
+func TestCmpaLongUsesFullWidthSource(t *testing.T) {
+	cpu, ram := newEnvironment(t)
+	cpu.regs.A[1] = 0x12345678
+
+	code := assemble(t, "CMPA.L #$12345678,A1\n")
+	for i, b := range code {
+		if err := ram.Write(Byte, cpu.regs.PC+uint32(i), uint32(b)); err != nil {
+			t.Fatalf("write code: %v", err)
+		}
+	}
+
+	opcode, err := cpu.fetchOpcode()
+	if err != nil {
+		t.Fatalf("fetch: %v", err)
+	}
+	if err := cpu.executeInstruction(opcode); err != nil {
+		t.Fatalf("exec: %v", err)
+	}
+
+	if cpu.regs.A[1] != 0x12345678 {
+		t.Fatalf("CMPA modified address register: %08x", cpu.regs.A[1])
+	}
+	expected := uint16(srZero)
 	if got := cpu.regs.SR & (srNegative | srZero | srOverflow | srCarry); got != expected {
 		t.Fatalf("unexpected condition codes %04x", got)
 	}

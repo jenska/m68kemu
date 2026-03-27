@@ -301,6 +301,9 @@ func (ea *eaAbsolute) init(cpu *cpu, o Size) (modifier, error) {
 	if err != nil {
 		return nil, err
 	}
+	if ea.eaSize == Word {
+		address = uint32(int32(int16(address)))
+	}
 	ea.address = address
 	return ea, nil
 }

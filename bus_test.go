@@ -233,3 +233,30 @@ func TestNewAtariSTBusKeepsTOSAndIORegionsDistinct(t *testing.T) {
 		t.Fatalf("read IO start = (%02x, %v), want (34, <nil>)", got, err)
 	}
 }
+
+func TestBusOverlappingMappedDevicesPreferLaterSpecificRegionAfterCache(t *testing.T) {
+	romAlias := newStubMappedDevice(STTOSStart, STIOEnd)
+	io := newStubMappedDevice(STIOStart, STIOEnd)
+
+	bus := NewAtariSTBus(
+		STRegionMapping{Start: STTOSStart, End: STIOEnd, Device: romAlias},
+		STRegionMapping{Start: STIOStart, End: STIOEnd, Device: io},
+	)
+
+	if err := bus.Write(Byte, STTOSStart, 0x12); err != nil {
+		t.Fatalf("write ROM alias region failed: %v", err)
+	}
+	if got, err := bus.Read(Byte, STTOSStart); err != nil || got != 0x12 {
+		t.Fatalf("read ROM alias region = (%02x, %v), want (12, <nil>)", got, err)
+	}
+
+	if err := bus.Write(Byte, STIOStart, 0x34); err != nil {
+		t.Fatalf("write IO region failed: %v", err)
+	}
+	if got, err := bus.Read(Byte, STIOStart); err != nil || got != 0x34 {
+		t.Fatalf("read IO region = (%02x, %v), want (34, <nil>)", got, err)
+	}
+	if got, err := romAlias.Read(Byte, STIOStart); err != nil || got != 0 {
+		t.Fatalf("ROM alias should not service IO address: got (%02x, %v)", got, err)
+	}
+}

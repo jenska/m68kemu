@@ -124,6 +124,17 @@ func TestEAAbsoluteWordAndLong(t *testing.T) {
 		t.Fatalf("absolute word address mismatch: %08x", addr)
 	}
 
+	if err := cpu.bus.Write(Word, cpu.regs.PC, 0x8001); err != nil {
+		t.Fatalf("write signed absolute word failed: %v", err)
+	}
+	eaWordSigned, err := (&eaAbsolute{eaSize: Word}).init(cpu, Word)
+	if err != nil {
+		t.Fatalf("init signed word failed: %v", err)
+	}
+	if addr := eaWordSigned.computedAddress(); addr != 0xFFFF8001 {
+		t.Fatalf("signed absolute word address mismatch: %08x", addr)
+	}
+
 	if err := cpu.bus.Write(Long, cpu.regs.PC, 0xAABBCCDD); err != nil {
 		t.Fatalf("write absolute long failed: %v", err)
 	}
@@ -133,6 +144,46 @@ func TestEAAbsoluteWordAndLong(t *testing.T) {
 	}
 	if addr := eaLong.computedAddress(); addr != 0xAABBCCDD {
 		t.Fatalf("absolute long address mismatch: %08x", addr)
+	}
+}
+
+func TestEAAbsoluteWordUsesSignExtendedAddressForAccess(t *testing.T) {
+	low := NewRAM(0, 1024*64)
+	high := NewRAM(0xFF8000, 0x100)
+	bus := NewBus(low, high)
+	low.Write(Long, 0, 0x1000)
+	low.Write(Long, 4, 0x2000)
+
+	processor, err := NewCPU(bus)
+	if err != nil {
+		t.Fatalf("failed to create CPU: %v", err)
+	}
+	cpu, ok := processor.(*cpu)
+	if !ok {
+		t.Fatalf("CPU implementation has unexpected type %T", processor)
+	}
+
+	if err := high.Write(Byte, 0xFF8001, 0x5A); err != nil {
+		t.Fatalf("write high memory failed: %v", err)
+	}
+
+	code := assemble(t, "MOVE.B $8001.W,D0\n")
+	for i, b := range code {
+		if err := low.Write(Byte, cpu.regs.PC+uint32(i), uint32(b)); err != nil {
+			t.Fatalf("write code: %v", err)
+		}
+	}
+
+	opcode, err := cpu.fetchOpcode()
+	if err != nil {
+		t.Fatalf("fetch: %v", err)
+	}
+	if err := cpu.executeInstruction(opcode); err != nil {
+		t.Fatalf("exec: %v", err)
+	}
+
+	if got := uint32(cpu.regs.D[0]) & 0xFF; got != 0x5A {
+		t.Fatalf("expected D0 low byte 0x5A got %02x", got)
 	}
 }
 
