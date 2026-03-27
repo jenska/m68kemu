@@ -3,8 +3,6 @@ package m68kemu
 import (
 	"fmt"
 	"strings"
-
-	"github.com/jenska/m68kdasm"
 )
 
 const (
@@ -930,34 +928,11 @@ func constantCycles(c uint32) cycleCalculator {
 }
 
 func (cpu *cpu) disassemblyString() string {
-	const maxInstructionBytes = 16
-
-	peeker, ok := cpu.bus.(interface {
-		Peek(Size, uint32) (uint32, error)
-	})
-	if !ok {
-		return fmt.Sprintf("DISASM %08x: <unavailable>", cpu.regs.PC)
-	}
-
-	data := make([]byte, 0, maxInstructionBytes)
-	for i := uint32(0); i < maxInstructionBytes; i++ {
-		value, err := peeker.Peek(Byte, (cpu.regs.PC+i)&0xffffff)
-		if err != nil {
-			break
-		}
-		data = append(data, byte(value))
-	}
-
-	if len(data) < 2 {
-		return fmt.Sprintf("DISASM %08x: <unavailable>", cpu.regs.PC)
-	}
-
-	inst, err := m68kdasm.Decode(data, cpu.regs.PC)
+	line, err := DisassembleInstruction(cpu.bus, cpu.regs.PC)
 	if err != nil {
-		return fmt.Sprintf("DISASM %08x: <decode error: %v>", cpu.regs.PC, err)
+		return fmt.Sprintf("DISASM %08x: <unavailable>", cpu.regs.PC)
 	}
-
-	return fmt.Sprintf("DISASM %08x: %s", cpu.regs.PC, inst.Assembly())
+	return fmt.Sprintf("DISASM %08x: %s", cpu.regs.PC, line.Assembly)
 }
 
 func (cpu *cpu) dataFunctionCode() uint16 {
