@@ -124,6 +124,24 @@ func TestBusMappedDeviceRangeLookup(t *testing.T) {
 	}
 }
 
+func TestBusPrefersEarlierOverlappingDeviceAfterROMHit(t *testing.T) {
+	overlay := newStubMappedDevice(0xFF8000, 0xFF8007)
+	rom := newStubMappedDevice(0xFC0000, 0xFFFFFF)
+	overlay.data[0xFF8006] = 0x12
+	rom.data[0xFF8006] = 0x34
+	rom.data[0xFC0000] = 0x56
+
+	bus := NewBus(overlay, rom)
+
+	if got, err := bus.Read(Byte, 0xFC0000); err != nil || got != 0x56 {
+		t.Fatalf("prime ROM read = (%02x, %v), want (56, <nil>)", got, err)
+	}
+
+	if got, err := bus.Read(Byte, 0xFF8006); err != nil || got != 0x12 {
+		t.Fatalf("overlapping device read = (%02x, %v), want (12, <nil>)", got, err)
+	}
+}
+
 func TestBusSingleMappedDeviceRejectsUnmappedAddresses(t *testing.T) {
 	ram := NewRAM(0x2000, 0x0010)
 	bus := NewBus(MapDevice(0x2000, 0x200F, ram))
@@ -237,26 +255,22 @@ func TestNewAtariSTBusKeepsTOSAndIORegionsDistinct(t *testing.T) {
 func TestBusOverlappingMappedDevicesPreferLaterSpecificRegionAfterCache(t *testing.T) {
 	romAlias := newStubMappedDevice(STTOSStart, STIOEnd)
 	io := newStubMappedDevice(STIOStart, STIOEnd)
+	romAlias.data[STTOSStart] = 0x12
+	romAlias.data[STIOStart] = 0x56
+	io.data[STIOStart] = 0x34
 
 	bus := NewAtariSTBus(
-		STRegionMapping{Start: STTOSStart, End: STIOEnd, Device: romAlias},
 		STRegionMapping{Start: STIOStart, End: STIOEnd, Device: io},
+		STRegionMapping{Start: STTOSStart, End: STIOEnd, Device: romAlias},
 	)
 
-	if err := bus.Write(Byte, STTOSStart, 0x12); err != nil {
-		t.Fatalf("write ROM alias region failed: %v", err)
-	}
 	if got, err := bus.Read(Byte, STTOSStart); err != nil || got != 0x12 {
 		t.Fatalf("read ROM alias region = (%02x, %v), want (12, <nil>)", got, err)
-	}
-
-	if err := bus.Write(Byte, STIOStart, 0x34); err != nil {
-		t.Fatalf("write IO region failed: %v", err)
 	}
 	if got, err := bus.Read(Byte, STIOStart); err != nil || got != 0x34 {
 		t.Fatalf("read IO region = (%02x, %v), want (34, <nil>)", got, err)
 	}
-	if got, err := romAlias.Read(Byte, STIOStart); err != nil || got != 0 {
-		t.Fatalf("ROM alias should not service IO address: got (%02x, %v)", got, err)
+	if got, err := io.Read(Byte, STIOStart); err != nil || got != 0x34 {
+		t.Fatalf("IO backing device missing expected value: got (%02x, %v)", got, err)
 	}
 }
