@@ -12,7 +12,7 @@ This project provides a Motorola 68000 CPU emulator for retro-computing projects
 * Interrupt handling and exception processing.
 * Correct short exception frames for group 1/2 exceptions and 68000 group 0 bus/address error frames.
 * 24-bit address bus with support for multiple devices, fixed-range mappings, and Atari ST-style region layout.
-* Tracing, breakpoints, and cycle-budgeted execution.
+* Tracing, breakpoints, cycle-budgeted execution, and verbose logging helpers with instruction-range disassembly.
 * Optional cycle scheduler hooks for machine-level devices such as timers, video, DMA, and interrupt controllers.
 
 ## Current Status
@@ -126,6 +126,31 @@ scheduler.ScheduleAfter(512, func(now uint64) {
 ```
 
 The scheduler is intentionally small at this stage. It is meant as a foundation for ST components rather than a finished machine-timing framework.
+
+### Verbose Logging And Range Disassembly
+
+The emulator includes helpers for both one-off disassembly and trace logging:
+
+```go
+logger := m68kemu.NewVerboseLogger(cpu, bus, os.Stdout, m68kemu.VerboseLoggerOptions{
+	IncludeRegisters: true,
+	IncludeCycles:    true,
+	MemoryRanges: []m68kemu.MemoryRange{
+		{Start: 0x2000, Length: 0x10, Label: "program"},
+	},
+})
+cpu.SetTracer(logger.Trace)
+
+lines, err := m68kemu.DisassembleMemoryRange(bus, 0x2000, 0x10)
+if err != nil {
+	log.Fatalf("disassembly failed: %v", err)
+}
+for _, line := range lines {
+	fmt.Println(line)
+}
+```
+
+These helpers use the bus `Peek` path when available so debug output does not trigger device side effects.
 
 ## Testing
 

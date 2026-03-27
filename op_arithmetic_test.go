@@ -258,3 +258,78 @@ func TestAddaSuba(t *testing.T) {
 		t.Fatalf("expected condition codes untouched, SR=%04x", cpu.regs.SR)
 	}
 }
+
+func TestAddaSubaAddressRegisterSource(t *testing.T) {
+	tests := []struct {
+		name   string
+		asm    string
+		a0     uint32
+		a1     uint32
+		sr     uint16
+		wantA1 uint32
+	}{
+		{
+			name:   "SUBA.L A0,A1",
+			asm:    "SUBA.L A0,A1\n",
+			a0:     0x00000003,
+			a1:     0x00000010,
+			sr:     0x271b,
+			wantA1: 0x0000000d,
+		},
+		{
+			name:   "SUBA.W A0,A1",
+			asm:    "SUBA.W A0,A1\n",
+			a0:     0x1234ffff,
+			a1:     0x00000005,
+			sr:     0x271b,
+			wantA1: 0x00000006,
+		},
+		{
+			name:   "ADDA.L A0,A1",
+			asm:    "ADDA.L A0,A1\n",
+			a0:     0x00000003,
+			a1:     0x00000005,
+			sr:     0x271b,
+			wantA1: 0x00000008,
+		},
+		{
+			name:   "ADDA.W A0,A1",
+			asm:    "ADDA.W A0,A1\n",
+			a0:     0x1234ffff,
+			a1:     0x00000005,
+			sr:     0x271b,
+			wantA1: 0x00000004,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cpu, ram := newEnvironment(t)
+			cpu.regs.A[0] = tt.a0
+			cpu.regs.A[1] = tt.a1
+			cpu.regs.SR = tt.sr
+
+			code := assemble(t, tt.asm)
+			for i, b := range code {
+				if err := ram.Write(Byte, cpu.regs.PC+uint32(i), uint32(b)); err != nil {
+					t.Fatalf("write code: %v", err)
+				}
+			}
+
+			opcode, err := cpu.fetchOpcode()
+			if err != nil {
+				t.Fatalf("fetch: %v", err)
+			}
+			if err := cpu.executeInstruction(opcode); err != nil {
+				t.Fatalf("execute %s: %v", tt.name, err)
+			}
+
+			if cpu.regs.A[1] != tt.wantA1 {
+				t.Fatalf("A1 = %08x, want %08x", cpu.regs.A[1], tt.wantA1)
+			}
+			if cpu.regs.SR != tt.sr {
+				t.Fatalf("expected SR unchanged, got %04x want %04x", cpu.regs.SR, tt.sr)
+			}
+		})
+	}
+}

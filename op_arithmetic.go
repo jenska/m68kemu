@@ -33,7 +33,7 @@ func init() {
 		registerInstruction(sub, match, 0xf1c0, addSubAlterableMask, addCycleCalculator(opmode, true))
 	}
 
-	addaSubaMask := eaMaskDataRegister | eaMaskIndirect | eaMaskPostIncrement |
+	addaSubaMask := eaMaskDataRegister | eaMaskAddressRegister | eaMaskIndirect | eaMaskPostIncrement |
 		eaMaskPreDecrement | eaMaskDisplacement | eaMaskIndex |
 		eaMaskAbsoluteShort | eaMaskAbsoluteLong | eaMaskPCDisplacement | eaMaskPCIndex | eaMaskImmediate
 	for opmode := uint16(3); opmode <= 7; opmode += 4 { // 3=word, 7=long
