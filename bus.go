@@ -239,12 +239,10 @@ func (b *Bus) refreshTopology() {
 }
 
 func (b *Bus) findDevice(address uint32) Device {
-	if b.lastDevice != nil && b.lastDevice.Contains(address) {
-		return b.lastDevice
-	}
-
 	if b.hasPageMap {
-		for _, dev := range b.pageDevices[(address&0xffffff)>>16] {
+		pageDevices := b.pageDevices[(address&0xffffff)>>16]
+		for i := len(pageDevices) - 1; i >= 0; i-- {
+			dev := pageDevices[i]
 			if dev.Contains(address) {
 				b.lastDevice = dev
 				return dev
@@ -252,7 +250,12 @@ func (b *Bus) findDevice(address uint32) Device {
 		}
 	}
 
-	for _, dev := range b.devices {
+	if b.lastDevice != nil && b.lastDevice.Contains(address) {
+		return b.lastDevice
+	}
+
+	for i := len(b.devices) - 1; i >= 0; i-- {
+		dev := b.devices[i]
 		if dev.Contains(address) {
 			b.lastDevice = dev
 			return dev

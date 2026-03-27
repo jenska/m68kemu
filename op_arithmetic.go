@@ -66,6 +66,11 @@ func init() {
 		eaMaskAbsoluteShort | eaMaskAbsoluteLong
 
 	for size := uint16(0); size < 3; size++ {
+		registerInstruction(addi, uint16(0x0600)|(size<<6), 0xffc0, alterableNoAddr, arithmeticImmediateCycleCalculator())
+		registerInstruction(subi, uint16(0x0400)|(size<<6), 0xffc0, alterableNoAddr, arithmeticImmediateCycleCalculator())
+	}
+
+	for size := uint16(0); size < 3; size++ {
 		match := uint16(0x4400) | (size << 6)
 		registerInstruction(negInstruction, match, 0xffc0, alterableNoAddr, clrTstCycleCalculator())
 	}
@@ -218,6 +223,45 @@ func subq(cpu *cpu) error {
 	return nil
 }
 
+func addi(cpu *cpu) error {
+	return arithmeticImmediate(cpu, addWithFlags)
+}
+
+func subi(cpu *cpu) error {
+	return arithmeticImmediate(cpu, subWithFlags)
+}
+
+func arithmeticImmediate(cpu *cpu, op func(src, dst uint32, size Size) (uint32, uint16)) error {
+	size := operandSizeFromOpcode(cpu.regs.IR)
+
+	immSize := size
+	if size == Byte {
+		immSize = Word
+	}
+
+	srcVal, err := cpu.popPc(immSize)
+	if err != nil {
+		return err
+	}
+	srcVal &= size.mask()
+
+	dst, err := cpu.ResolveSrcEA(size)
+	if err != nil {
+		return err
+	}
+	dstVal, err := dst.read()
+	if err != nil {
+		return err
+	}
+
+	result, flags := op(srcVal, dstVal, size)
+	if err := dst.write(result); err != nil {
+		return err
+	}
+	cpu.regs.SR = (cpu.regs.SR &^ (srNegative | srZero | srOverflow | srCarry | srExtend)) | flags
+	return nil
+}
+
 func addWithFlags(src, dst uint32, size Size) (uint32, uint16) {
 	mask := size.mask()
 	sign := size.signBit()
@@ -293,6 +337,15 @@ func addqSubqCycleCalculator() cycleCalculator {
 		if mode == 1 {
 			return 8 + eaAccessCycles(mode, reg, size)
 		}
+		return 8 + eaAccessCycles(mode, reg, size)
+	}
+}
+
+func arithmeticImmediateCycleCalculator() cycleCalculator {
+	return func(opcode uint16) uint32 {
+		size := operandSizeFromOpcode(opcode)
+		mode := (opcode >> 3) & 0x7
+		reg := opcode & 0x7
 		return 8 + eaAccessCycles(mode, reg, size)
 	}
 }

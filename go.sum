@@ -1,4 +1,6 @@
 github.com/jenska/m68kasm v1.2.1 h1:/yNFqI8Pkuku4X8zeWshihOWnNjSCOjr8XWHRBjSvuk=
 github.com/jenska/m68kasm v1.2.1/go.mod h1:i2eQYMVrrnIGbMvRQ3UHYL225K9+yNBlygIIkvOsM5c=
+github.com/jenska/m68kasm v1.2.2-0.20260327094032-1614385bf7b2 h1:mowXGhlJQTQXvmHWxYWqnMnPbQS2EuDSuuNyzYfuMqs=
+github.com/jenska/m68kasm v1.2.2-0.20260327094032-1614385bf7b2/go.mod h1:i2eQYMVrrnIGbMvRQ3UHYL225K9+yNBlygIIkvOsM5c=
 github.com/jenska/m68kdasm v1.0.0 h1:PkrF89QX1yq6OrkBrNFYb4imBcRfcBcG0mUxhEyi1y0=
 github.com/jenska/m68kdasm v1.0.0/go.mod h1:zo8kmm6mRV7C1v0pQc9kIQBh+RIuAuczHZk4w/ezEjs=

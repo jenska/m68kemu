@@ -7,7 +7,6 @@ func TestLogicalInstructions(t *testing.T) {
 		name  string
 		setup func(*cpu, *RAM)
 		src   string
-		code  []byte
 		check func(*cpu, *RAM)
 	}{
 		{
@@ -16,7 +15,7 @@ func TestLogicalInstructions(t *testing.T) {
 				c.regs.D[0] = 0xf0f0
 				c.regs.SR = srExtend | srCarry
 			},
-			code: []byte{0x02, 0x40, 0x0f, 0x0f}, // ANDI.W #$0f0f,D0
+			src: "ANDI.W #$0f0f,D0\n",
 			check: func(c *cpu, _ *RAM) {
 				if got := c.regs.D[0] & 0xffff; got != 0x0000 {
 					t.Fatalf("unexpected D0 after ANDI: %04x", got)
@@ -89,12 +88,11 @@ func TestLogicalInstructions(t *testing.T) {
 		{
 			name: "EORIImmediateMemory",
 			setup: func(c *cpu, ram *RAM) {
-				c.regs.A[0] = 0x1000
-				_ = ram.Write(Long, 0x1000, 0xaaaa5555)
+				_ = ram.Write(Long, 0x3000, 0xaaaa5555)
 			},
-			code: []byte{0x0a, 0x90, 0xff, 0xff, 0x00, 0x00}, // EORI.L #$ffff0000,(A0)
+			src: "EORI.L #$ffff0000,$3000\n",
 			check: func(c *cpu, ram *RAM) {
-				value, _ := ram.Read(Long, 0x1000)
+				value, _ := ram.Read(Long, 0x3000)
 				if value != 0x55555555 {
 					t.Fatalf("unexpected EORI result: %08x", value)
 				}
@@ -110,10 +108,7 @@ func TestLogicalInstructions(t *testing.T) {
 			cpu, ram := newEnvironment(t)
 			tt.setup(cpu, ram)
 
-			code := tt.code
-			if code == nil {
-				code = assemble(t, tt.src)
-			}
+			code := assemble(t, tt.src)
 			for i := range code {
 				addr := cpu.regs.PC + uint32(i)
 				if err := ram.Write(Byte, addr, uint32(code[i])); err != nil {

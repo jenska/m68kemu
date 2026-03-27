@@ -112,6 +112,91 @@ func TestSubInstruction(t *testing.T) {
 	}
 }
 
+func TestAddiByteToDataRegister(t *testing.T) {
+	cpu, ram := newEnvironment(t)
+	cpu.regs.D[0] = 0x1234ff
+
+	code := assemble(t, "ADDI.B #1,D0\n")
+	for i, b := range code {
+		if err := ram.Write(Byte, cpu.regs.PC+uint32(i), uint32(b)); err != nil {
+			t.Fatalf("write code: %v", err)
+		}
+	}
+
+	opcode, err := cpu.fetchOpcode()
+	if err != nil {
+		t.Fatalf("fetch: %v", err)
+	}
+	if err := cpu.executeInstruction(opcode); err != nil {
+		t.Fatalf("exec: %v", err)
+	}
+
+	if got := uint32(cpu.regs.D[0]); got != 0x00123400 {
+		t.Fatalf("expected D0=0x00123400 got %08x", got)
+	}
+	expected := uint16(srZero | srCarry | srExtend)
+	if got := cpu.regs.SR & (srZero | srNegative | srOverflow | srCarry | srExtend); got != expected {
+		t.Fatalf("unexpected flags %04x", got)
+	}
+}
+
+func TestSubiWordToDataRegister(t *testing.T) {
+	cpu, ram := newEnvironment(t)
+	cpu.regs.D[1] = 0x12340000
+
+	code := assemble(t, "SUBI.W #1,D1\n")
+	for i, b := range code {
+		if err := ram.Write(Byte, cpu.regs.PC+uint32(i), uint32(b)); err != nil {
+			t.Fatalf("write code: %v", err)
+		}
+	}
+
+	opcode, err := cpu.fetchOpcode()
+	if err != nil {
+		t.Fatalf("fetch: %v", err)
+	}
+	if err := cpu.executeInstruction(opcode); err != nil {
+		t.Fatalf("exec: %v", err)
+	}
+
+	if got := uint32(cpu.regs.D[1]); got != 0x1234ffff {
+		t.Fatalf("expected D1=0x1234ffff got %08x", got)
+	}
+	expected := uint16(srNegative | srCarry | srExtend)
+	if got := cpu.regs.SR & (srZero | srNegative | srOverflow | srCarry | srExtend); got != expected {
+		t.Fatalf("unexpected flags %04x", got)
+	}
+}
+
+func TestAddiLongToMemory(t *testing.T) {
+	cpu, ram := newEnvironment(t)
+	if err := ram.Write(Long, 0x3000, 1); err != nil {
+		t.Fatalf("write data: %v", err)
+	}
+
+	code := assemble(t, "ADDI.L #2,$3000\n")
+	for i, b := range code {
+		if err := ram.Write(Byte, cpu.regs.PC+uint32(i), uint32(b)); err != nil {
+			t.Fatalf("write code: %v", err)
+		}
+	}
+
+	opcode, err := cpu.fetchOpcode()
+	if err != nil {
+		t.Fatalf("fetch: %v", err)
+	}
+	if err := cpu.executeInstruction(opcode); err != nil {
+		t.Fatalf("exec: %v", err)
+	}
+
+	if got, err := ram.Read(Long, 0x3000); err != nil || got != 3 {
+		t.Fatalf("expected memory=3 got %08x err=%v", got, err)
+	}
+	if cpu.regs.SR&(srZero|srNegative|srOverflow|srCarry|srExtend) != 0 {
+		t.Fatalf("unexpected flags %04x", cpu.regs.SR)
+	}
+}
+
 func TestMulDivInstructions(t *testing.T) {
 	cpu, ram := newEnvironment(t)
 	cpu.regs.D[0] = 10
