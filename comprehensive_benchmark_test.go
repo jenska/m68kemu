@@ -77,8 +77,6 @@ done:   BRA.S   done            ; Spin until budget exhausted
 func BenchmarkPrimeSieve(b *testing.B) {
 	// Sieve of Eratosthenes up to 1000
 	// Array at 0x4000. 0 = prime, 1 = composite.
-	const limit = 1000
-	const arrayBase = 0x4000
 	const cycleBudget = 2_000_000
 
 	program := assemble(b, `
@@ -89,7 +87,7 @@ clear:  CLR.B   (A0)+           ; Clear byte
         
         LEA     $4000,A0        ; Reset A0 to array base
         MOVEQ   #2,D0           ; Start with prime candidate 2
-outer:  CMP.W   #1000,D0        ; Check limit
+outer:  CMP.W 	#1000,D0        ; Check limit
         BGE.S   done
         
         TST.B   0(A0,D0.W)      ; Is marked?
