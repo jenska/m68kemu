@@ -21,6 +21,7 @@ func init() {
 func branch(cpu *cpu) error {
 	cond := (cpu.regs.IR >> 8) & 0xf
 	displacement := int32(int8(cpu.regs.IR))
+	basePC := cpu.regs.PC
 
 	if displacement == 0 {
 		ext, err := cpu.popPc(Word)
@@ -38,13 +39,14 @@ func branch(cpu *cpu) error {
 				return err
 			}
 		}
-		cpu.regs.PC = uint32(int32(cpu.regs.PC) + displacement)
+		cpu.regs.PC = uint32(int32(basePC) + displacement)
 	}
 	return nil
 }
 
 func dbcc(cpu *cpu) error {
 	cond := (cpu.regs.IR >> 8) & 0xf
+	basePC := cpu.regs.PC
 
 	displacement, err := cpu.popPc(Word)
 	if err != nil {
@@ -60,7 +62,7 @@ func dbcc(cpu *cpu) error {
 	cpu.regs.D[reg] = (cpu.regs.D[reg] &^ 0xffff) | int32(counter)
 
 	if counter != 0xffff {
-		cpu.regs.PC = uint32(int32(cpu.regs.PC) + int32(int16(displacement)))
+		cpu.regs.PC = uint32(int32(basePC) + int32(int16(displacement)))
 	}
 
 	return nil

@@ -1,0 +1,32 @@
+# Changelog
+
+All notable changes to this project will be documented in this file.
+
+The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
+and this project adheres to [Semantic Versioning](https://semver.org/spec/SemVer).
+
+## [1.2.0] - 2026-03-28
+
+### Changed
+- Updated m68kasm to v1.3.0, adding support for $ in expressions and .w/.l label suffixes
+- Updated m68kdasm to v1.0.1, fixing MOVEM register decoding and SWAP instruction handling
+- Fixed PC-relative addressing calculation in PEA instruction test
+
+### Dependencies
+- github.com/jenska/m68kasm v1.3.0
+- github.com/jenska/m68kdasm v1.0.1
+
+## [1.1.0] - 2024-12-01
+
+### Added
+- Initial release
+
+## [1.0.1] - 2024-11-15
+
+### Fixed
+- Bug fixes
+
+## [1.0.0] - 2024-11-01
+
+### Added
+- Initial release

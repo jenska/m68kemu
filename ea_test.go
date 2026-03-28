@@ -102,7 +102,7 @@ func TestEAPCDisplacementUsesProgramCounter(t *testing.T) {
 		t.Fatalf("init failed: %v", err)
 	}
 
-	if addr := ea.computedAddress(); addr != 0x2006 {
+	if addr := ea.computedAddress(); addr != 0x2004 {
 		t.Fatalf("computed PC-relative address mismatch: got %04x", addr)
 	}
 	if cpu.regs.PC != 0x2002 {
@@ -257,5 +257,26 @@ func TestEAIndirectIndexUsesIndexAndDisplacement(t *testing.T) {
 	}
 	if cpu.regs.PC != 0x2002 {
 		t.Fatalf("PC not advanced after index extension: %04x", cpu.regs.PC)
+	}
+}
+
+func TestEAPCIndirectIndexUsesExtensionWordAddressAsBase(t *testing.T) {
+	cpu, _ := newEnvironment(t)
+	cpu.regs.D[0] = 0x10
+
+	if err := cpu.bus.Write(Word, cpu.regs.PC, 0x0801); err != nil {
+		t.Fatalf("failed to write PC index extension: %v", err)
+	}
+
+	ea, err := (&eaPCIndirectIndex{eaIndirectIndex{eaRegisterIndirect{eaRegister{areg: nil}, 0}, ix68000}}).init(cpu, Word)
+	if err != nil {
+		t.Fatalf("init failed: %v", err)
+	}
+
+	if addr := ea.computedAddress(); addr != 0x2011 {
+		t.Fatalf("PC-indexed address mismatch: got %08x", addr)
+	}
+	if cpu.regs.PC != 0x2002 {
+		t.Fatalf("PC not advanced after PC index extension: %04x", cpu.regs.PC)
 	}
 }

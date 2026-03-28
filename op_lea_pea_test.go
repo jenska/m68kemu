@@ -32,8 +32,8 @@ func TestLEA(t *testing.T) {
 					t.Fatalf("expected stack pointer to decrement by 4, got %04x", cpu.regs.A[7])
 				}
 				value, _ := ram.Read(Long, cpu.regs.A[7])
-				if value != 0x2008 {
-					t.Fatalf("expected pushed PC-relative address 0x2008, got %08x", value)
+				if value != 0x2004 {
+					t.Fatalf("expected pushed PC-relative address 0x2004, got %08x", value)
 				}
 			},
 		},
@@ -71,5 +71,20 @@ func TestLEA(t *testing.T) {
 
 			tt.check(t, cpu, ram)
 		})
+	}
+}
+
+func TestLEAPCRelativeLabelTargetsLabelStart(t *testing.T) {
+	helper := newStepTestHelper(t)
+	helper.LoadProgram([]byte{
+		0x41, 0xFA, 0x00, 0x04, // LEA 4(PC),A0
+		0x4E, 0x71, // NOP
+		0x4E, 0x75, // RTS
+	})
+
+	helper.RunInstructions(1)
+
+	if helper.cpu.regs.A[0] != 0x2006 {
+		t.Fatalf("A0 = %08x, want label start %08x", helper.cpu.regs.A[0], uint32(0x2006))
 	}
 }

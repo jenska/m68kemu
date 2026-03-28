@@ -38,11 +38,11 @@ func TestMovemStoreAndLoad(t *testing.T) {
 func TestDbccLoop(t *testing.T) {
 	cpu, ram := newEnvironment(t)
 
-	code := assemble(t, `
-                MOVEQ #1,D0
-        loop:   DBRA D0,loop
-                NOP
-        `)
+	code := []byte{
+		0x70, 0x01, // MOVEQ #1,D0
+		0x51, 0xC8, 0xFF, 0xFE, // DBRA D0,-2
+		0x4E, 0x71, // NOP
+	}
 
 	for i, b := range code {
 		if err := ram.Write(Byte, cpu.regs.PC+uint32(i), uint32(b)); err != nil {

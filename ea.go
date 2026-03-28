@@ -257,11 +257,12 @@ func (ea *eaDisplacement) computedAddress() uint32 {
 
 func (ea *eaPCDisplacement) init(cpu *cpu, o Size) (modifier, error) {
 	ea.cpu, ea.size = cpu, o
+	basePC := cpu.regs.PC
 	offset, err := cpu.popPc(Word)
 	if err != nil {
 		return nil, err
 	}
-	ea.address = uint32(int32(cpu.regs.PC) + int32(int16(offset)))
+	ea.address = uint32(int32(basePC) + int32(int16(offset)))
 	return ea, nil
 }
 
@@ -284,7 +285,8 @@ func (ea *eaIndirectIndex) init(cpu *cpu, o Size) (modifier, error) {
 
 func (ea *eaPCIndirectIndex) init(cpu *cpu, o Size) (modifier, error) {
 	ea.cpu, ea.size = cpu, o
-	address, err := ea.index(cpu, cpu.regs.PC)
+	basePC := cpu.regs.PC
+	address, err := ea.index(cpu, basePC)
 	if err != nil {
 		return nil, err
 	}

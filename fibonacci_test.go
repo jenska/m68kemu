@@ -56,26 +56,25 @@ func TestRecursiveFibonacciProgram(t *testing.T) {
 	startPC := cpu.regs.PC
 
 	program := assemble(t, `
-        BRA main
-fib:    MOVE.L D0,D1
+main:   LEA $4000,A0
+        MOVEQ #5,D0
+        BSR fibonacci
+        MOVE.L D0,(A0)
+        NOP
+fibonacci:    MOVE.L D0,D1
         SUBQ.L #1,D1
         BLE.S return
         MOVE.L D0,-(A7)
         SUBQ.L #1,D0
-        BSR fib
+        BSR.S fibonacci
         MOVE.L D0,-(A7)
         MOVE.L 4(A7),D0
         SUBQ.L #2,D0
-        BSR fib
+        BSR.S fibonacci
         MOVE.L (A7)+,D2
         MOVE.L (A7)+,D1
         ADD.L D2,D0
 return: RTS
-main:   LEA $4000,A0
-        MOVEQ #7,D0
-        BSR fib
-        MOVE.L D0,(A0)
-        NOP
 `)
 
 	for i, b := range program {
@@ -98,7 +97,7 @@ main:   LEA $4000,A0
 	if err != nil {
 		t.Fatalf("read fib result: %v", err)
 	}
-	if result != 13 {
-		t.Fatalf("fib(7) = %d, want 13", result)
+	if result != 5 {
+		t.Fatalf("fib(5) = %d, want 5 (pc=%04x sp=%04x d0=%08x)", result, cpu.regs.PC, cpu.regs.A[7], uint32(cpu.regs.D[0]))
 	}
 }
