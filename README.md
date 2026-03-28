@@ -49,49 +49,49 @@ Here's a simple example of how to set up the CPU, load a program, and run it:
 package main
 
 import (
-	"fmt"
-	"log"
+ "fmt"
+ "log"
 
-	"github.com/jenska/m68kemu"
+ "github.com/jenska/m68kemu"
 )
 
 func main() {
-	// Create a 64KB RAM device at address 0.
-	ram := m68kemu.NewRAM(0, 64*1024)
+ // Create a 64KB RAM device at address 0.
+ ram := m68kemu.NewRAM(0, 64*1024)
 
-	// Create a bus and attach the RAM.
-	bus := m68kemu.NewBus(ram)
+ // Create a bus and attach the RAM.
+ bus := m68kemu.NewBus(ram)
 
-	// Set up the initial stack pointer and program counter.
-	// SSP at 0x1000, PC at 0x2000.
-	ram.Write(m68kemu.Long, 0, 0x1000)
-	ram.Write(m68kemu.Long, 4, 0x2000)
+ // Set up the initial stack pointer and program counter.
+ // SSP at 0x1000, PC at 0x2000.
+ ram.Write(m68kemu.Long, 0, 0x1000)
+ ram.Write(m68kemu.Long, 4, 0x2000)
 
-	// Create the CPU.
-	cpu, err := m68kemu.NewCPU(bus)
-	if err != nil {
-		log.Fatalf("Failed to create CPU: %v", err)
-	}
+ // Create the CPU.
+ cpu, err := m68kemu.NewCPU(bus)
+ if err != nil {
+  log.Fatalf("Failed to create CPU: %v", err)
+ }
 
-	// Assemble a simple program: MOVEQ #5, D0 (opcode 0x7005)
-	program := []byte{0x70, 0x05}
-	startPC, _ := ram.Read(m68kemu.Long, 4)
+ // Assemble a simple program: MOVEQ #5, D0 (opcode 0x7005)
+ program := []byte{0x70, 0x05}
+ startPC, _ := ram.Read(m68kemu.Long, 4)
 
-	for i, b := range program {
-		if err := ram.Write(m68kemu.Byte, startPC+uint32(i), uint32(b)); err != nil {
-			log.Fatalf("Failed to write program: %v", err)
-		}
-	}
+ for i, b := range program {
+  if err := ram.Write(m68kemu.Byte, startPC+uint32(i), uint32(b)); err != nil {
+   log.Fatalf("Failed to write program: %v", err)
+  }
+ }
 
-	// Step one instruction.
-	if err := cpu.Step(); err != nil {
-		log.Fatalf("CPU step failed: %v", err)
-	}
+ // Step one instruction.
+ if err := cpu.Step(); err != nil {
+  log.Fatalf("CPU step failed: %v", err)
+ }
 
-	// Print registers to see the result.
-	regs := cpu.Registers()
-	fmt.Printf("D0 = %d\n", regs.D[0]) // Should be 5
-	fmt.Printf("PC = 0x%04x\n", regs.PC) // Should be 0x2002
+ // Print registers to see the result.
+ regs := cpu.Registers()
+ fmt.Printf("D0 = %d\n", regs.D[0]) // Should be 5
+ fmt.Printf("PC = 0x%04x\n", regs.PC) // Should be 0x2002
 }
 ```
 
@@ -104,8 +104,8 @@ ram := m68kemu.NewRAM(0x000000, 512*1024)
 tos := m68kemu.NewRAM(m68kemu.STTOSStart, 192*1024)
 
 bus := m68kemu.NewAtariSTBus(
-	m68kemu.STRegionMapping{Start: 0x000000, End: 0x07ffff, Device: ram},
-	m68kemu.STRegionMapping{Start: m68kemu.STTOSStart, End: m68kemu.STTOSEnd, Device: tos},
+ m68kemu.STRegionMapping{Start: 0x000000, End: 0x07ffff, Device: ram},
+ m68kemu.STRegionMapping{Start: m68kemu.STTOSStart, End: m68kemu.STTOSEnd, Device: tos},
 )
 ```
 
@@ -121,7 +121,7 @@ scheduler := m68kemu.NewCycleScheduler()
 cpu.SetScheduler(scheduler)
 
 scheduler.ScheduleAfter(512, func(now uint64) {
-	// Run a timer tick, trigger an interrupt, advance video state, etc.
+ // Run a timer tick, trigger an interrupt, advance video state, etc.
 })
 ```
 
@@ -157,11 +157,13 @@ These helpers use the bus `Peek` path when available so debug output does not tr
 The emulator has an extensive test suite, including instruction-level tests and small programs.
 
 To run the tests:
+
 ```sh
 go test ./...
 ```
 
 To run the benchmarks:
+
 ```sh
 go test -bench=. ./...
 ```
