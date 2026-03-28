@@ -150,7 +150,13 @@ for _, line := range lines {
 }
 ```
 
-These helpers use the bus `Peek` path when available so debug output does not trigger device side effects.
+Verbose trace lines include the current PC, decoded assembly, and optionally the total cycle count. When the tracer has access to the fetched instruction bytes, the logger also includes the raw opcode and per-instruction cycle delta, for example:
+
+```text
+TRACE PC 00002000 OPCODE 7005 DELTA 4 CYCLES 4 MOVEQ #5, D0
+```
+
+These helpers use the bus `Peek` path when available so debug output does not trigger device side effects, and the verbose logger prefers `TraceInfo.Bytes` for disassembly so the trace remains accurate even when fetch-side effects would make a second bus read misleading.
 
 ## Testing
 
