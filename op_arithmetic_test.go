@@ -333,3 +333,75 @@ func TestAddaSubaAddressRegisterSource(t *testing.T) {
 		})
 	}
 }
+
+func TestAddSubAddressRegisterSource(t *testing.T) {
+	tests := []struct {
+		name   string
+		asm    string
+		a3     uint32
+		d0     int32
+		sr     uint16
+		wantD0 int32
+	}{
+		{
+			name:   "ADD.L A3,D0",
+			asm:    "ADD.L A3,D0\n",
+			a3:     0xfffffff8,
+			d0:     0x0000000e,
+			sr:     0x2700,
+			wantD0: 0x00000006,
+		},
+		{
+			name:   "ADD.W A3,D0",
+			asm:    "ADD.W A3,D0\n",
+			a3:     0x1234ffff,
+			d0:     0x00000005,
+			sr:     0x2700,
+			wantD0: 0x00000004,
+		},
+		{
+			name:   "SUB.L A3,D0",
+			asm:    "SUB.L A3,D0\n",
+			a3:     0x00000003,
+			d0:     0x00000010,
+			sr:     0x2700,
+			wantD0: 0x0000000d,
+		},
+		{
+			name:   "SUB.W A3,D0",
+			asm:    "SUB.W A3,D0\n",
+			a3:     0x1234ffff,
+			d0:     0x00000005,
+			sr:     0x2700,
+			wantD0: 0x00000006,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cpu, ram := newEnvironment(t)
+			cpu.regs.A[3] = tt.a3
+			cpu.regs.D[0] = tt.d0
+			cpu.regs.SR = tt.sr
+
+			code := assemble(t, tt.asm)
+			for i, b := range code {
+				if err := ram.Write(Byte, cpu.regs.PC+uint32(i), uint32(b)); err != nil {
+					t.Fatalf("write code: %v", err)
+				}
+			}
+
+			opcode, err := cpu.fetchOpcode()
+			if err != nil {
+				t.Fatalf("fetch: %v", err)
+			}
+			if err := cpu.executeInstruction(opcode); err != nil {
+				t.Fatalf("execute %s: %v", tt.name, err)
+			}
+
+			if cpu.regs.D[0] != tt.wantD0 {
+				t.Fatalf("D0 = %08x, want %08x", uint32(cpu.regs.D[0]), uint32(tt.wantD0))
+			}
+		})
+	}
+}

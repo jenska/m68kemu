@@ -5,14 +5,18 @@ func init() {
 		eaMaskPreDecrement | eaMaskDisplacement | eaMaskIndex |
 		eaMaskAbsoluteShort | eaMaskAbsoluteLong | eaMaskImmediate |
 		eaMaskPCDisplacement | eaMaskPCIndex
+	addSubWordLongEAMask := addSubEAMask | eaMaskAddressRegister
 	addSubAlterableMask := eaMaskDataRegister | eaMaskIndirect | eaMaskPostIncrement |
 		eaMaskPreDecrement | eaMaskDisplacement | eaMaskIndex |
 		eaMaskAbsoluteShort | eaMaskAbsoluteLong
 
-	// ADD <ea>,Dn
-	for opmode := uint16(0); opmode <= 2; opmode++ {
+	// ADD.B <ea>,Dn
+	registerInstruction(add, 0xd000, 0xf1c0, addSubEAMask, addCycleCalculator(0, false))
+
+	// ADD.W/L <ea>,Dn
+	for opmode := uint16(1); opmode <= 2; opmode++ {
 		match := uint16(0xd000) | (opmode << 6)
-		registerInstruction(add, match, 0xf1c0, addSubEAMask, addCycleCalculator(opmode, false))
+		registerInstruction(add, match, 0xf1c0, addSubWordLongEAMask, addCycleCalculator(opmode, false))
 	}
 
 	// ADD Dn,<ea>
@@ -21,10 +25,13 @@ func init() {
 		registerInstruction(add, match, 0xf1c0, addSubAlterableMask, addCycleCalculator(opmode, true))
 	}
 
-	// SUB <ea>,Dn
-	for opmode := uint16(0); opmode <= 2; opmode++ {
+	// SUB.B <ea>,Dn
+	registerInstruction(sub, 0x9000, 0xf1c0, addSubEAMask, addCycleCalculator(0, false))
+
+	// SUB.W/L <ea>,Dn
+	for opmode := uint16(1); opmode <= 2; opmode++ {
 		match := uint16(0x9000) | (opmode << 6)
-		registerInstruction(sub, match, 0xf1c0, addSubEAMask, addCycleCalculator(opmode, false))
+		registerInstruction(sub, match, 0xf1c0, addSubWordLongEAMask, addCycleCalculator(opmode, false))
 	}
 
 	// SUB Dn,<ea>
