@@ -131,3 +131,99 @@ func TestMovemWordLoadsSignExtendRegisters(t *testing.T) {
 		t.Fatalf("A2 should postincrement by 4, got %08x", cpu.regs.A[2])
 	}
 }
+
+func TestMovemLongStoresSequentialWordsForControlMode(t *testing.T) {
+	cpu, ram := newEnvironment(t)
+	cpu.regs.A[0] = 0x3000
+	cpu.regs.A[1] = 0x4000
+
+	values := []uint32{
+		0x000000ff,
+		0x000d000b,
+		0x00080002,
+		0x00020007,
+		0x00080001,
+		0x00070001,
+		0x00015555,
+		0x5555000d,
+	}
+	for i, value := range values {
+		if err := ram.Write(Long, cpu.regs.A[0]+uint32(i*4), value); err != nil {
+			t.Fatalf("seed memory %d: %v", i, err)
+		}
+	}
+
+	code := assemble(t, `
+		MOVEM.L (A0)+,D2-D7/A4-A5
+		MOVEM.L D2-D7/A4-A5,(A1)
+	`)
+	for i, b := range code {
+		if err := ram.Write(Byte, cpu.regs.PC+uint32(i), uint32(b)); err != nil {
+			t.Fatalf("failed to write program: %v", err)
+		}
+	}
+
+	for step := 0; step < 2; step++ {
+		if err := cpu.Step(); err != nil {
+			t.Fatalf("step %d failed: %v", step, err)
+		}
+	}
+
+	for i, want := range values {
+		got, err := ram.Read(Long, cpu.regs.A[1]+uint32(i*4))
+		if err != nil {
+			t.Fatalf("read back %d: %v", i, err)
+		}
+		if got != want {
+			t.Fatalf("destination long %d = %08x, want %08x", i, got, want)
+		}
+	}
+	if cpu.regs.A[1] != 0x4000 {
+		t.Fatalf("A1 should remain unchanged for MOVEM to (A1), got %08x", cpu.regs.A[1])
+	}
+}
+
+func TestMovemLongLoadsSequentialWordsForControlMode(t *testing.T) {
+	cpu, ram := newEnvironment(t)
+	cpu.regs.A[6] = 0x3050
+
+	values := []uint32{
+		0x11111111,
+		0x22222222,
+		0x33333333,
+		0x44444444,
+	}
+	base := cpu.regs.A[6] - 56
+	for i, value := range values {
+		if err := ram.Write(Long, base+uint32(i*4), value); err != nil {
+			t.Fatalf("seed memory %d: %v", i, err)
+		}
+	}
+
+	code := assemble(t, "MOVEM.L -56(A6),D2/D3/A2/A3")
+	for i, b := range code {
+		if err := ram.Write(Byte, cpu.regs.PC+uint32(i), uint32(b)); err != nil {
+			t.Fatalf("failed to write program: %v", err)
+		}
+	}
+
+	if err := cpu.Step(); err != nil {
+		t.Fatalf("step failed: %v", err)
+	}
+
+	if uint32(cpu.regs.D[2]) != values[0] {
+		t.Fatalf("D2 = %08x, want %08x", uint32(cpu.regs.D[2]), values[0])
+	}
+	if uint32(cpu.regs.D[3]) != values[1] {
+		t.Fatalf("D3 = %08x, want %08x", uint32(cpu.regs.D[3]), values[1])
+	}
+	if cpu.regs.A[2] != values[2] {
+		t.Fatalf("A2 = %08x, want %08x", cpu.regs.A[2], values[2])
+	}
+	if cpu.regs.A[3] != values[3] {
+		t.Fatalf("A3 = %08x, want %08x", cpu.regs.A[3], values[3])
+	}
+	if cpu.regs.A[6] != 0x3050 {
+		t.Fatalf("A6 should remain unchanged for control-mode MOVEM load, got %08x", cpu.regs.A[6])
+	}
+}
