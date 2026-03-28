@@ -977,6 +977,15 @@ func (cpu *cpu) checkAccessBreakpoint(address uint32, kind BreakpointType) error
 }
 
 func (cpu *cpu) fetchOpcode() (uint16, error) {
+	if opcode, ok, err := cpu.readProgramFastWord(cpu.regs.PC); ok {
+		if err != nil {
+			cpu.recordProgramFault(cpu.regs.PC, err)
+			return 0, err
+		}
+		cpu.regs.PC += uint32(Word)
+		return opcode, nil
+	}
+
 	if opcode, err := cpu.readProgram(Word, cpu.regs.PC); err == nil {
 		cpu.regs.PC += uint32(Word)
 		return uint16(opcode), nil
@@ -1114,6 +1123,33 @@ func (cpu *cpu) pop(s Size) (uint32, error) {
 }
 
 func (cpu *cpu) popPc(s Size) (uint32, error) {
+	switch s {
+	case Word:
+		if res, ok, err := cpu.readProgramFastWord(cpu.regs.PC); ok {
+			if err != nil {
+				cpu.recordProgramFault(cpu.regs.PC, err)
+				return 0, err
+			}
+			cpu.regs.PC += uint32(s)
+			if cpu.regs.PC&1 != 0 {
+				cpu.regs.PC++ // never odd
+			}
+			return uint32(res), nil
+		}
+	case Long:
+		if res, ok, err := cpu.readProgramFastLong(cpu.regs.PC); ok {
+			if err != nil {
+				cpu.recordProgramFault(cpu.regs.PC, err)
+				return 0, err
+			}
+			cpu.regs.PC += uint32(s)
+			if cpu.regs.PC&1 != 0 {
+				cpu.regs.PC++ // never odd
+			}
+			return res, nil
+		}
+	}
+
 	if res, err := cpu.readProgram(s, cpu.regs.PC); err == nil {
 		cpu.regs.PC += uint32(s)
 		if cpu.regs.PC&1 != 0 {
@@ -1124,6 +1160,70 @@ func (cpu *cpu) popPc(s Size) (uint32, error) {
 	} else {
 		return 0, err
 	}
+}
+
+func (cpu *cpu) readProgramFastWord(address uint32) (uint16, bool, error) {
+	if cpu.breakpoints != nil || cpu.busTrap != nil {
+		return 0, false, nil
+	}
+
+	ram := cpu.fastRAMDevice()
+	if ram == nil {
+		return 0, false, nil
+	}
+
+	address &= 0xffffff
+	if address&1 != 0 {
+		return 0, true, AddressError(address)
+	}
+	if address < ram.offset {
+		return 0, true, BusError(address)
+	}
+
+	idx := address - ram.offset
+	memLen := uint32(len(ram.mem))
+	if idx+1 >= memLen {
+		return 0, true, BusError(address)
+	}
+
+	return uint16(ram.mem[idx])<<8 | uint16(ram.mem[idx+1]), true, nil
+}
+
+func (cpu *cpu) readProgramFastLong(address uint32) (uint32, bool, error) {
+	if cpu.breakpoints != nil || cpu.busTrap != nil {
+		return 0, false, nil
+	}
+
+	ram := cpu.fastRAMDevice()
+	if ram == nil {
+		return 0, false, nil
+	}
+
+	address &= 0xffffff
+	if address&1 != 0 {
+		return 0, true, AddressError(address)
+	}
+	if address < ram.offset {
+		return 0, true, BusError(address)
+	}
+
+	idx := address - ram.offset
+	memLen := uint32(len(ram.mem))
+	if idx+1 >= memLen {
+		return 0, true, BusError(address)
+	}
+	if idx+3 >= memLen {
+		return 0, true, BusError((address + uint32(Word)) & 0xffffff)
+	}
+
+	return uint32(ram.mem[idx])<<24 |
+		uint32(ram.mem[idx+1])<<16 |
+		uint32(ram.mem[idx+2])<<8 |
+		uint32(ram.mem[idx+3]), true, nil
+}
+
+func (cpu *cpu) recordProgramFault(address uint32, err error) {
+	cpu.recordFault(faultAddress(address, err), accessContext{functionCode: cpu.programFunctionCode()})
 }
 
 // addCycles increments the CPU cycle counter using a uint32 input to keep call
