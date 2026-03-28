@@ -82,7 +82,7 @@ func TestVerboseLoggerIncludesDisassemblyAndRanges(t *testing.T) {
 	}
 
 	text := output.String()
-	if !strings.Contains(text, "TRACE PC 00002000 CYCLES 4 MOVEQ #5, D0") {
+	if !strings.Contains(text, "TRACE PC 00002000 OPCODE 7005 DELTA 4 CYCLES 4 MOVEQ #5, D0") {
 		t.Fatalf("verbose log missing trace header, got:\n%s", text)
 	}
 	if !strings.Contains(text, "SR 2700 PC 00002002") {

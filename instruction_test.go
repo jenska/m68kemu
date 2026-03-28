@@ -2,8 +2,6 @@ package m68kemu
 
 import (
 	"testing"
-
-	asm "github.com/jenska/m68kasm"
 )
 
 func newEnvironment(tb testing.TB) (*cpu, *RAM) {
@@ -26,12 +24,7 @@ func newEnvironment(tb testing.TB) (*cpu, *RAM) {
 
 func assemble(tb testing.TB, instruction string) []byte {
 	tb.Helper()
-
-	code, err := asm.AssembleString(instruction)
-	if err != nil {
-		tb.Fatalf("Assembler failed: %v", err)
-	}
-	return code
+	return assembleProgram(tb, instruction).Bytes
 }
 
 func TestInstructions(t *testing.T) {

@@ -1,40 +1,35 @@
 package m68kemu
 
 import (
+	"bytes"
 	"errors"
 	"testing"
 )
 
 func TestTraceCallbackReceivesSnapshot(t *testing.T) {
-	cpu, ram := newEnvironment(t)
-
-	code := assemble(t, "MOVEA.L #1,A1\n")
-	for i := range code {
-		addr := cpu.regs.PC + uint32(i)
-		if err := ram.Write(Byte, addr, uint32(code[i])); err != nil {
-			t.Fatalf("failed to place instruction: %v", err)
-		}
-	}
+	helper := newStepTestHelper(t)
+	program := helper.LoadAssembly("MOVEA.L #1,A1\n")
 
 	var traces []TraceInfo
-	cpu.SetTracer(func(info TraceInfo) {
+	helper.cpu.SetTracer(func(info TraceInfo) {
 		traces = append(traces, info)
 	})
 
-	if err := cpu.Step(); err != nil {
-		t.Fatalf("step failed: %v", err)
-	}
+	helper.RunInstructions(1)
 
 	if len(traces) != 1 {
 		t.Fatalf("expected 1 trace entry, got %d", len(traces))
 	}
 
 	got := traces[0]
-	if got.PC != 0x2000 {
-		t.Fatalf("trace PC = 0x%x, want 0x2000", got.PC)
+	if got.PC != program.PCForLine(t, 1) {
+		t.Fatalf("trace PC = 0x%x, want 0x%x", got.PC, program.PCForLine(t, 1))
 	}
 	if got.Registers.A[1] != 1 {
 		t.Fatalf("trace A1 = %d, want 1", got.Registers.A[1])
+	}
+	if !bytes.Equal(got.Bytes, program.BytesForLine(t, 1)) {
+		t.Fatalf("trace bytes = % x, want % x", got.Bytes, program.BytesForLine(t, 1))
 	}
 }
 

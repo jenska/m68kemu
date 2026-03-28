@@ -75,12 +75,83 @@ type (
 	}
 
 	TraceInfo struct {
-		PC        uint32
-		SR        uint16
-		Registers Registers
+		PC         uint32
+		SR         uint16
+		Registers  Registers
+		Opcode     uint16
+		Bytes      []byte
+		CycleDelta uint32
 	}
 
 	TraceCallback func(TraceInfo)
+
+	ExceptionInfo struct {
+		Vector        uint32
+		PC            uint32
+		NewPC         uint32
+		Opcode        uint16
+		FaultAddress  uint32
+		FaultValid    bool
+		SR            uint16
+		NewSR         uint16
+		InterruptMask uint8
+		Group0        bool
+	}
+
+	ExceptionCallback func(ExceptionInfo)
+
+	BusAccessInfo struct {
+		Address          uint32
+		Size             Size
+		Value            uint32
+		Write            bool
+		InstructionFetch bool
+	}
+
+	BusAccessCallback func(BusAccessInfo)
+
+	DebugFaultInfo struct {
+		Address          uint32
+		PC               uint32
+		Opcode           uint16
+		FunctionCode     uint16
+		Write            bool
+		InstructionFetch bool
+		Valid            bool
+	}
+
+	DebugState struct {
+		Registers     Registers
+		InException   bool
+		InterruptMask uint8
+		LastFault     DebugFaultInfo
+		LastException ExceptionInfo
+		HasException  bool
+	}
+
+	AddressRange struct {
+		Start uint32
+		End   uint32
+	}
+
+	RunUntilOptions struct {
+		MaxInstructions   uint64
+		StopOnException   bool
+		StopOnIllegal     bool
+		StopOnPCRange     *AddressRange
+		StopWhenPCOutside *AddressRange
+	}
+
+	RunStopReason int
+
+	RunResult struct {
+		Reason       RunStopReason
+		Instructions uint64
+		Cycles       uint64
+		PC           uint32
+		Exception    ExceptionInfo
+		HasException bool
+	}
 
 	Breakpoint struct {
 		Address   uint32
@@ -131,10 +202,15 @@ type (
 	// CPU exposes the minimal interface for interacting with the emulator core.
 	CPU interface {
 		Registers() Registers
+		DebugState() DebugState
 		Step() error
 		RunCycles(budget uint64) error
+		RunInstructions(count uint64) error
+		RunUntil(options RunUntilOptions) (RunResult, error)
 		Reset() error
 		SetTracer(TraceCallback)
+		SetExceptionTracer(ExceptionCallback)
+		SetBusTracer(BusAccessCallback)
 		SetScheduler(*CycleScheduler)
 		Scheduler() *CycleScheduler
 		AddBreakpoint(Breakpoint)
@@ -154,18 +230,26 @@ type (
 
 	//  CPU core
 	cpu struct {
-		regs       Registers
-		cycles     uint64
-		bus        AddressBus
-		busFast    *Bus
-		trap       TraceCallback
-		scheduler  *CycleScheduler
-		interrupts *InterruptController
+		regs          Registers
+		cycles        uint64
+		bus           AddressBus
+		busFast       *Bus
+		trap          TraceCallback
+		exceptionTrap ExceptionCallback
+		busTrap       BusAccessCallback
+		scheduler     *CycleScheduler
+		interrupts    *InterruptController
 
 		stopped bool
 
-		fault       faultInfo
-		breakpoints map[uint32]Breakpoint
+		fault              faultInfo
+		inException        bool
+		lastException      ExceptionInfo
+		lastExceptionValid bool
+		stepException      ExceptionInfo
+		stepExceptionValid bool
+		traceBytes         []byte
+		breakpoints        map[uint32]Breakpoint
 	}
 )
 
@@ -173,6 +257,15 @@ const (
 	BreakpointExecute BreakpointType = iota
 	BreakpointRead
 	BreakpointWrite
+)
+
+const (
+	RunStopNone RunStopReason = iota
+	RunStopInstructionLimit
+	RunStopPCInRange
+	RunStopPCOutsideRange
+	RunStopException
+	RunStopIllegalOpcode
 )
 
 const (
@@ -235,6 +328,23 @@ func (bt BreakpointType) String() string {
 	}
 }
 
+func (reason RunStopReason) String() string {
+	switch reason {
+	case RunStopInstructionLimit:
+		return "instruction-limit"
+	case RunStopPCInRange:
+		return "pc-in-range"
+	case RunStopPCOutsideRange:
+		return "pc-outside-range"
+	case RunStopException:
+		return "exception"
+	case RunStopIllegalOpcode:
+		return "illegal-opcode"
+	default:
+		return "none"
+	}
+}
+
 func (cpu *cpu) read(size Size, address uint32) (uint32, error) {
 	return cpu.readContext(size, address, accessContext{functionCode: cpu.dataFunctionCode()})
 }
@@ -259,12 +369,16 @@ func (cpu *cpu) readContext(size Size, address uint32, ctx accessContext) (uint3
 		if result, ok, err := cpu.fastRAMRead(size, address); ok {
 			if err != nil {
 				cpu.recordFault(faultAddress(address, err), ctx)
+			} else {
+				cpu.traceBusAccess(size, address, result, ctx)
 			}
 			return result, err
 		}
 		result, err := cpu.bus.Read(size, address)
 		if err != nil {
 			cpu.recordFault(faultAddress(address, err), ctx)
+		} else {
+			cpu.traceBusAccess(size, address, result, ctx)
 		}
 		return uint32(result), err
 	default:
@@ -293,6 +407,8 @@ func (cpu *cpu) writeContext(size Size, address uint32, value uint32, ctx access
 		if ok, err := cpu.fastRAMWrite(size, address, value); ok {
 			if err != nil {
 				cpu.recordFault(faultAddress(address, err), ctx)
+			} else {
+				cpu.traceBusAccess(size, address, value, ctx)
 			}
 			return err
 		}
@@ -300,6 +416,7 @@ func (cpu *cpu) writeContext(size Size, address uint32, value uint32, ctx access
 			cpu.recordFault(faultAddress(address, err), ctx)
 			return err
 		}
+		cpu.traceBusAccess(size, address, value, ctx)
 		return nil
 	default:
 		return fmt.Errorf("unknown operand size")
@@ -415,8 +532,27 @@ func (cpu *cpu) Registers() Registers {
 	return cpu.regs
 }
 
+func (cpu *cpu) DebugState() DebugState {
+	return DebugState{
+		Registers:     cpu.regs,
+		InException:   cpu.inException,
+		InterruptMask: cpu.interruptMask(),
+		LastFault:     cpu.fault.snapshot(),
+		LastException: cpu.lastException,
+		HasException:  cpu.lastExceptionValid,
+	}
+}
+
 func (cpu *cpu) SetTracer(cb TraceCallback) {
 	cpu.trap = cb
+}
+
+func (cpu *cpu) SetExceptionTracer(cb ExceptionCallback) {
+	cpu.exceptionTrap = cb
+}
+
+func (cpu *cpu) SetBusTracer(cb BusAccessCallback) {
+	cpu.busTrap = cb
 }
 
 func (cpu *cpu) requireSupervisor() (bool, error) {
@@ -499,6 +635,11 @@ func (cpu *cpu) raiseException(vector uint32, newSR uint16) error {
 
 	vectorOffset := vector << 2
 	originalSR := cpu.regs.SR
+	originalPC := cpu.regs.PC
+	cpu.inException = true
+	defer func() {
+		cpu.inException = false
+	}()
 	cpu.setSR(newSR)
 
 	// 68000 stack frame: PC (long), SR (word).
@@ -515,6 +656,15 @@ func (cpu *cpu) raiseException(vector uint32, newSR uint16) error {
 	}
 
 	cpu.regs.PC = handler
+	cpu.dispatchException(ExceptionInfo{
+		Vector:        vector,
+		PC:            originalPC,
+		NewPC:         handler,
+		Opcode:        cpu.regs.IR,
+		SR:            originalSR,
+		NewSR:         cpu.regs.SR,
+		InterruptMask: cpu.interruptMask(),
+	})
 	return nil
 }
 
@@ -533,6 +683,10 @@ func (cpu *cpu) raiseGroup0Exception(vector uint32, newSR uint16) error {
 	}
 
 	originalSR := cpu.regs.SR
+	cpu.inException = true
+	defer func() {
+		cpu.inException = false
+	}()
 	cpu.setSR(newSR)
 
 	sp := cpu.regs.A[7] - group0ExceptionFrameSize
@@ -559,6 +713,18 @@ func (cpu *cpu) raiseGroup0Exception(vector uint32, newSR uint16) error {
 		return err
 	}
 	cpu.regs.PC = handler
+	cpu.dispatchException(ExceptionInfo{
+		Vector:        vector,
+		PC:            cpu.fault.pc,
+		NewPC:         handler,
+		Opcode:        cpu.fault.ir,
+		FaultAddress:  cpu.fault.address,
+		FaultValid:    cpu.fault.valid,
+		SR:            originalSR,
+		NewSR:         cpu.regs.SR,
+		InterruptMask: cpu.interruptMask(),
+		Group0:        true,
+	})
 	return nil
 }
 
@@ -642,6 +808,9 @@ func (cpu *cpu) handleFaultError(err error, currentInstruction bool) error {
 }
 
 func (cpu *cpu) executeNext() error {
+	cpu.stepExceptionValid = false
+	cpu.traceBytes = cpu.traceBytes[:0]
+
 	if cpu.breakpoints != nil {
 		if err := cpu.checkExecuteBreakpoint(cpu.regs.PC); err != nil {
 			return err
@@ -649,6 +818,7 @@ func (cpu *cpu) executeNext() error {
 	}
 
 	pc := cpu.regs.PC
+	beforeCycles := cpu.cycles
 	opcode, err := cpu.fetchOpcode()
 	if err != nil {
 		return cpu.handleFaultError(err, false)
@@ -659,7 +829,7 @@ func (cpu *cpu) executeNext() error {
 	if err := cpu.checkInterrupts(); err != nil {
 		return err
 	}
-	cpu.sendTrace(pc)
+	cpu.sendTrace(pc, uint32(cpu.cycles-beforeCycles))
 	return nil
 }
 
@@ -710,12 +880,65 @@ func (cpu *cpu) RunCycles(budget uint64) error {
 	return nil
 }
 
-func (cpu *cpu) sendTrace(pc uint32) {
+func (cpu *cpu) RunInstructions(count uint64) error {
+	for i := uint64(0); i < count; i++ {
+		if err := cpu.Step(); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (cpu *cpu) RunUntil(options RunUntilOptions) (RunResult, error) {
+	var result RunResult
+
+	if reason, ok := cpu.pcStopReason(options); ok {
+		result.Reason = reason
+		result.PC = cpu.regs.PC
+		return result, nil
+	}
+
+	startCycles := cpu.cycles
+	for {
+		if options.MaxInstructions > 0 && result.Instructions >= options.MaxInstructions {
+			result.Reason = RunStopInstructionLimit
+			result.PC = cpu.regs.PC
+			result.Cycles = cpu.cycles - startCycles
+			return result, nil
+		}
+
+		if err := cpu.Step(); err != nil {
+			return result, err
+		}
+
+		result.Instructions++
+		result.Cycles = cpu.cycles - startCycles
+		result.PC = cpu.regs.PC
+		if cpu.stepExceptionValid {
+			result.Exception = cpu.stepException
+			result.HasException = true
+		}
+
+		if reason, ok := cpu.runStopReason(options); ok {
+			result.Reason = reason
+			return result, nil
+		}
+	}
+}
+
+func (cpu *cpu) sendTrace(pc uint32, cycleDelta uint32) {
 	if cpu.trap == nil {
 		return
 	}
 
-	cpu.trap(TraceInfo{PC: pc, SR: cpu.regs.SR, Registers: cpu.regs})
+	cpu.trap(TraceInfo{
+		PC:         pc,
+		SR:         cpu.regs.SR,
+		Registers:  cpu.regs,
+		Opcode:     cpu.regs.IR,
+		Bytes:      cpu.traceInstructionBytes(pc),
+		CycleDelta: cycleDelta,
+	})
 }
 
 func (cpu *cpu) checkExecuteBreakpoint(pc uint32) error {
@@ -783,6 +1006,12 @@ func (cpu *cpu) Reset() error {
 	cpu.regs.PC = pc
 	cpu.cycles = 0
 	cpu.fault = faultInfo{}
+	cpu.inException = false
+	cpu.lastException = ExceptionInfo{}
+	cpu.lastExceptionValid = false
+	cpu.stepException = ExceptionInfo{}
+	cpu.stepExceptionValid = false
+	cpu.traceBytes = cpu.traceBytes[:0]
 	if cpu.scheduler != nil {
 		cpu.scheduler.Reset(0)
 	}
@@ -961,6 +1190,58 @@ func (cpu *cpu) recordFault(address uint32, ctx accessContext) {
 	}
 }
 
+func (cpu *cpu) interruptMask() uint8 {
+	return uint8((cpu.regs.SR & srInterruptMask) >> 8)
+}
+
+func (cpu *cpu) dispatchException(info ExceptionInfo) {
+	cpu.lastException = info
+	cpu.lastExceptionValid = true
+	cpu.stepException = info
+	cpu.stepExceptionValid = true
+	if cpu.exceptionTrap != nil {
+		cpu.exceptionTrap(info)
+	}
+}
+
+func (cpu *cpu) traceBusAccess(size Size, address uint32, value uint32, ctx accessContext) {
+	if ctx.instructionFetch() && !ctx.write {
+		cpu.traceBytes = appendTraceValue(cpu.traceBytes, size, value)
+	}
+
+	if cpu.busTrap == nil {
+		return
+	}
+
+	cpu.busTrap(BusAccessInfo{
+		Address:          address & 0xffffff,
+		Size:             size,
+		Value:            value & size.mask(),
+		Write:            ctx.write,
+		InstructionFetch: ctx.instructionFetch(),
+	})
+}
+
+func (cpu *cpu) runStopReason(options RunUntilOptions) (RunStopReason, bool) {
+	if options.StopOnIllegal && cpu.stepExceptionValid && isIllegalException(cpu.stepException.Vector) {
+		return RunStopIllegalOpcode, true
+	}
+	if options.StopOnException && cpu.stepExceptionValid {
+		return RunStopException, true
+	}
+	return cpu.pcStopReason(options)
+}
+
+func (cpu *cpu) pcStopReason(options RunUntilOptions) (RunStopReason, bool) {
+	if options.StopOnPCRange != nil && options.StopOnPCRange.Contains(cpu.regs.PC) {
+		return RunStopPCInRange, true
+	}
+	if options.StopWhenPCOutside != nil && !options.StopWhenPCOutside.Contains(cpu.regs.PC) {
+		return RunStopPCOutsideRange, true
+	}
+	return RunStopNone, false
+}
+
 func faultAddress(address uint32, err error) uint32 {
 	switch fault := err.(type) {
 	case BusError:
@@ -982,4 +1263,55 @@ func (f faultInfo) statusWord() uint16 {
 	}
 	word |= f.functionCode & 0x7
 	return word
+}
+
+func (f faultInfo) snapshot() DebugFaultInfo {
+	return DebugFaultInfo{
+		Address:          f.address,
+		PC:               f.pc,
+		Opcode:           f.ir,
+		FunctionCode:     f.functionCode,
+		Write:            f.write,
+		InstructionFetch: !f.notInstruction && !f.write,
+		Valid:            f.valid,
+	}
+}
+
+func (ctx accessContext) instructionFetch() bool {
+	return !ctx.notInstruction && !ctx.write &&
+		(ctx.functionCode == functionCodeUserProgram || ctx.functionCode == functionCodeSupervisorProg)
+}
+
+func (r AddressRange) Contains(address uint32) bool {
+	address &= 0xffffff
+	return address >= (r.Start&0xffffff) && address <= (r.End&0xffffff)
+}
+
+func isIllegalException(vector uint32) bool {
+	switch vector {
+	case XIllegal, XLineA, XLineF:
+		return true
+	default:
+		return false
+	}
+}
+
+func (cpu *cpu) traceInstructionBytes(pc uint32) []byte {
+	if len(cpu.traceBytes) != 0 {
+		return append([]byte(nil), cpu.traceBytes...)
+	}
+	return traceInstructionBytes(cpu.bus, pc, cpu.regs.IR)
+}
+
+func appendTraceValue(dst []byte, size Size, value uint32) []byte {
+	switch size {
+	case Byte:
+		return append(dst, byte(value))
+	case Word:
+		return append(dst, byte(value>>8), byte(value))
+	case Long:
+		return append(dst, byte(value>>24), byte(value>>16), byte(value>>8), byte(value))
+	default:
+		return dst
+	}
 }

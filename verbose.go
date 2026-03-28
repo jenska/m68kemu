@@ -69,10 +69,16 @@ func (logger *VerboseLogger) Trace(info TraceInfo) {
 
 	var text strings.Builder
 	fmt.Fprintf(&text, "TRACE PC %08x", info.PC&0xffffff)
+	if info.Opcode != 0 || len(info.Bytes) >= 2 {
+		fmt.Fprintf(&text, " OPCODE %04x", info.Opcode)
+	}
+	if info.CycleDelta != 0 {
+		fmt.Fprintf(&text, " DELTA %d", info.CycleDelta)
+	}
 	if logger.options.IncludeCycles && logger.cpu != nil {
 		fmt.Fprintf(&text, " CYCLES %d", logger.cpu.Cycles())
 	}
-	if line, err := DisassembleInstruction(logger.bus, info.PC); err == nil {
+	if line, err := traceDisassemblyLine(logger.bus, info); err == nil {
 		fmt.Fprintf(&text, " %s", line.Assembly)
 	} else {
 		fmt.Fprintf(&text, " <disassembly unavailable: %v>", err)
@@ -169,6 +175,25 @@ func decodeInstruction(bus AddressBus, address uint32) (*m68kdasm.Instruction, e
 	return m68kdasm.Decode(data, address)
 }
 
+func traceInstructionBytes(bus AddressBus, address uint32, opcode uint16) []byte {
+	if inst, err := decodeInstruction(bus, address); err == nil && len(inst.Bytes) != 0 {
+		return append([]byte(nil), inst.Bytes...)
+	}
+	return []byte{byte(opcode >> 8), byte(opcode)}
+}
+
+func traceDisassemblyLine(bus AddressBus, info TraceInfo) (DisassemblyLine, error) {
+	if len(info.Bytes) >= 2 {
+		if inst, err := m68kdasm.Decode(append([]byte(nil), info.Bytes...), info.PC); err == nil {
+			return DisassemblyLine{
+				Address:  inst.Address,
+				Bytes:    append([]byte(nil), inst.Bytes...),
+				Assembly: inst.Assembly(),
+			}, nil
+		}
+	}
+	return DisassembleInstruction(bus, info.PC)
+}
 func formatDisassemblyBytes(data []byte) string {
 	if len(data) == 0 {
 		return ""
