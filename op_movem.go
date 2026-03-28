@@ -175,7 +175,7 @@ func movemToRegisters(cpu *cpu) error {
 			}
 		}
 
-		if mode == 3 { // postincrement source
+		if mode != 4 { // all memory-to-register modes read sequentially
 			addr += sizeBytes
 		}
 	}
@@ -232,12 +232,12 @@ func movemToMemory(cpu *cpu) error {
 			return err
 		}
 
-		if mode == 3 {
+		if mode != 4 {
 			addr += sizeBytes
 		}
 	}
 
-	if mode == 3 || mode == 4 {
+	if mode == 4 {
 		cpu.regs.A[reg] = addr
 	}
 
