@@ -1,6 +1,9 @@
 package m68kemu
 
-import "testing"
+import (
+	"fmt"
+	"testing"
+)
 
 func TestJmp(t *testing.T) {
 	cpu, ram := newEnvironment(t)
@@ -58,6 +61,132 @@ func TestMoveUsp(t *testing.T) {
 	}
 	if cpu.regs.A[1] != 0x4000 {
 		t.Fatalf("A1=%04x, want 0x4000", cpu.regs.A[1])
+	}
+}
+
+func TestMoveUspAllRegisterForms(t *testing.T) {
+	for reg := uint16(0); reg < 8; reg++ {
+		t.Run(fmt.Sprintf("A%d", reg), func(t *testing.T) {
+			cpu, _ := newEnvironment(t)
+			cpu.regs.SR = srSupervisor
+
+			source := uint32(0x1000 + reg*0x100)
+			cpu.regs.A[reg] = source
+			if reg == 7 {
+				cpu.regs.SSP = source
+				cpu.regs.A[7] = source
+			}
+
+			toUSP := uint16(0x4e60) | reg
+			if opcodeTable[toUSP] == nil {
+				t.Fatalf("MOVE A%d,USP opcode %04x not registered", reg, toUSP)
+			}
+			if opcodeCycleTable[toUSP] != 4 {
+				t.Fatalf("MOVE A%d,USP cycles=%d, want 4", reg, opcodeCycleTable[toUSP])
+			}
+			if err := cpu.executeInstruction(toUSP); err != nil {
+				t.Fatalf("MOVE A%d,USP failed: %v", reg, err)
+			}
+			if cpu.regs.USP != source {
+				t.Fatalf("USP=%08x, want %08x after MOVE A%d,USP", cpu.regs.USP, source, reg)
+			}
+
+			destination := uint32(0x8000 + reg*0x100)
+			cpu.regs.USP = destination
+
+			fromUSP := uint16(0x4e68) | reg
+			if opcodeTable[fromUSP] == nil {
+				t.Fatalf("MOVE USP,A%d opcode %04x not registered", reg, fromUSP)
+			}
+			if opcodeCycleTable[fromUSP] != 4 {
+				t.Fatalf("MOVE USP,A%d cycles=%d, want 4", reg, opcodeCycleTable[fromUSP])
+			}
+			if err := cpu.executeInstruction(fromUSP); err != nil {
+				t.Fatalf("MOVE USP,A%d failed: %v", reg, err)
+			}
+			if cpu.regs.A[reg] != destination {
+				t.Fatalf("A%d=%08x, want %08x after MOVE USP,A%d", reg, cpu.regs.A[reg], destination, reg)
+			}
+
+			if cpu.Cycles() != 8 {
+				t.Fatalf("cycles=%d, want 8 after both MOVE USP forms", cpu.Cycles())
+			}
+		})
+	}
+}
+
+func TestMoveUspPrivilegeViolationAllRegisterForms(t *testing.T) {
+	tests := make([]struct {
+		name   string
+		opcode uint16
+		reg    uint16
+	}, 0, 16)
+
+	for reg := uint16(0); reg < 8; reg++ {
+		tests = append(tests,
+			struct {
+				name   string
+				opcode uint16
+				reg    uint16
+			}{name: fmt.Sprintf("MoveA%dToUSP", reg), opcode: 0x4e60 | reg, reg: reg},
+			struct {
+				name   string
+				opcode uint16
+				reg    uint16
+			}{name: fmt.Sprintf("MoveUSPToA%d", reg), opcode: 0x4e68 | reg, reg: reg},
+		)
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cpu, ram := newEnvironment(t)
+			startPC := cpu.regs.PC
+			supervisorSP := cpu.regs.A[7]
+			userSP := uint32(0x4000)
+			handler := uint32(0x5000)
+
+			cpu.regs.SSP = supervisorSP
+			cpu.regs.USP = userSP
+			cpu.regs.A[7] = userSP
+			cpu.regs.SR &^= srSupervisor
+			cpu.regs.A[tt.reg] = 0x12345678
+			expectedUSP := cpu.regs.A[7]
+
+			if err := ram.Write(Long, uint32(XPrivViolation<<2), handler); err != nil {
+				t.Fatalf("failed to seed privilege vector: %v", err)
+			}
+			if err := ram.Write(Word, startPC, uint32(tt.opcode)); err != nil {
+				t.Fatalf("failed to write opcode %04x: %v", tt.opcode, err)
+			}
+
+			if err := cpu.Step(); err != nil {
+				t.Fatalf("step failed: %v", err)
+			}
+
+			if cpu.regs.PC != handler {
+				t.Fatalf("PC=%08x, want %08x", cpu.regs.PC, handler)
+			}
+			if cpu.regs.USP != expectedUSP {
+				t.Fatalf("USP=%08x, want %08x after privilege violation", cpu.regs.USP, expectedUSP)
+			}
+			if tt.reg != 7 && cpu.regs.A[tt.reg] != 0x12345678 {
+				t.Fatalf("A%d changed on privilege violation: got %08x want %08x", tt.reg, cpu.regs.A[tt.reg], uint32(0x12345678))
+			}
+			expectedSP := supervisorSP - exceptionFrameSize
+			if cpu.regs.A[7] != expectedSP {
+				t.Fatalf("SP=%08x, want %08x after privilege violation", cpu.regs.A[7], expectedSP)
+			}
+			stackedPC, err := ram.Read(Long, expectedSP+uint32(Word))
+			if err != nil {
+				t.Fatalf("failed to read stacked PC: %v", err)
+			}
+			if stackedPC != startPC+uint32(Word) {
+				t.Fatalf("stacked PC=%08x, want %08x", stackedPC, startPC+uint32(Word))
+			}
+			if cpu.Cycles() != uint64(exceptionCyclesPrivilege) {
+				t.Fatalf("cycles=%d, want %d", cpu.Cycles(), exceptionCyclesPrivilege)
+			}
+		})
 	}
 }
 

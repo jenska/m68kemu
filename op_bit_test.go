@@ -68,3 +68,27 @@ func TestBitSetMemory(t *testing.T) {
 		t.Fatalf("expected zero clear when testing set bit, SR=%04x", cpu.regs.SR)
 	}
 }
+
+func TestBitImmediateWithDisplacementUsesImmediateBeforeEAExtensions(t *testing.T) {
+	cpu, ram := newEnvironment(t)
+	cpu.regs.A[0] = 0x3000
+
+	if err := ram.Write(Byte, 0x3008, 0x00); err != nil {
+		t.Fatalf("failed to seed memory: %v", err)
+	}
+
+	code := []byte{
+		0x08, 0x28, 0x00, 0x00, 0x00, 0x08, // BTST #0,(8,A0)
+	}
+	for i, b := range code {
+		ram.Write(Byte, cpu.regs.PC+uint32(i), uint32(b))
+	}
+
+	opcode, _ := cpu.fetchOpcode()
+	if err := cpu.executeInstruction(opcode); err != nil {
+		t.Fatalf("BTST failed: %v", err)
+	}
+	if cpu.regs.SR&srZero == 0 {
+		t.Fatalf("expected zero flag set when testing clear bit, SR=%04x", cpu.regs.SR)
+	}
+}

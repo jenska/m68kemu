@@ -77,6 +77,11 @@ func bitDynamic(cpu *cpu) error {
 func bitImmediate(cpu *cpu) error {
 	mode := (cpu.regs.IR >> 3) & 0x7
 
+	imm, err := cpu.popPc(Word)
+	if err != nil {
+		return err
+	}
+
 	var dst modifier
 	if mode != 0 {
 		var err error
@@ -86,10 +91,6 @@ func bitImmediate(cpu *cpu) error {
 		}
 	}
 
-	imm, err := cpu.popPc(Word)
-	if err != nil {
-		return err
-	}
 	return bitOperation(cpu, imm, mode, dst)
 }
 

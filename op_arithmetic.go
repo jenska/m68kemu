@@ -62,7 +62,8 @@ func init() {
 
 	divMulMask := eaMaskDataRegister | eaMaskIndirect | eaMaskPostIncrement |
 		eaMaskPreDecrement | eaMaskDisplacement | eaMaskIndex |
-		eaMaskAbsoluteShort | eaMaskAbsoluteLong | eaMaskPCDisplacement | eaMaskPCIndex
+		eaMaskAbsoluteShort | eaMaskAbsoluteLong | eaMaskPCDisplacement | eaMaskPCIndex |
+		eaMaskImmediate
 	registerInstruction(divu, 0x80c0, 0xf1c0, divMulMask, constantCycles(140))
 	registerInstruction(divs, 0x81c0, 0xf1c0, divMulMask, constantCycles(158))
 	registerInstruction(mulu, 0xc0c0, 0xf1c0, divMulMask, constantCycles(70))

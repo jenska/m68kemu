@@ -232,6 +232,39 @@ func TestMulDivInstructions(t *testing.T) {
 	step(-12)        // MULS => 6 * -2 = -12
 }
 
+func TestMulDivImmediateInstructions(t *testing.T) {
+	cpu, ram := newEnvironment(t)
+	cpu.regs.D[0] = 3
+	cpu.regs.D[1] = -7
+
+	code := []byte{
+		0xC0, 0xFC, 0x00, 0x05, // MULU #5,D0
+		0xC3, 0xFC, 0xFF, 0xFE, // MULS #-2,D1
+	}
+	for i, b := range code {
+		if err := ram.Write(Byte, cpu.regs.PC+uint32(i), uint32(b)); err != nil {
+			t.Fatalf("write code: %v", err)
+		}
+	}
+
+	step := func(reg int, expect int32) {
+		t.Helper()
+		opcode, err := cpu.fetchOpcode()
+		if err != nil {
+			t.Fatalf("fetch: %v", err)
+		}
+		if err := cpu.executeInstruction(opcode); err != nil {
+			t.Fatalf("exec: %v", err)
+		}
+		if cpu.regs.D[reg] != expect {
+			t.Fatalf("expected D%d=%08x got %08x", reg, expect, cpu.regs.D[reg])
+		}
+	}
+
+	step(0, 15)
+	step(1, 14)
+}
+
 func TestAddaSuba(t *testing.T) {
 	cpu, ram := newEnvironment(t)
 	code := assemble(t, "ADDA.W #-1,A0\nSUBA.L #1,A0\n")

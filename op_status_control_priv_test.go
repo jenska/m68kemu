@@ -80,6 +80,54 @@ func TestMoveToSrAndCcr(t *testing.T) {
 	}
 }
 
+func TestSrInstructionsSwitchToUspWhenSupervisorBitClears(t *testing.T) {
+	tests := []struct {
+		name       string
+		program    string
+		expectedSR uint16
+		expectStop bool
+	}{
+		{name: "AndiToSr", program: "ANDI #$DFFF,SR", expectedSR: 0x0000},
+		{name: "EoriToSr", program: "EORI #$2000,SR", expectedSR: 0x0000},
+		{name: "Stop", program: "STOP #$0000", expectedSR: 0x0000, expectStop: true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cpu, ram := newEnvironment(t)
+
+			originalSSP := cpu.regs.A[7]
+			cpu.regs.SR = srSupervisor
+			cpu.regs.SSP = originalSSP
+			cpu.regs.USP = 0x5000
+
+			code := assemble(t, tt.program)
+			for i, b := range code {
+				if err := ram.Write(Byte, cpu.regs.PC+uint32(i), uint32(b)); err != nil {
+					t.Fatalf("write program: %v", err)
+				}
+			}
+
+			if err := cpu.Step(); err != nil {
+				t.Fatalf("%s failed: %v", tt.name, err)
+			}
+
+			if cpu.regs.SR != tt.expectedSR {
+				t.Fatalf("SR=%04x, want %04x", cpu.regs.SR, tt.expectedSR)
+			}
+			if cpu.regs.A[7] != cpu.regs.USP {
+				t.Fatalf("SP=%04x, want USP=%04x after %s", cpu.regs.A[7], cpu.regs.USP, tt.name)
+			}
+			if cpu.regs.SSP != originalSSP {
+				t.Fatalf("SSP=%04x, want %04x after %s", cpu.regs.SSP, originalSSP, tt.name)
+			}
+			if cpu.stopped != tt.expectStop {
+				t.Fatalf("stopped=%v, want %v", cpu.stopped, tt.expectStop)
+			}
+		})
+	}
+}
+
 func TestMoveFromSr(t *testing.T) {
 	cpu, ram := newEnvironment(t)
 
