@@ -11,6 +11,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/SemVer
 - Fixed MOVEM control-mode sequencing
 - Added support for address-register sources in ADD and SUB instructions
 
+## [1.2.2] - 2026-03-29
+
+### Fixed
+- Enhanced arithmetic and bit operation handling with immediate values
+- Added new tests for instruction behavior
+
 ## [1.2.0] - 2026-03-28
 
 ### Changed
