@@ -6,7 +6,7 @@ import (
 )
 
 const (
-	Version           = "1.2.0"
+	Version           = "1.2.3"
 	XBusError         = 2
 	XAddressError     = 3
 	XIllegal          = 4
@@ -248,6 +248,8 @@ type (
 		lastExceptionValid bool
 		stepException      ExceptionInfo
 		stepExceptionValid bool
+		lastOpcodePC       uint32
+		lastOpcodePCValid  bool
 		traceBytes         []byte
 		breakpoints        map[uint32]Breakpoint
 	}
@@ -599,16 +601,40 @@ func (cpu *cpu) handleBreakpoint(bp Breakpoint, kind BreakpointType, address uin
 	return nil
 }
 
+func (cpu *cpu) rememberOpcodePC(pc uint32) {
+	cpu.lastOpcodePC = pc
+	cpu.lastOpcodePCValid = true
+}
+
+func (cpu *cpu) consumeOpcodePC() uint32 {
+	pc := cpu.regs.PC
+	if cpu.lastOpcodePCValid {
+		pc = cpu.lastOpcodePC
+	}
+	cpu.lastOpcodePCValid = false
+	return pc
+}
+
+func (cpu *cpu) opcodeException(vector uint32, instructionPC uint32) error {
+	if vector == XLineA || vector == XLineF {
+		cpu.overrideInstructionCycles(exceptionCyclesIllegal)
+		return cpu.raiseExceptionWithPC(vector, cpu.regs.SR|srSupervisor, instructionPC, instructionPC)
+	}
+	return cpu.exceptionWithCycles(vector, exceptionCyclesIllegal)
+}
+
 // ExecuteInstruction runs an instruction without fetching it from memory. This allows
 // callers to execute single instructions directly through the API.
 func (cpu *cpu) executeInstruction(opcode uint16) error {
+	instructionPC := cpu.consumeOpcodePC()
+
 	cpu.regs.IR = opcode
 
 	cpu.addCycles(opcodeCycleTable[opcode])
 
 	handler := opcodeTable[opcode]
 	if handler == nil {
-		return cpu.exceptionWithCycles(exceptionVectorForOpcode(opcode), exceptionCyclesIllegal)
+		return cpu.opcodeException(exceptionVectorForOpcode(opcode), instructionPC)
 	}
 
 	if err := handler(cpu); err != nil {
@@ -629,13 +655,16 @@ func exceptionVectorForOpcode(opcode uint16) uint32 {
 }
 
 func (cpu *cpu) raiseException(vector uint32, newSR uint16) error {
+	return cpu.raiseExceptionWithPC(vector, newSR, cpu.regs.PC, cpu.regs.PC)
+}
+
+func (cpu *cpu) raiseExceptionWithPC(vector uint32, newSR uint16, stackedPC uint32, exceptionPC uint32) error {
 	if vector > 255 {
 		return fmt.Errorf("invalid vector %d", vector)
 	}
 
 	vectorOffset := vector << 2
 	originalSR := cpu.regs.SR
-	originalPC := cpu.regs.PC
 	cpu.inException = true
 	defer func() {
 		cpu.inException = false
@@ -643,7 +672,7 @@ func (cpu *cpu) raiseException(vector uint32, newSR uint16) error {
 	cpu.setSR(newSR)
 
 	// 68000 stack frame: PC (long), SR (word).
-	if err := cpu.pushException(Long, cpu.regs.PC); err != nil {
+	if err := cpu.pushException(Long, stackedPC); err != nil {
 		return err
 	}
 	if err := cpu.pushException(Word, uint32(originalSR)); err != nil {
@@ -658,7 +687,7 @@ func (cpu *cpu) raiseException(vector uint32, newSR uint16) error {
 	cpu.regs.PC = handler
 	cpu.dispatchException(ExceptionInfo{
 		Vector:        vector,
-		PC:            originalPC,
+		PC:            exceptionPC,
 		NewPC:         handler,
 		Opcode:        cpu.regs.IR,
 		SR:            originalSR,
@@ -977,16 +1006,19 @@ func (cpu *cpu) checkAccessBreakpoint(address uint32, kind BreakpointType) error
 }
 
 func (cpu *cpu) fetchOpcode() (uint16, error) {
+	fetchPC := cpu.regs.PC
 	if opcode, ok, err := cpu.readProgramFastWord(cpu.regs.PC); ok {
 		if err != nil {
 			cpu.recordProgramFault(cpu.regs.PC, err)
 			return 0, err
 		}
+		cpu.rememberOpcodePC(fetchPC)
 		cpu.regs.PC += uint32(Word)
 		return opcode, nil
 	}
 
 	if opcode, err := cpu.readProgram(Word, cpu.regs.PC); err == nil {
+		cpu.rememberOpcodePC(fetchPC)
 		cpu.regs.PC += uint32(Word)
 		return uint16(opcode), nil
 	} else {
@@ -1020,6 +1052,8 @@ func (cpu *cpu) Reset() error {
 	cpu.lastExceptionValid = false
 	cpu.stepException = ExceptionInfo{}
 	cpu.stepExceptionValid = false
+	cpu.lastOpcodePC = 0
+	cpu.lastOpcodePCValid = false
 	cpu.traceBytes = cpu.traceBytes[:0]
 	if cpu.scheduler != nil {
 		cpu.scheduler.Reset(0)

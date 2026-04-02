@@ -210,12 +210,19 @@ func TestExecuteInstructionTriggersLineExceptionVector(t *testing.T) {
 			if err != nil {
 				t.Fatalf("failed reading stacked PC: %v", err)
 			}
-			if stackedPC != originalPC+uint32(Word) {
-				t.Fatalf("stacked PC mismatch: got %08x want %08x", stackedPC, originalPC+uint32(Word))
+			if stackedPC != originalPC {
+				t.Fatalf("stacked PC mismatch: got %08x want %08x", stackedPC, originalPC)
 			}
 
 			if cpu.regs.PC != tt.handler {
 				t.Fatalf("PC did not jump to line exception handler: got %08x want %08x", cpu.regs.PC, tt.handler)
+			}
+			state := cpu.DebugState()
+			if !state.HasException || state.LastException.Vector != tt.vector {
+				t.Fatalf("debug state did not retain line exception %d", tt.vector)
+			}
+			if state.LastException.PC != originalPC {
+				t.Fatalf("exception info PC mismatch: got %08x want %08x", state.LastException.PC, originalPC)
 			}
 		})
 	}

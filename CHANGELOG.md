@@ -5,6 +5,12 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/SemVer).
 
+## [1.2.3] - 2026-04-02
+
+### Fixed
+- Corrected 68000 Line-A and Line-F exception frames to stack the trapping opcode address
+- Expanded validation around USP moves, privilege traps, and supervisor/user stack bank switching
+
 ## [1.2.1] - 2026-03-28
 
 ### Fixed

@@ -2,19 +2,20 @@
 
 ## Current Results
 
-Benchmarks were run on March 25, 2026 on an Apple M1 (`darwin/arm64`) with:
+Benchmarks were run on April 2, 2026 on an Apple M1 (`darwin/arm64`) with:
 
 ```sh
-go test -run '^$' -bench 'BenchmarkRecursiveFibonacci|BenchmarkBubbleSort|BenchmarkPrimeSieve' -benchmem
+go test -run '^$' -bench 'BenchmarkBubbleSort|BenchmarkPrimeSieve|BenchmarkRunEightMillionCycles|BenchmarkRecursiveFibonacci' -benchmem -count=3
 ```
 
-Results:
+Representative medians from the three runs:
 
 | Benchmark | Result | Allocations |
 | --- | --- | --- |
-| `BenchmarkBubbleSort` | `3078764 ns/op` | `0 B/op, 0 allocs/op` |
-| `BenchmarkPrimeSieve` | `5836703 ns/op` | `4 B/op, 1 allocs/op` |
-| `BenchmarkRecursiveFibonacci` | `28598799 ns/op` | `0 B/op, 0 allocs/op` |
+| `BenchmarkBubbleSort` | `2501416 ns/op` | `0 B/op, 0 allocs/op` |
+| `BenchmarkPrimeSieve` | `4740330 ns/op` | `4 B/op, 1 allocs/op` |
+| `BenchmarkRunEightMillionCycles` | `24641607 ns/op` | `0 B/op, 0 allocs/op` |
+| `BenchmarkRecursiveFibonacci` | `25296994 ns/op` | `0 B/op, 0 allocs/op` |
 
 ## What Improved
 
@@ -38,22 +39,22 @@ These changes were made while also improving correctness:
 Representative profiles were collected with:
 
 ```sh
-go test -run '^$' -bench BenchmarkRecursiveFibonacci -cpuprofile /tmp/m68kemu_after.cpu.out
-go test -run '^$' -bench BenchmarkBubbleSort -cpuprofile /tmp/m68kemu_after.bubble.cpu.out
-go tool pprof -top /tmp/m68kemu_after.cpu.out
-go tool pprof -top /tmp/m68kemu_after.bubble.cpu.out
+go test -run '^$' -bench BenchmarkRecursiveFibonacci -cpuprofile /tmp/m68kemu_recursive_2026-04-02.cpu.out
+go test -run '^$' -bench BenchmarkBubbleSort -cpuprofile /tmp/m68kemu_bubble_2026-04-02.cpu.out
+go tool pprof -top /tmp/m68kemu_recursive_2026-04-02.cpu.out
+go tool pprof -top /tmp/m68kemu_bubble_2026-04-02.cpu.out
 ```
 
 ### Recursive Fibonacci
 
 Top remaining costs were still concentrated in the interpreter core:
 
-* `(*Bus).wait`
-* `(*Bus).Read`
-* `(*cpu).read`
-* `movel`
+* `ResolveSrcEA`
 * `(*cpu).fetchOpcode`
-* `ResolveSrcEA` / `ResolveDstEA`
+* `movel`
+* `fastRAMDevice`
+* `ResolveDstEA`
+* `readProgramFastWord`
 
 This means the project has already harvested some of the easy structural wins, and future speed work is likely to come from deeper fetch / decode specialization rather than small local cleanup.
 
@@ -61,22 +62,23 @@ This means the project has already harvested some of the easy structural wins, a
 
 The hot path is now dominated by:
 
-* `(*cpu).RunCycles`
+* `(*cpu).executeNext`
 * `(*cpu).fetchOpcode`
-* `branch`
+* `readProgramFastWord`
 * `(*cpu).executeInstruction`
-* `(*Bus).Read`
-* `(*RAM).Read`
+* `fastRAMDevice`
+* `branch`
+* `(*cpu).RunCycles`
 
-Notably, device lookup no longer dominates the profile the way it did before the fixed-range and single-device fast paths were added.
+Notably, the remaining time is concentrated in instruction fetch / dispatch and simple memory lookup rather than broad bus indirection or allocation-heavy setup work.
 
 ## Current Optimization Priorities
 
 If performance becomes the main focus again, the highest-value next steps are:
 
-1. Add a direct program-fetch fast path for RAM / ROM regions.
+1. Trim hot-loop instruction fetch overhead in `fetchOpcode`, `readProgramFastWord`, and related bookkeeping.
 2. Push opcode predecode further so more handlers can avoid repeated mode / register extraction.
-3. Reduce interface-heavy EA setup on common register and simple memory forms.
+3. Reduce EA setup overhead on common register, displacement, and simple memory forms.
 4. Move from generic bus timing to machine-specific ST memory / MMIO timing tables as the chipset comes online.
 
 ## Notes

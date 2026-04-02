@@ -185,9 +185,9 @@ Recent profiling work focused on the interpreter hot path:
 
 On the current benchmark set, that work brought the project to roughly:
 
-* `BenchmarkBubbleSort`: ~3.08 ms/op
-* `BenchmarkPrimeSieve`: ~5.84 ms/op
-* `BenchmarkRecursiveFibonacci`: ~28.6 ms/op
+* `BenchmarkBubbleSort`: ~2.50 ms/op
+* `BenchmarkPrimeSieve`: ~4.74 ms/op
+* `BenchmarkRecursiveFibonacci`: ~25.4 ms/op
 
 See [doc/benchmark_report.md](doc/benchmark_report.md) for more detail.
 
