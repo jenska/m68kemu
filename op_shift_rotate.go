@@ -62,7 +62,7 @@ func shiftRotate(cpu *cpu) error {
 
 func shiftRotateMemory(cpu *cpu) error {
 	opcode := cpu.regs.IR
-	logical := ((opcode >> 9) & 0x1) != 0
+	operation := int((opcode >> 9) & 0x3)
 	left := ((opcode >> 8) & 0x1) != 0
 
 	ea, err := cpu.ResolveSrcEA(Word)
@@ -75,21 +75,7 @@ func shiftRotateMemory(cpu *cpu) error {
 		return err
 	}
 
-	var (
-		result uint32
-		flags  shiftRotateFlags
-	)
-	switch {
-	case !logical && !left:
-		result, flags = asr(uint32(val), 1, 16)
-	case !logical && left:
-		result, flags = asl(uint32(val), 1, 16)
-	case logical && !left:
-		result, flags = lsr(uint32(val), 1, 16)
-	case logical && left:
-		result, flags = lsl(uint32(val), 1, 16)
-	}
-
+	result, flags := doShiftRotate(uint32(val), 1, 16, operation, left, cpu.regs.SR&srExtend != 0)
 	if err := ea.write(result); err != nil {
 		return err
 	}

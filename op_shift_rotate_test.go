@@ -128,3 +128,40 @@ func TestShiftRotateMemoryLogicalRight(t *testing.T) {
 		t.Fatalf("unexpected flags for memory LSR: got %04x want %04x", got, expectedFlags)
 	}
 }
+
+func TestShiftRotateMemoryRotateLeft(t *testing.T) {
+	cpu, ram := newEnvironment(t)
+	cpu.regs.A[0] = 0x200
+
+	if err := ram.Write(Word, 0x200, 0x1111); err != nil {
+		t.Fatalf("failed to seed memory: %v", err)
+	}
+
+	runSingleInstruction(t, cpu, ram, "ROL.W (A0)")
+
+	if val, _ := ram.Read(Word, 0x200); val != 0x2222 {
+		t.Fatalf("expected memory ROL result 0x2222, got %04x", val)
+	}
+	if got := cpu.regs.SR & (srCarry | srExtend | srZero | srNegative | srOverflow); got != 0 {
+		t.Fatalf("unexpected flags for memory ROL: got %04x want 0000", got)
+	}
+}
+
+func TestShiftRotateMemoryRotateLeftWrapsBit(t *testing.T) {
+	cpu, ram := newEnvironment(t)
+	cpu.regs.A[0] = 0x200
+
+	if err := ram.Write(Word, 0x200, 0x8888); err != nil {
+		t.Fatalf("failed to seed memory: %v", err)
+	}
+
+	runSingleInstruction(t, cpu, ram, "ROL.W (A0)")
+
+	if val, _ := ram.Read(Word, 0x200); val != 0x1111 {
+		t.Fatalf("expected memory ROL wrap result 0x1111, got %04x", val)
+	}
+	expectedFlags := uint16(srCarry)
+	if got := cpu.regs.SR & (srCarry | srExtend | srZero | srNegative | srOverflow); got != expectedFlags {
+		t.Fatalf("unexpected flags for wrapped memory ROL: got %04x want %04x", got, expectedFlags)
+	}
+}
