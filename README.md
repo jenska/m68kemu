@@ -29,9 +29,6 @@ The CPU core is in good shape for integration work:
 
 Still missing for a complete Atari ST:
 
-* The rest of the ST chipset and memory-mapped I/O devices.
-* A full machine-level reset / cold-boot model on top of CPU `RESET`.
-* More detailed interrupt acknowledge and device-level timing behavior.
 * Prefetch-sensitive behavior and any remaining compatibility gaps found by larger TOS / software workloads.
 
 ## Getting Started
