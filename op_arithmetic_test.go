@@ -232,6 +232,58 @@ func TestMulDivInstructions(t *testing.T) {
 	step(-12)        // MULS => 6 * -2 = -12
 }
 
+func TestDivByZeroTriggersExceptionVector(t *testing.T) {
+	cpu, ram := newEnvironment(t)
+	cpu.regs.D[0] = 10
+	cpu.regs.D[1] = 0
+
+	handler := uint32(0x3456)
+	if err := ram.Write(Long, uint32(XDivByZero<<2), handler); err != nil {
+		t.Fatalf("failed to install divide-by-zero vector: %v", err)
+	}
+
+	originalPC := cpu.regs.PC
+	code := assemble(t, "DIVU D1,D0\n")
+	for i, b := range code {
+		if err := ram.Write(Byte, cpu.regs.PC+uint32(i), uint32(b)); err != nil {
+			t.Fatalf("write code: %v", err)
+		}
+	}
+
+	opcode, err := cpu.fetchOpcode()
+	if err != nil {
+		t.Fatalf("fetch: %v", err)
+	}
+	if err := cpu.executeInstruction(opcode); err != nil {
+		t.Fatalf("exec: %v", err)
+	}
+
+	expectedSP := cpu.regs.SSP - exceptionFrameSize
+	if cpu.regs.A[7] != expectedSP {
+		t.Fatalf("SP after divide-by-zero = %08x, want %08x", cpu.regs.A[7], expectedSP)
+	}
+
+	stackedPC, err := ram.Read(Long, expectedSP+uint32(Word))
+	if err != nil {
+		t.Fatalf("read stacked PC: %v", err)
+	}
+	if want := originalPC + uint32(Word); stackedPC != want {
+		t.Fatalf("stacked PC = %08x, want %08x", stackedPC, want)
+	}
+
+	if cpu.regs.PC != handler {
+		t.Fatalf("PC after divide-by-zero = %08x, want %08x", cpu.regs.PC, handler)
+	}
+
+	state := cpu.DebugState()
+	if !state.HasException || state.LastException.Vector != XDivByZero {
+		t.Fatalf("expected divide-by-zero exception state, got %+v", state.LastException)
+	}
+	if want := originalPC + uint32(Word); state.LastException.PC != want {
+		t.Fatalf("exception PC = %08x, want %08x", state.LastException.PC, want)
+	}
+}
+
 func TestMulDivImmediateInstructions(t *testing.T) {
 	cpu, ram := newEnvironment(t)
 	cpu.regs.D[0] = 3

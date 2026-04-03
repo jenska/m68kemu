@@ -10,6 +10,48 @@ func TestLogicalInstructions(t *testing.T) {
 		check func(*cpu, *RAM)
 	}{
 		{
+			name: "ANDSourceEAToDataRegister",
+			setup: func(c *cpu, ram *RAM) {
+				c.regs.D[0] = 0xf0
+				c.regs.A[0] = 0x1000
+				c.regs.SR = srExtend | srCarry
+				_ = ram.Write(Byte, 0x1000, 0x0f)
+			},
+			src: "AND.B (A0),D0\n",
+			check: func(c *cpu, _ *RAM) {
+				if got := c.regs.D[0] & 0xff; got != 0x00 {
+					t.Fatalf("unexpected D0 after AND: %02x", got)
+				}
+				if c.regs.SR&srZero == 0 {
+					t.Fatalf("zero flag not set after AND: SR=%04x", c.regs.SR)
+				}
+				if c.regs.SR&(srCarry|srOverflow) != 0 {
+					t.Fatalf("carry/overflow not cleared after AND: SR=%04x", c.regs.SR)
+				}
+				if c.regs.SR&srExtend == 0 {
+					t.Fatalf("extend flag should be preserved after AND: SR=%04x", c.regs.SR)
+				}
+			},
+		},
+		{
+			name: "ANDDestinationMemory",
+			setup: func(c *cpu, ram *RAM) {
+				c.regs.D[0] = 0x0f
+				c.regs.A[0] = 0x1000
+				_ = ram.Write(Byte, 0x1000, 0xf3)
+			},
+			src: "AND.B D0,(A0)\n",
+			check: func(c *cpu, ram *RAM) {
+				value, _ := ram.Read(Byte, 0x1000)
+				if value != 0x03 {
+					t.Fatalf("unexpected AND result in memory: %02x", value)
+				}
+				if got := c.regs.SR & (srNegative | srZero | srOverflow | srCarry); got != 0 {
+					t.Fatalf("unexpected SR after AND to memory: %04x", got)
+				}
+			},
+		},
+		{
 			name: "ANDIDestinationDataRegister",
 			setup: func(c *cpu, _ *RAM) {
 				c.regs.D[0] = 0xf0f0

@@ -34,6 +34,42 @@ main:   MOVEQ #1,D0
 	}
 }
 
+func TestJsrPushesReturnAddressAndJumps(t *testing.T) {
+	cpu, ram := newEnvironment(t)
+	startPC := cpu.regs.PC
+
+	program := []byte{
+		0x4E, 0xB9, 0x00, 0x00, 0x20, 0x08, // JSR $00002008
+		0x4E, 0x71, // NOP (return address)
+		0x4E, 0x75, // RTS
+	}
+	for i, b := range program {
+		if err := ram.Write(Byte, startPC+uint32(i), uint32(b)); err != nil {
+			t.Fatalf("write program: %v", err)
+		}
+	}
+
+	if err := cpu.Step(); err != nil {
+		t.Fatalf("step jsr: %v", err)
+	}
+
+	if cpu.regs.PC != startPC+8 {
+		t.Fatalf("PC after JSR = %08x, want %08x", cpu.regs.PC, startPC+8)
+	}
+
+	if cpu.regs.A[7] != 0x0ffc {
+		t.Fatalf("SP after JSR = %08x, want 00000ffc", cpu.regs.A[7])
+	}
+
+	returnAddr, err := ram.Read(Long, cpu.regs.A[7])
+	if err != nil {
+		t.Fatalf("read return address: %v", err)
+	}
+	if returnAddr != startPC+6 {
+		t.Fatalf("stacked return address = %08x, want %08x", returnAddr, startPC+6)
+	}
+}
+
 func TestBSRWordUsesExtensionWordAddressAsBase(t *testing.T) {
 	cpu, ram := newEnvironment(t)
 	startPC := cpu.regs.PC

@@ -44,6 +44,16 @@ func TestShiftRotateFlags(t *testing.T) {
 			srCarry | srExtend | srNegative,
 		},
 		{
+			"ROXLUsesExtend",
+			"ROXL.B #1,D5",
+			5,
+			srExtend,
+			map[int]int32{5: 0x80},
+			0xff,
+			0x01,
+			srCarry | srExtend,
+		},
+		{
 			"ROLThroughZero",
 			"ROL.B #2,D2",
 			2,
@@ -72,6 +82,16 @@ func TestShiftRotateFlags(t *testing.T) {
 			0xff,
 			0x03,
 			srCarry | srExtend,
+		},
+		{
+			"RORPreservesExtend",
+			"ROR.B #1,D6",
+			6,
+			srExtend,
+			map[int]int32{6: 0x01},
+			0xff,
+			0x80,
+			srCarry | srExtend | srNegative,
 		},
 	}
 
