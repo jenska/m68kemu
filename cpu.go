@@ -263,6 +263,7 @@ type (
 		now       uint64
 		listeners []CycleListener
 		events    []ScheduledEvent
+		eventHead int
 	}
 
 	CycleListener interface {

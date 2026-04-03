@@ -1,7 +1,7 @@
 GOFILES := $(shell find . -name '*.go')
 PKGS := ./...
 
-.PHONY: fmt fmt-check lint staticcheck test check
+.PHONY: fmt fmt-check lint staticcheck test check ci
 
 fmt:
 	gofmt -w $(GOFILES)
@@ -24,3 +24,5 @@ test:
 	go test $(PKGS)
 
 check: fmt-check lint staticcheck test
+
+ci: check

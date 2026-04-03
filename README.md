@@ -220,20 +220,31 @@ To run the benchmarks:
 go test -bench=. ./...
 ```
 
+To run the core CPU and infrastructure benchmarks without test noise:
+
+```sh
+go test -run '^$' -bench 'Benchmark(BubbleSort|PrimeSieve|RunEightMillionCycles|RecursiveFibonacci|CycleSchedulerAdvanceBurst|BusReadMappedRanges)$' -benchmem ./...
+```
+
 ## Performance Notes
 
 Recent profiling work focused on the interpreter hot path:
 
 * bus fast paths for simple and fixed-range mappings
+* precomputed page-range lookup for mapped devices
+* amortized scheduler event dispatch without per-event slice shifting
 * reduced wait-state overhead when no device contributes extra wait states
 * fewer allocations on reset / benchmark loops
 * predecoded opcode metadata for common decode fields
 
-On the current benchmark set, that work brought the project to roughly:
+Representative results on April 3, 2026 on Apple M1 (`darwin/arm64`) were:
 
-* `BenchmarkBubbleSort`: ~2.50 ms/op
-* `BenchmarkPrimeSieve`: ~4.74 ms/op
-* `BenchmarkRecursiveFibonacci`: ~25.4 ms/op
+* `BenchmarkBubbleSort`: ~2.80 ms/op
+* `BenchmarkPrimeSieve`: ~5.56 ms/op
+* `BenchmarkRunEightMillionCycles`: ~27.1 ms/op
+* `BenchmarkRecursiveFibonacci`: ~27.0 ms/op
+* `BenchmarkCycleSchedulerAdvanceBurst`: ~3.16 us/op
+* `BenchmarkBusReadMappedRanges`: ~15.5 ns/op
 
 See [doc/benchmark_report.md](doc/benchmark_report.md) for more detail.
 

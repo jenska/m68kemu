@@ -38,12 +38,11 @@ type Bus struct {
 	devices             []Device
 	waitStates          uint32
 	waitHook            WaitHook
-	lastDevice          Device
 	singleDevice        Device
 	singleRAM           *RAM
 	hasWaitStateDevices bool
 	hasPageMap          bool
-	pageDevices         [256][]Device
+	pageRanges          [256][]pageRange
 }
 
 // MappedDevice wraps another device with an explicit 24-bit address range.
@@ -56,6 +55,12 @@ type MappedDevice struct {
 type mappedWaitStateDevice struct {
 	*MappedDevice
 	waitStateDevice WaitStateDevice
+}
+
+type pageRange struct {
+	start  uint32
+	end    uint32
+	device Device
 }
 
 // NewBus constructs a bus optionally seeded with devices.
@@ -209,8 +214,7 @@ func (b *Bus) refreshTopology() {
 	b.singleRAM = nil
 	b.hasWaitStateDevices = false
 	b.hasPageMap = false
-	b.lastDevice = nil
-	b.pageDevices = [256][]Device{}
+	b.pageRanges = [256][]pageRange{}
 
 	if len(b.devices) == 1 {
 		b.singleDevice = b.devices[0]
@@ -232,7 +236,17 @@ func (b *Bus) refreshTopology() {
 			}
 			b.hasPageMap = true
 			for page := start >> 16; page <= end>>16; page++ {
-				b.pageDevices[page] = append(b.pageDevices[page], dev)
+				pageStart := page << 16
+				rangeStart := start
+				if rangeStart < pageStart {
+					rangeStart = pageStart
+				}
+				rangeEnd := end
+				pageEnd := pageStart | 0xffff
+				if rangeEnd > pageEnd {
+					rangeEnd = pageEnd
+				}
+				b.addPageRange(page, rangeStart, rangeEnd, dev)
 			}
 		}
 	}
@@ -240,17 +254,14 @@ func (b *Bus) refreshTopology() {
 
 func (b *Bus) findDevice(address uint32) Device {
 	if b.hasPageMap {
-		for _, dev := range b.pageDevices[(address&0xffffff)>>16] {
-			if dev.Contains(address) {
-				b.lastDevice = dev
-				return dev
-			}
+		page := (address & 0xffffff) >> 16
+		if dev := b.findPageMappedDevice(page, address); dev != nil {
+			return dev
 		}
 	}
 
 	for _, dev := range b.devices {
 		if dev.Contains(address) {
-			b.lastDevice = dev
 			return dev
 		}
 	}
@@ -353,4 +364,81 @@ func peekDevice(dev Device, size Size, address uint32) (uint32, error) {
 		return 0, fmt.Errorf("peek unsupported at %08x", address&0xffffff)
 	}
 	return peekable.Peek(size, address)
+}
+
+func (b *Bus) addPageRange(page, start, end uint32, dev Device) {
+	if start > end {
+		return
+	}
+
+	existing := b.pageRanges[page]
+	uncovered := make([]pageRange, 0, 1)
+	cursor := start
+	for _, current := range existing {
+		if current.end < cursor {
+			continue
+		}
+		if current.start > end {
+			break
+		}
+		if cursor < current.start {
+			uncovered = append(uncovered, pageRange{
+				start:  cursor,
+				end:    minUint32(end, current.start-1),
+				device: dev,
+			})
+		}
+		if current.end >= end {
+			cursor = end + 1
+			break
+		}
+		cursor = current.end + 1
+	}
+	if cursor <= end {
+		uncovered = append(uncovered, pageRange{start: cursor, end: end, device: dev})
+	}
+	if len(uncovered) == 0 {
+		return
+	}
+
+	merged := make([]pageRange, 0, len(existing)+len(uncovered))
+	i, j := 0, 0
+	for i < len(existing) && j < len(uncovered) {
+		if existing[i].start <= uncovered[j].start {
+			merged = append(merged, existing[i])
+			i++
+			continue
+		}
+		merged = append(merged, uncovered[j])
+		j++
+	}
+	merged = append(merged, existing[i:]...)
+	merged = append(merged, uncovered[j:]...)
+	b.pageRanges[page] = merged
+}
+
+func (b *Bus) findPageMappedDevice(page, address uint32) Device {
+	ranges := b.pageRanges[page]
+	lo, hi := 0, len(ranges)
+	for lo < hi {
+		mid := lo + (hi-lo)/2
+		current := ranges[mid]
+		if address < current.start {
+			hi = mid
+			continue
+		}
+		if address > current.end {
+			lo = mid + 1
+			continue
+		}
+		return current.device
+	}
+	return nil
+}
+
+func minUint32(a, b uint32) uint32 {
+	if a < b {
+		return a
+	}
+	return b
 }

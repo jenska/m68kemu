@@ -10,6 +10,7 @@ func (s *CycleScheduler) Reset(now uint64) {
 	}
 	s.now = now
 	s.events = s.events[:0]
+	s.eventHead = 0
 }
 
 func (s *CycleScheduler) Now() uint64 {
@@ -34,7 +35,7 @@ func (s *CycleScheduler) Schedule(at uint64, fn func(now uint64)) {
 	event := ScheduledEvent{At: at, Fn: fn}
 	index := len(s.events)
 	s.events = append(s.events, event)
-	for index > 0 && s.events[index-1].At > at {
+	for index > s.eventHead && s.events[index-1].At > at {
 		s.events[index] = s.events[index-1]
 		index--
 	}
@@ -54,19 +55,19 @@ func (s *CycleScheduler) Advance(delta uint64) {
 	}
 
 	target := s.now + delta
-	for len(s.events) > 0 && s.events[0].At <= target {
-		event := s.events[0]
+	for s.eventHead < len(s.events) && s.events[s.eventHead].At <= target {
+		event := s.events[s.eventHead]
 		if event.At > s.now {
 			s.advanceTo(event.At)
 		}
-		copy(s.events, s.events[1:])
-		s.events = s.events[:len(s.events)-1]
+		s.eventHead++
 		event.Fn(s.now)
 	}
 
 	if s.now < target {
 		s.advanceTo(target)
 	}
+	s.compactEvents()
 }
 
 func (s *CycleScheduler) advanceTo(target uint64) {
@@ -79,4 +80,22 @@ func (s *CycleScheduler) advanceTo(target uint64) {
 	for _, listener := range s.listeners {
 		listener.AdvanceCycles(delta, s.now)
 	}
+}
+
+func (s *CycleScheduler) compactEvents() {
+	if s.eventHead == 0 {
+		return
+	}
+	if s.eventHead == len(s.events) {
+		s.events = s.events[:0]
+		s.eventHead = 0
+		return
+	}
+	if s.eventHead < len(s.events)/2 {
+		return
+	}
+
+	copy(s.events, s.events[s.eventHead:])
+	s.events = s.events[:len(s.events)-s.eventHead]
+	s.eventHead = 0
 }
