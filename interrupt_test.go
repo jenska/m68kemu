@@ -166,23 +166,29 @@ func TestInterruptControllerQueuesRequestsPerLevel(t *testing.T) {
 		t.Fatalf("failed to request second interrupt: %v", err)
 	}
 
-	level, vector, ok := ic.Pending(0)
+	level, vector, autoVector, ok := ic.Pending(0)
 	if !ok {
 		t.Fatalf("expected pending interrupt")
 	}
 	if level != 3 || vector != uint32(firstVector) {
 		t.Fatalf("unexpected first interrupt: level=%d vector=%d", level, vector)
 	}
+	if autoVector {
+		t.Fatalf("explicit interrupt unexpectedly reported as autovector")
+	}
 
-	level, vector, ok = ic.Pending(0)
+	level, vector, autoVector, ok = ic.Pending(0)
 	if !ok {
 		t.Fatalf("expected second pending interrupt")
 	}
 	if level != 3 || vector != uint32(secondVector) {
 		t.Fatalf("unexpected second interrupt: level=%d vector=%d", level, vector)
 	}
+	if autoVector {
+		t.Fatalf("explicit interrupt unexpectedly reported as autovector")
+	}
 
-	if _, _, ok = ic.Pending(0); ok {
+	if _, _, _, ok = ic.Pending(0); ok {
 		t.Fatalf("expected no further interrupts")
 	}
 }

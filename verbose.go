@@ -183,6 +183,13 @@ func traceInstructionBytes(bus AddressBus, address uint32, opcode uint16) []byte
 }
 
 func traceDisassemblyLine(bus AddressBus, info TraceInfo) (DisassemblyLine, error) {
+	if info.Mnemonic != "" {
+		return DisassemblyLine{
+			Address:  info.PC,
+			Bytes:    append([]byte(nil), info.Bytes...),
+			Assembly: info.Mnemonic,
+		}, nil
+	}
 	if len(info.Bytes) >= 2 {
 		if inst, err := m68kdasm.Decode(append([]byte(nil), info.Bytes...), info.PC); err == nil {
 			return DisassemblyLine{
@@ -194,6 +201,19 @@ func traceDisassemblyLine(bus AddressBus, info TraceInfo) (DisassemblyLine, erro
 	}
 	return DisassembleInstruction(bus, info.PC)
 }
+
+func traceInstructionMnemonic(bus AddressBus, address uint32, bytes []byte) string {
+	if len(bytes) >= 2 {
+		if inst, err := m68kdasm.Decode(append([]byte(nil), bytes...), address); err == nil {
+			return inst.Assembly()
+		}
+	}
+	if line, err := DisassembleInstruction(bus, address); err == nil {
+		return line.Assembly
+	}
+	return ""
+}
+
 func formatDisassemblyBytes(data []byte) string {
 	if len(data) == 0 {
 		return ""

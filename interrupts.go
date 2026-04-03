@@ -5,8 +5,13 @@ import "fmt"
 const autoVectorBase = 24
 
 type (
+	pendingInterrupt struct {
+		vector     uint8
+		autoVector bool
+	}
+
 	InterruptController struct {
-		requests [8][]uint8
+		requests [8][]pendingInterrupt
 		maxLevel uint8
 	}
 )
@@ -16,7 +21,7 @@ func NewInterruptController() *InterruptController {
 }
 
 func (ic *InterruptController) Reset() {
-	ic.requests = [8][]uint8{}
+	ic.requests = [8][]pendingInterrupt{}
 	ic.maxLevel = 0
 }
 
@@ -33,18 +38,23 @@ func (ic *InterruptController) Request(level uint8, vector *uint8) error {
 	}
 
 	if vector == nil {
-		ic.requests[level] = append(ic.requests[level], uint8(autoVectorBase+level))
+		ic.requests[level] = append(ic.requests[level], pendingInterrupt{
+			vector:     uint8(autoVectorBase + level),
+			autoVector: true,
+		})
 		return nil
 	}
 
-	ic.requests[level] = append(ic.requests[level], *vector)
+	ic.requests[level] = append(ic.requests[level], pendingInterrupt{
+		vector: *vector,
+	})
 	return nil
 }
 
-func (ic *InterruptController) Pending(mask uint16) (uint8, uint32, bool) {
+func (ic *InterruptController) Pending(mask uint16) (uint8, uint32, bool, bool) {
 	interruptMask := uint8((mask & srInterruptMask) >> 8)
 	if ic.maxLevel <= interruptMask {
-		return 0, 0, false
+		return 0, 0, false, false
 	}
 
 	for level := uint8(7); level > 0; level-- {
@@ -56,7 +66,7 @@ func (ic *InterruptController) Pending(mask uint16) (uint8, uint32, bool) {
 			continue
 		}
 
-		vector := queue[0]
+		interrupt := queue[0]
 		ic.requests[level] = queue[1:]
 
 		// Recalculate maxLevel
@@ -68,10 +78,10 @@ func (ic *InterruptController) Pending(mask uint16) (uint8, uint32, bool) {
 			}
 		}
 
-		return level, uint32(vector), true
+		return level, uint32(interrupt.vector), interrupt.autoVector, true
 	}
 
-	return 0, 0, false
+	return 0, 0, false, false
 }
 
 func (ic *InterruptController) HasPending(mask uint16) bool {

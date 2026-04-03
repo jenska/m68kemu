@@ -187,6 +187,72 @@ func TestTraceInfoIncludesOpcodeBytesAndCycleDelta(t *testing.T) {
 	}
 }
 
+func TestTraceInfoIncludesMnemonicAndBeforeRegisters(t *testing.T) {
+	helper := newStepTestHelper(t)
+	helper.LoadAssembly("MOVEQ #5,D0\nMOVEQ #6,D0\n")
+
+	var traces []TraceInfo
+	helper.cpu.SetTracer(func(info TraceInfo) {
+		traces = append(traces, info)
+	})
+
+	helper.RunInstructions(2)
+
+	if len(traces) != 2 {
+		t.Fatalf("expected 2 traces, got %d", len(traces))
+	}
+
+	first := traces[0]
+	if first.Mnemonic != "MOVEQ #5, D0" {
+		t.Fatalf("first mnemonic = %q, want %q", first.Mnemonic, "MOVEQ #5, D0")
+	}
+	if first.BeforeRegisters.D[0] != 0 {
+		t.Fatalf("first before D0 = %d, want 0", first.BeforeRegisters.D[0])
+	}
+	if first.Registers.D[0] != 5 {
+		t.Fatalf("first after D0 = %d, want 5", first.Registers.D[0])
+	}
+
+	second := traces[1]
+	if second.Mnemonic != "MOVEQ #6, D0" {
+		t.Fatalf("second mnemonic = %q, want %q", second.Mnemonic, "MOVEQ #6, D0")
+	}
+	if second.BeforeRegisters.D[0] != 5 {
+		t.Fatalf("second before D0 = %d, want 5", second.BeforeRegisters.D[0])
+	}
+	if second.Registers.D[0] != 6 {
+		t.Fatalf("second after D0 = %d, want 6", second.Registers.D[0])
+	}
+}
+
+func TestPreTracerSeesInstructionBeforeExecution(t *testing.T) {
+	helper := newStepTestHelper(t)
+	program := helper.LoadAssembly("MOVEQ #5,D0\n")
+
+	var got PreTraceInfo
+	helper.cpu.SetPreTracer(func(info PreTraceInfo) {
+		got = info
+	})
+
+	helper.RunInstructions(1)
+
+	if got.PC != program.PCForLine(t, 1) {
+		t.Fatalf("pre-trace PC = %08x, want %08x", got.PC, program.PCForLine(t, 1))
+	}
+	if got.Opcode != 0x7005 {
+		t.Fatalf("pre-trace opcode = %04x, want 7005", got.Opcode)
+	}
+	if got.Mnemonic != "MOVEQ #5, D0" {
+		t.Fatalf("pre-trace mnemonic = %q, want %q", got.Mnemonic, "MOVEQ #5, D0")
+	}
+	if !bytes.Equal(got.Bytes, program.BytesForLine(t, 1)) {
+		t.Fatalf("pre-trace bytes = % x, want % x", got.Bytes, program.BytesForLine(t, 1))
+	}
+	if got.Registers.D[0] != 0 {
+		t.Fatalf("pre-trace D0 = %d, want 0", got.Registers.D[0])
+	}
+}
+
 func TestRunUntilSupportsCommonStopConditions(t *testing.T) {
 	t.Run("instruction limit", func(t *testing.T) {
 		cpu, ram := newEnvironment(t)
@@ -302,6 +368,240 @@ func TestRunUntilSupportsCommonStopConditions(t *testing.T) {
 			t.Fatalf("instructions = %d, want 1", result.Instructions)
 		}
 	})
+}
+
+func TestExceptionTracingExposesOpcodeAddressAndFrame(t *testing.T) {
+	cpu, ram := newEnvironment(t)
+	startPC := cpu.regs.PC
+	handler := uint32(0x2600)
+
+	if err := ram.Write(Long, uint32(XIllegal<<2), handler); err != nil {
+		t.Fatalf("failed to install illegal vector: %v", err)
+	}
+
+	code := assemble(t, "ILLEGAL\n")
+	for i, value := range code {
+		if err := ram.Write(Byte, startPC+uint32(i), uint32(value)); err != nil {
+			t.Fatalf("failed to write opcode byte: %v", err)
+		}
+	}
+
+	var got ExceptionInfo
+	cpu.SetExceptionTracer(func(info ExceptionInfo) {
+		got = info
+	})
+
+	if err := cpu.Step(); err != nil {
+		t.Fatalf("step failed: %v", err)
+	}
+
+	if got.OpcodeAddress != startPC {
+		t.Fatalf("opcode address = %08x, want %08x", got.OpcodeAddress, startPC)
+	}
+	if got.StackPointer != cpu.regs.A[7] {
+		t.Fatalf("stack pointer = %08x, want %08x", got.StackPointer, cpu.regs.A[7])
+	}
+	if !got.FrameValid {
+		t.Fatalf("expected exception frame to be captured")
+	}
+	if got.Frame.Format != ExceptionStackFrameGroup12 {
+		t.Fatalf("frame format = %v, want %v", got.Frame.Format, ExceptionStackFrameGroup12)
+	}
+	if got.Frame.SR != 0x2700 {
+		t.Fatalf("frame SR = %04x, want 2700", got.Frame.SR)
+	}
+	if got.Frame.PC != startPC+uint32(Word) {
+		t.Fatalf("frame PC = %08x, want %08x", got.Frame.PC, startPC+uint32(Word))
+	}
+
+	frame, ok, err := cpu.CurrentExceptionFrame()
+	if err != nil {
+		t.Fatalf("CurrentExceptionFrame failed: %v", err)
+	}
+	if !ok {
+		t.Fatalf("expected current exception frame")
+	}
+	if frame != got.Frame {
+		t.Fatalf("current frame = %+v, want %+v", frame, got.Frame)
+	}
+}
+
+func TestBusTracerIncludesCurrentInstructionPC(t *testing.T) {
+	cpu, ram := newEnvironment(t)
+	startPC := cpu.regs.PC
+	code := assemble(t, "MOVE.B (A0),D0\n")
+	for i, value := range code {
+		if err := ram.Write(Byte, startPC+uint32(i), uint32(value)); err != nil {
+			t.Fatalf("failed to write opcode byte: %v", err)
+		}
+	}
+	cpu.regs.A[0] = 0x3000
+	if err := ram.Write(Byte, 0x3000, 0x12); err != nil {
+		t.Fatalf("failed to write data byte: %v", err)
+	}
+
+	var accesses []BusAccessInfo
+	cpu.SetBusTracer(func(info BusAccessInfo) {
+		accesses = append(accesses, info)
+	})
+
+	if err := cpu.Step(); err != nil {
+		t.Fatalf("step failed: %v", err)
+	}
+
+	if len(accesses) < 2 {
+		t.Fatalf("expected at least 2 bus accesses, got %d", len(accesses))
+	}
+	if accesses[0].PC != startPC {
+		t.Fatalf("fetch PC = %08x, want %08x", accesses[0].PC, startPC)
+	}
+	if accesses[1].PC != startPC {
+		t.Fatalf("data access PC = %08x, want %08x", accesses[1].PC, startPC)
+	}
+}
+
+func TestInterruptTracerReportsAcceptance(t *testing.T) {
+	cpu, ram := newEnvironment(t)
+	startPC := cpu.regs.PC
+	handler := uint32(0x3000)
+
+	if err := ram.Write(Long, uint32((autoVectorBase+2)<<2), handler); err != nil {
+		t.Fatalf("failed to install interrupt vector: %v", err)
+	}
+
+	code := assemble(t, "NOP\n")
+	for i, value := range code {
+		if err := ram.Write(Byte, startPC+uint32(i), uint32(value)); err != nil {
+			t.Fatalf("failed to write opcode byte: %v", err)
+		}
+	}
+
+	var got InterruptInfo
+	cpu.SetInterruptTracer(func(info InterruptInfo) {
+		got = info
+	})
+	cpu.setSR(srSupervisor)
+
+	if err := cpu.RequestInterrupt(2, nil); err != nil {
+		t.Fatalf("failed to request interrupt: %v", err)
+	}
+	if err := cpu.Step(); err != nil {
+		t.Fatalf("step failed: %v", err)
+	}
+
+	if got.Level != 2 {
+		t.Fatalf("interrupt level = %d, want 2", got.Level)
+	}
+	if got.Vector != autoVectorBase+2 {
+		t.Fatalf("interrupt vector = %d, want %d", got.Vector, autoVectorBase+2)
+	}
+	if !got.AutoVector {
+		t.Fatalf("interrupt should report autovector")
+	}
+	if got.PC != startPC+uint32(Word) {
+		t.Fatalf("interrupt PC = %08x, want %08x", got.PC, startPC+uint32(Word))
+	}
+	if got.NewPC != handler {
+		t.Fatalf("interrupt new PC = %08x, want %08x", got.NewPC, handler)
+	}
+	if got.SR != srSupervisor {
+		t.Fatalf("interrupt SR = %04x, want %04x", got.SR, uint16(srSupervisor))
+	}
+	if got.NewSR&srInterruptMask != uint16(2<<8) {
+		t.Fatalf("interrupt new SR = %04x, want mask %04x", got.NewSR, uint16(2<<8))
+	}
+}
+
+func TestRunUntilSupportsExactPCBusAccessAndPredicateStops(t *testing.T) {
+	t.Run("exact pc", func(t *testing.T) {
+		helper := newStepTestHelper(t)
+		program := helper.LoadAssembly("NOP\nNOP\n")
+
+		result, err := helper.cpu.RunUntil(RunUntilOptions{StopAtPC: []uint32{program.PCForLine(t, 2)}})
+		if err != nil {
+			t.Fatalf("run until failed: %v", err)
+		}
+		if result.Reason != RunStopPC {
+			t.Fatalf("stop reason = %v, want %v", result.Reason, RunStopPC)
+		}
+		if result.Instructions != 1 {
+			t.Fatalf("instructions = %d, want 1", result.Instructions)
+		}
+	})
+
+	t.Run("bus access", func(t *testing.T) {
+		cpu, ram := newEnvironment(t)
+		code := assemble(t, "MOVE.B (A0),D0\n")
+		for i, value := range code {
+			if err := ram.Write(Byte, cpu.regs.PC+uint32(i), uint32(value)); err != nil {
+				t.Fatalf("failed to write opcode byte: %v", err)
+			}
+		}
+		cpu.regs.A[0] = 0x3000
+		if err := ram.Write(Byte, 0x3000, 0x12); err != nil {
+			t.Fatalf("failed to seed data: %v", err)
+		}
+
+		result, err := cpu.RunUntil(RunUntilOptions{
+			StopOnBusAccess: func(info BusAccessInfo) bool {
+				return !info.InstructionFetch && !info.Write && info.Address == 0x3000
+			},
+		})
+		if err != nil {
+			t.Fatalf("run until failed: %v", err)
+		}
+		if result.Reason != RunStopBusAccess {
+			t.Fatalf("stop reason = %v, want %v", result.Reason, RunStopBusAccess)
+		}
+		if !result.HasBusAccess {
+			t.Fatalf("expected matching bus access in result")
+		}
+		if result.BusAccess.Address != 0x3000 {
+			t.Fatalf("bus access address = %08x, want 00003000", result.BusAccess.Address)
+		}
+	})
+
+	t.Run("predicate", func(t *testing.T) {
+		helper := newStepTestHelper(t)
+		helper.LoadAssembly("MOVEQ #1,D0\nADDQ.B #1,D0\n")
+
+		result, err := helper.cpu.RunUntil(RunUntilOptions{
+			StopPredicate: func(info RunPredicateInfo) bool {
+				return info.Registers.D[0] == 1
+			},
+		})
+		if err != nil {
+			t.Fatalf("run until failed: %v", err)
+		}
+		if result.Reason != RunStopPredicate {
+			t.Fatalf("stop reason = %v, want %v", result.Reason, RunStopPredicate)
+		}
+		if result.Instructions != 1 {
+			t.Fatalf("instructions = %d, want 1", result.Instructions)
+		}
+	})
+}
+
+func TestHistoryRingBufferKeepsRecentEvents(t *testing.T) {
+	helper := newStepTestHelper(t)
+	program := helper.LoadAssembly("NOP\nNOP\n")
+	helper.cpu.SetHistoryLimit(2)
+
+	helper.RunInstructions(2)
+
+	history := helper.cpu.History()
+	if len(history) != 2 {
+		t.Fatalf("history length = %d, want 2", len(history))
+	}
+	if history[0].Kind != HistoryBusAccess {
+		t.Fatalf("oldest history kind = %v, want %v", history[0].Kind, HistoryBusAccess)
+	}
+	if history[1].Kind != HistoryInstruction {
+		t.Fatalf("newest history kind = %v, want %v", history[1].Kind, HistoryInstruction)
+	}
+	if history[1].Trace.PC != program.PCForLine(t, 2) {
+		t.Fatalf("history trace PC = %08x, want %08x", history[1].Trace.PC, program.PCForLine(t, 2))
+	}
 }
 
 func TestStepTestHelperSupportsSmallRegressionScenarios(t *testing.T) {

@@ -74,38 +74,89 @@ type (
 		Reset()
 	}
 
+	// TraceInfo reports the outcome of a single executed instruction.
 	TraceInfo struct {
-		PC         uint32
-		SR         uint16
-		Registers  Registers
-		Opcode     uint16
-		Bytes      []byte
-		CycleDelta uint32
+		PC              uint32
+		SR              uint16
+		Registers       Registers
+		BeforeRegisters Registers
+		Opcode          uint16
+		Bytes           []byte
+		Mnemonic        string
+		CycleDelta      uint32
+		Cycles          uint64
 	}
 
 	TraceCallback func(TraceInfo)
 
+	// PreTraceInfo reports an instruction just before execution.
+	PreTraceInfo struct {
+		PC        uint32
+		SR        uint16
+		Registers Registers
+		Opcode    uint16
+		Bytes     []byte
+		Mnemonic  string
+		Cycles    uint64
+	}
+
+	PreTraceCallback func(PreTraceInfo)
+
+	// ExceptionStackFrameFormat identifies the 68000 frame layout captured for an exception.
+	ExceptionStackFrameFormat int
+
+	// ExceptionStackFrame mirrors the exception frame currently stored on the supervisor stack.
+	ExceptionStackFrame struct {
+		Format              ExceptionStackFrameFormat
+		StackPointer        uint32
+		StatusWord          uint16
+		FaultAddress        uint32
+		InstructionRegister uint16
+		SR                  uint16
+		PC                  uint32
+	}
+
+	// ExceptionInfo describes one taken exception after vectoring has completed.
 	ExceptionInfo struct {
 		Vector        uint32
 		PC            uint32
 		NewPC         uint32
 		Opcode        uint16
+		OpcodeAddress uint32
 		FaultAddress  uint32
 		FaultValid    bool
 		SR            uint16
 		NewSR         uint16
+		StackPointer  uint32
+		Frame         ExceptionStackFrame
+		FrameValid    bool
 		InterruptMask uint8
 		Group0        bool
 	}
 
 	ExceptionCallback func(ExceptionInfo)
 
+	// InterruptInfo describes an interrupt that was accepted by the CPU.
+	InterruptInfo struct {
+		Level      uint8
+		Vector     uint32
+		AutoVector bool
+		PC         uint32
+		NewPC      uint32
+		SR         uint16
+		NewSR      uint16
+	}
+
+	InterruptCallback func(InterruptInfo)
+
+	// BusAccessInfo describes one memory transaction observed by the CPU core.
 	BusAccessInfo struct {
 		Address          uint32
 		Size             Size
 		Value            uint32
 		Write            bool
 		InstructionFetch bool
+		PC               uint32
 	}
 
 	BusAccessCallback func(BusAccessInfo)
@@ -127,6 +178,8 @@ type (
 		LastFault     DebugFaultInfo
 		LastException ExceptionInfo
 		HasException  bool
+		LastInterrupt InterruptInfo
+		HasInterrupt  bool
 	}
 
 	AddressRange struct {
@@ -134,16 +187,21 @@ type (
 		End   uint32
 	}
 
+	// RunUntilOptions controls which conditions stop the instruction runner.
 	RunUntilOptions struct {
 		MaxInstructions   uint64
 		StopOnException   bool
 		StopOnIllegal     bool
+		StopAtPC          []uint32
 		StopOnPCRange     *AddressRange
 		StopWhenPCOutside *AddressRange
+		StopOnBusAccess   func(BusAccessInfo) bool
+		StopPredicate     func(RunPredicateInfo) bool
 	}
 
 	RunStopReason int
 
+	// RunResult reports why RunUntil stopped and what the CPU observed while stopping.
 	RunResult struct {
 		Reason       RunStopReason
 		Instructions uint64
@@ -151,6 +209,34 @@ type (
 		PC           uint32
 		Exception    ExceptionInfo
 		HasException bool
+		BusAccess    BusAccessInfo
+		HasBusAccess bool
+		Interrupt    InterruptInfo
+		HasInterrupt bool
+	}
+
+	// RunPredicateInfo is passed to StopPredicate after each completed instruction.
+	RunPredicateInfo struct {
+		Registers     Registers
+		Instructions  uint64
+		Cycles        uint64
+		LastException ExceptionInfo
+		HasException  bool
+		LastBusAccess BusAccessInfo
+		HasBusAccess  bool
+		LastInterrupt InterruptInfo
+		HasInterrupt  bool
+	}
+
+	HistoryKind int
+
+	// HistoryEntry stores one recent debug event in the optional rolling history buffer.
+	HistoryEntry struct {
+		Kind      HistoryKind
+		Trace     TraceInfo
+		Exception ExceptionInfo
+		Interrupt InterruptInfo
+		BusAccess BusAccessInfo
 	}
 
 	Breakpoint struct {
@@ -209,13 +295,18 @@ type (
 		RunUntil(options RunUntilOptions) (RunResult, error)
 		Reset() error
 		SetTracer(TraceCallback)
+		SetPreTracer(PreTraceCallback)
 		SetExceptionTracer(ExceptionCallback)
 		SetBusTracer(BusAccessCallback)
+		SetInterruptTracer(InterruptCallback)
 		SetScheduler(*CycleScheduler)
 		Scheduler() *CycleScheduler
 		AddBreakpoint(Breakpoint)
 		RequestInterrupt(level uint8, vector *uint8) error
 		Cycles() uint64
+		SetHistoryLimit(limit int)
+		History() []HistoryEntry
+		CurrentExceptionFrame() (ExceptionStackFrame, bool, error)
 	}
 
 	faultInfo struct {
@@ -235,8 +326,10 @@ type (
 		bus           AddressBus
 		busFast       *Bus
 		trap          TraceCallback
+		preTrap       PreTraceCallback
 		exceptionTrap ExceptionCallback
 		busTrap       BusAccessCallback
+		interruptTrap InterruptCallback
 		scheduler     *CycleScheduler
 		interrupts    *InterruptController
 
@@ -248,10 +341,23 @@ type (
 		lastExceptionValid bool
 		stepException      ExceptionInfo
 		stepExceptionValid bool
+		lastInterrupt      InterruptInfo
+		lastInterruptValid bool
+		stepInterrupt      InterruptInfo
+		stepInterruptValid bool
 		lastOpcodePC       uint32
 		lastOpcodePCValid  bool
+		currentOpcodePC    uint32
+		currentOpcodeValid bool
+		collectStepBus     bool
+		traceInstructions  bool
+		traceBus           bool
 		traceBytes         []byte
+		stepBusAccesses    []BusAccessInfo
 		breakpoints        map[uint32]Breakpoint
+		history            []HistoryEntry
+		historyNext        int
+		historyCount       int
 	}
 )
 
@@ -264,10 +370,25 @@ const (
 const (
 	RunStopNone RunStopReason = iota
 	RunStopInstructionLimit
+	RunStopPC
 	RunStopPCInRange
 	RunStopPCOutsideRange
+	RunStopBusAccess
+	RunStopPredicate
 	RunStopException
 	RunStopIllegalOpcode
+)
+
+const (
+	ExceptionStackFrameGroup12 ExceptionStackFrameFormat = iota
+	ExceptionStackFrameGroup0
+)
+
+const (
+	HistoryInstruction HistoryKind = iota
+	HistoryException
+	HistoryInterrupt
+	HistoryBusAccess
 )
 
 const (
@@ -334,10 +455,16 @@ func (reason RunStopReason) String() string {
 	switch reason {
 	case RunStopInstructionLimit:
 		return "instruction-limit"
+	case RunStopPC:
+		return "pc"
 	case RunStopPCInRange:
 		return "pc-in-range"
 	case RunStopPCOutsideRange:
 		return "pc-outside-range"
+	case RunStopBusAccess:
+		return "bus-access"
+	case RunStopPredicate:
+		return "predicate"
 	case RunStopException:
 		return "exception"
 	case RunStopIllegalOpcode:
@@ -371,7 +498,7 @@ func (cpu *cpu) readContext(size Size, address uint32, ctx accessContext) (uint3
 		if result, ok, err := cpu.fastRAMRead(size, address); ok {
 			if err != nil {
 				cpu.recordFault(faultAddress(address, err), ctx)
-			} else {
+			} else if cpu.shouldTraceBusAccess(ctx) {
 				cpu.traceBusAccess(size, address, result, ctx)
 			}
 			return result, err
@@ -379,7 +506,7 @@ func (cpu *cpu) readContext(size Size, address uint32, ctx accessContext) (uint3
 		result, err := cpu.bus.Read(size, address)
 		if err != nil {
 			cpu.recordFault(faultAddress(address, err), ctx)
-		} else {
+		} else if cpu.shouldTraceBusAccess(ctx) {
 			cpu.traceBusAccess(size, address, result, ctx)
 		}
 		return uint32(result), err
@@ -409,7 +536,7 @@ func (cpu *cpu) writeContext(size Size, address uint32, value uint32, ctx access
 		if ok, err := cpu.fastRAMWrite(size, address, value); ok {
 			if err != nil {
 				cpu.recordFault(faultAddress(address, err), ctx)
-			} else {
+			} else if cpu.shouldTraceBusAccess(ctx) {
 				cpu.traceBusAccess(size, address, value, ctx)
 			}
 			return err
@@ -418,7 +545,9 @@ func (cpu *cpu) writeContext(size Size, address uint32, value uint32, ctx access
 			cpu.recordFault(faultAddress(address, err), ctx)
 			return err
 		}
-		cpu.traceBusAccess(size, address, value, ctx)
+		if cpu.shouldTraceBusAccess(ctx) {
+			cpu.traceBusAccess(size, address, value, ctx)
+		}
 		return nil
 	default:
 		return fmt.Errorf("unknown operand size")
@@ -542,11 +671,18 @@ func (cpu *cpu) DebugState() DebugState {
 		LastFault:     cpu.fault.snapshot(),
 		LastException: cpu.lastException,
 		HasException:  cpu.lastExceptionValid,
+		LastInterrupt: cpu.lastInterrupt,
+		HasInterrupt:  cpu.lastInterruptValid,
 	}
 }
 
 func (cpu *cpu) SetTracer(cb TraceCallback) {
 	cpu.trap = cb
+	cpu.refreshDebugModes()
+}
+
+func (cpu *cpu) SetPreTracer(cb PreTraceCallback) {
+	cpu.preTrap = cb
 }
 
 func (cpu *cpu) SetExceptionTracer(cb ExceptionCallback) {
@@ -555,6 +691,16 @@ func (cpu *cpu) SetExceptionTracer(cb ExceptionCallback) {
 
 func (cpu *cpu) SetBusTracer(cb BusAccessCallback) {
 	cpu.busTrap = cb
+	cpu.refreshDebugModes()
+}
+
+func (cpu *cpu) SetInterruptTracer(cb InterruptCallback) {
+	cpu.interruptTrap = cb
+}
+
+func (cpu *cpu) refreshDebugModes() {
+	cpu.traceInstructions = cpu.trap != nil || len(cpu.history) != 0
+	cpu.traceBus = cpu.busTrap != nil || len(cpu.history) != 0 || cpu.collectStepBus
 }
 
 func (cpu *cpu) requireSupervisor() (bool, error) {
@@ -586,6 +732,48 @@ func (cpu *cpu) AddBreakpoint(bp Breakpoint) {
 	cpu.breakpoints[bp.Address] = bp
 }
 
+func (cpu *cpu) SetHistoryLimit(limit int) {
+	if limit <= 0 {
+		cpu.history = nil
+		cpu.historyNext = 0
+		cpu.historyCount = 0
+		cpu.refreshDebugModes()
+		return
+	}
+
+	previous := cpu.History()
+	cpu.history = make([]HistoryEntry, limit)
+	cpu.historyNext = 0
+	cpu.historyCount = 0
+
+	if len(previous) > limit {
+		previous = previous[len(previous)-limit:]
+	}
+	for _, entry := range previous {
+		cpu.appendHistory(entry)
+	}
+	cpu.refreshDebugModes()
+}
+
+func (cpu *cpu) History() []HistoryEntry {
+	if len(cpu.history) == 0 || cpu.historyCount == 0 {
+		return nil
+	}
+
+	result := make([]HistoryEntry, 0, cpu.historyCount)
+	start := cpu.historyNext - cpu.historyCount
+	if start < 0 {
+		start += len(cpu.history)
+	}
+
+	for i := 0; i < cpu.historyCount; i++ {
+		index := (start + i) % len(cpu.history)
+		result = append(result, cloneHistoryEntry(cpu.history[index]))
+	}
+
+	return result
+}
+
 func (cpu *cpu) handleBreakpoint(bp Breakpoint, kind BreakpointType, address uint32) error {
 	event := BreakpointEvent{Type: kind, Address: address, Registers: cpu.regs}
 	if bp.Callback != nil {
@@ -604,6 +792,34 @@ func (cpu *cpu) handleBreakpoint(bp Breakpoint, kind BreakpointType, address uin
 func (cpu *cpu) rememberOpcodePC(pc uint32) {
 	cpu.lastOpcodePC = pc
 	cpu.lastOpcodePCValid = true
+}
+
+// beginInstructionContext records the instruction boundary so nested helpers,
+// fault handling, and bus tracing can all attribute work to the same opcode.
+func (cpu *cpu) beginInstructionContext(pc uint32) {
+	cpu.currentOpcodePC = pc & 0xffffff
+	cpu.currentOpcodeValid = true
+}
+
+func (cpu *cpu) endInstructionContext() {
+	cpu.currentOpcodeValid = false
+}
+
+func (cpu *cpu) currentOpcodeAddress(fallback uint32) uint32 {
+	if cpu.currentOpcodeValid {
+		return cpu.currentOpcodePC
+	}
+	return fallback & 0xffffff
+}
+
+func (cpu *cpu) debugPC() uint32 {
+	if cpu.currentOpcodeValid {
+		return cpu.currentOpcodePC
+	}
+	if cpu.lastOpcodePCValid {
+		return cpu.lastOpcodePC & 0xffffff
+	}
+	return cpu.regs.PC & 0xffffff
 }
 
 func (cpu *cpu) consumeOpcodePC() uint32 {
@@ -627,6 +843,14 @@ func (cpu *cpu) opcodeException(vector uint32, instructionPC uint32) error {
 // callers to execute single instructions directly through the API.
 func (cpu *cpu) executeInstruction(opcode uint16) error {
 	instructionPC := cpu.consumeOpcodePC()
+	startedContext := false
+	if !cpu.currentOpcodeValid {
+		cpu.beginInstructionContext(instructionPC)
+		startedContext = true
+	}
+	if startedContext {
+		defer cpu.endInstructionContext()
+	}
 
 	cpu.regs.IR = opcode
 
@@ -665,6 +889,7 @@ func (cpu *cpu) raiseExceptionWithPC(vector uint32, newSR uint16, stackedPC uint
 
 	vectorOffset := vector << 2
 	originalSR := cpu.regs.SR
+	opcodeAddress := cpu.currentOpcodeAddress(exceptionPC)
 	cpu.inException = true
 	defer func() {
 		cpu.inException = false
@@ -685,13 +910,23 @@ func (cpu *cpu) raiseExceptionWithPC(vector uint32, newSR uint16, stackedPC uint
 	}
 
 	cpu.regs.PC = handler
+	frame := ExceptionStackFrame{
+		Format:       ExceptionStackFrameGroup12,
+		StackPointer: cpu.regs.A[7],
+		SR:           originalSR,
+		PC:           stackedPC,
+	}
 	cpu.dispatchException(ExceptionInfo{
 		Vector:        vector,
 		PC:            exceptionPC,
 		NewPC:         handler,
 		Opcode:        cpu.regs.IR,
+		OpcodeAddress: opcodeAddress,
 		SR:            originalSR,
 		NewSR:         cpu.regs.SR,
+		StackPointer:  cpu.regs.A[7],
+		Frame:         frame,
+		FrameValid:    true,
 		InterruptMask: cpu.interruptMask(),
 	})
 	return nil
@@ -712,6 +947,7 @@ func (cpu *cpu) raiseGroup0Exception(vector uint32, newSR uint16) error {
 	}
 
 	originalSR := cpu.regs.SR
+	opcodeAddress := cpu.currentOpcodeAddress(cpu.fault.pc)
 	cpu.inException = true
 	defer func() {
 		cpu.inException = false
@@ -742,15 +978,28 @@ func (cpu *cpu) raiseGroup0Exception(vector uint32, newSR uint16) error {
 		return err
 	}
 	cpu.regs.PC = handler
+	frame := ExceptionStackFrame{
+		Format:              ExceptionStackFrameGroup0,
+		StackPointer:        sp,
+		StatusWord:          cpu.fault.statusWord(),
+		FaultAddress:        cpu.fault.address,
+		InstructionRegister: cpu.fault.ir,
+		SR:                  originalSR,
+		PC:                  cpu.fault.pc,
+	}
 	cpu.dispatchException(ExceptionInfo{
 		Vector:        vector,
 		PC:            cpu.fault.pc,
 		NewPC:         handler,
 		Opcode:        cpu.fault.ir,
+		OpcodeAddress: opcodeAddress,
 		FaultAddress:  cpu.fault.address,
 		FaultValid:    cpu.fault.valid,
 		SR:            originalSR,
 		NewSR:         cpu.regs.SR,
+		StackPointer:  sp,
+		Frame:         frame,
+		FrameValid:    true,
 		InterruptMask: cpu.interruptMask(),
 		Group0:        true,
 	})
@@ -767,6 +1016,7 @@ func (cpu *cpu) group0ExceptionWithoutInstruction(vector uint32, total uint32) e
 	return cpu.raiseGroup0Exception(vector, cpu.regs.SR|srSupervisor)
 }
 
+// setSR keeps USP/SSP in sync when the supervisor bit changes.
 func (cpu *cpu) setSR(value uint16) {
 	if (cpu.regs.SR^value)&srSupervisor != 0 {
 		if value&srSupervisor != 0 {
@@ -798,10 +1048,24 @@ func (cpu *cpu) readVector(offset uint32) (uint32, error) {
 	return address, nil
 }
 
-func (cpu *cpu) interrupt(level uint8, vector uint32) error {
+func (cpu *cpu) interrupt(level uint8, vector uint32, autoVector bool) error {
+	originalPC := cpu.regs.PC
+	originalSR := cpu.regs.SR
 	newSR := (cpu.regs.SR & ^uint16(srInterruptMask)) | srSupervisor | (uint16(level) << 8)
 	cpu.addCycles(exceptionCyclesInterrupt)
-	return cpu.raiseException(vector, newSR)
+	if err := cpu.raiseException(vector, newSR); err != nil {
+		return err
+	}
+	cpu.dispatchInterrupt(InterruptInfo{
+		Level:      level,
+		Vector:     vector,
+		AutoVector: autoVector,
+		PC:         originalPC,
+		NewPC:      cpu.regs.PC,
+		SR:         originalSR,
+		NewSR:      cpu.regs.SR,
+	})
+	return nil
 }
 
 func (cpu *cpu) checkInterrupts() error {
@@ -809,14 +1073,14 @@ func (cpu *cpu) checkInterrupts() error {
 		return nil
 	}
 
-	level, vector, ok := cpu.interrupts.Pending(cpu.regs.SR)
+	level, vector, autoVector, ok := cpu.interrupts.Pending(cpu.regs.SR)
 	if !ok {
 		return nil
 	}
 
 	cpu.stopped = false
 
-	return cpu.interrupt(level, vector)
+	return cpu.interrupt(level, vector, autoVector)
 }
 
 func (cpu *cpu) handleFaultError(err error, currentInstruction bool) error {
@@ -836,10 +1100,9 @@ func (cpu *cpu) handleFaultError(err error, currentInstruction bool) error {
 	}
 }
 
+// executeNext runs one whole instruction boundary: fetch, optional pre-trace,
+// execute, post-instruction interrupt check, and final trace dispatch.
 func (cpu *cpu) executeNext() error {
-	cpu.stepExceptionValid = false
-	cpu.traceBytes = cpu.traceBytes[:0]
-
 	if cpu.breakpoints != nil {
 		if err := cpu.checkExecuteBreakpoint(cpu.regs.PC); err != nil {
 			return err
@@ -847,23 +1110,39 @@ func (cpu *cpu) executeNext() error {
 	}
 
 	pc := cpu.regs.PC
+	beforeRegs := cpu.regs
 	beforeCycles := cpu.cycles
+	cpu.beginInstructionContext(pc)
+
 	opcode, err := cpu.fetchOpcode()
 	if err != nil {
+		cpu.endInstructionContext()
 		return cpu.handleFaultError(err, false)
 	}
+	if cpu.preTrap != nil {
+		cpu.sendPreTrace(pc, opcode, beforeRegs)
+	}
 	if err := cpu.executeInstruction(opcode); err != nil {
+		cpu.endInstructionContext()
 		return err
 	}
 	if err := cpu.checkInterrupts(); err != nil {
+		cpu.endInstructionContext()
 		return err
 	}
-	cpu.sendTrace(pc, uint32(cpu.cycles-beforeCycles))
+	if cpu.traceInstructions {
+		cpu.sendTrace(pc, beforeRegs, uint32(cpu.cycles-beforeCycles))
+	}
+	cpu.endInstructionContext()
 	return nil
 }
 
 // Step fetches the next opcode at the program counter and executes it.
 func (cpu *cpu) Step() error {
+	if cpu.stepExceptionValid || cpu.stepInterruptValid || len(cpu.traceBytes) != 0 || len(cpu.stepBusAccesses) != 0 {
+		cpu.resetStepDebugState()
+	}
+
 	if cpu.stopped {
 		if err := cpu.checkInterrupts(); err != nil {
 			return err
@@ -884,6 +1163,9 @@ func (cpu *cpu) RunCycles(budget uint64) error {
 	target := start + budget
 
 	for cpu.cycles < target {
+		if cpu.stepExceptionValid || cpu.stepInterruptValid || len(cpu.traceBytes) != 0 || len(cpu.stepBusAccesses) != 0 {
+			cpu.resetStepDebugState()
+		}
 		before := cpu.cycles
 
 		// Inline Step() for performance
@@ -920,8 +1202,15 @@ func (cpu *cpu) RunInstructions(count uint64) error {
 
 func (cpu *cpu) RunUntil(options RunUntilOptions) (RunResult, error) {
 	var result RunResult
+	previousCollectStepBus := cpu.collectStepBus
+	cpu.collectStepBus = options.StopOnBusAccess != nil || options.StopPredicate != nil
+	cpu.refreshDebugModes()
+	defer func() {
+		cpu.collectStepBus = previousCollectStepBus
+		cpu.refreshDebugModes()
+	}()
 
-	if reason, ok := cpu.pcStopReason(options); ok {
+	if reason, ok := cpu.runStopReason(options, &result); ok {
 		result.Reason = reason
 		result.PC = cpu.regs.PC
 		return result, nil
@@ -947,27 +1236,73 @@ func (cpu *cpu) RunUntil(options RunUntilOptions) (RunResult, error) {
 			result.Exception = cpu.stepException
 			result.HasException = true
 		}
+		if matched, ok := cpu.matchStepBusAccess(options); ok {
+			result.BusAccess = matched
+			result.HasBusAccess = true
+		}
+		if cpu.stepInterruptValid {
+			result.Interrupt = cpu.stepInterrupt
+			result.HasInterrupt = true
+		}
 
-		if reason, ok := cpu.runStopReason(options); ok {
+		if reason, ok := cpu.runStopReason(options, &result); ok {
 			result.Reason = reason
 			return result, nil
 		}
 	}
 }
 
-func (cpu *cpu) sendTrace(pc uint32, cycleDelta uint32) {
-	if cpu.trap == nil {
+// resetStepDebugState clears per-step scratch state before a new Step/RunCycles
+// iteration so stop conditions only see events from the current instruction.
+func (cpu *cpu) resetStepDebugState() {
+	cpu.stepException = ExceptionInfo{}
+	cpu.stepExceptionValid = false
+	cpu.stepInterrupt = InterruptInfo{}
+	cpu.stepInterruptValid = false
+	cpu.traceBytes = cpu.traceBytes[:0]
+	cpu.stepBusAccesses = cpu.stepBusAccesses[:0]
+}
+
+func (cpu *cpu) sendPreTrace(pc uint32, opcode uint16, regs Registers) {
+	if cpu.preTrap == nil {
 		return
 	}
 
-	cpu.trap(TraceInfo{
-		PC:         pc,
-		SR:         cpu.regs.SR,
-		Registers:  cpu.regs,
-		Opcode:     cpu.regs.IR,
-		Bytes:      cpu.traceInstructionBytes(pc),
-		CycleDelta: cycleDelta,
+	bytes := traceInstructionBytes(cpu.bus, pc, opcode)
+	cpu.preTrap(PreTraceInfo{
+		PC:        pc & 0xffffff,
+		SR:        regs.SR,
+		Registers: regs,
+		Opcode:    opcode,
+		Bytes:     bytes,
+		Mnemonic:  traceInstructionMnemonic(cpu.bus, pc, bytes),
+		Cycles:    cpu.cycles,
 	})
+}
+
+// sendTrace snapshots the final instruction result and also feeds the optional
+// history buffer so callers can inspect the recent lead-up to a fault.
+func (cpu *cpu) sendTrace(pc uint32, before Registers, cycleDelta uint32) {
+	if !cpu.traceInstructions {
+		return
+	}
+
+	bytes := cpu.traceInstructionBytes(pc)
+	info := TraceInfo{
+		PC:              pc & 0xffffff,
+		SR:              cpu.regs.SR,
+		Registers:       cpu.regs,
+		BeforeRegisters: before,
+		Opcode:          cpu.regs.IR,
+		Bytes:           bytes,
+		Mnemonic:        traceInstructionMnemonic(cpu.bus, pc, bytes),
+		CycleDelta:      cycleDelta,
+		Cycles:          cpu.cycles,
+	}
+	cpu.appendHistory(HistoryEntry{Kind: HistoryInstruction, Trace: info})
+	if cpu.trap != nil {
+		cpu.trap(info)
+	}
 }
 
 func (cpu *cpu) checkExecuteBreakpoint(pc uint32) error {
@@ -1052,9 +1387,19 @@ func (cpu *cpu) Reset() error {
 	cpu.lastExceptionValid = false
 	cpu.stepException = ExceptionInfo{}
 	cpu.stepExceptionValid = false
+	cpu.lastInterrupt = InterruptInfo{}
+	cpu.lastInterruptValid = false
+	cpu.stepInterrupt = InterruptInfo{}
+	cpu.stepInterruptValid = false
 	cpu.lastOpcodePC = 0
 	cpu.lastOpcodePCValid = false
+	cpu.currentOpcodePC = 0
+	cpu.currentOpcodeValid = false
 	cpu.traceBytes = cpu.traceBytes[:0]
+	cpu.stepBusAccesses = cpu.stepBusAccesses[:0]
+	cpu.historyNext = 0
+	cpu.historyCount = 0
+	cpu.refreshDebugModes()
 	if cpu.scheduler != nil {
 		cpu.scheduler.Reset(0)
 	}
@@ -1196,8 +1541,10 @@ func (cpu *cpu) popPc(s Size) (uint32, error) {
 	}
 }
 
+// readProgramFastWord keeps the single-RAM fast path active while still
+// reporting instruction fetches through the debug bus hook.
 func (cpu *cpu) readProgramFastWord(address uint32) (uint16, bool, error) {
-	if cpu.breakpoints != nil || cpu.busTrap != nil {
+	if cpu.breakpoints != nil {
 		return 0, false, nil
 	}
 
@@ -1220,11 +1567,16 @@ func (cpu *cpu) readProgramFastWord(address uint32) (uint16, bool, error) {
 		return 0, true, BusError(address)
 	}
 
-	return uint16(ram.mem[idx])<<8 | uint16(ram.mem[idx+1]), true, nil
+	value := uint16(ram.mem[idx])<<8 | uint16(ram.mem[idx+1])
+	ctx := accessContext{functionCode: cpu.programFunctionCode()}
+	if cpu.shouldTraceBusAccess(ctx) {
+		cpu.traceBusAccess(Word, address, uint32(value), ctx)
+	}
+	return value, true, nil
 }
 
 func (cpu *cpu) readProgramFastLong(address uint32) (uint32, bool, error) {
-	if cpu.breakpoints != nil || cpu.busTrap != nil {
+	if cpu.breakpoints != nil {
 		return 0, false, nil
 	}
 
@@ -1250,10 +1602,15 @@ func (cpu *cpu) readProgramFastLong(address uint32) (uint32, bool, error) {
 		return 0, true, BusError((address + uint32(Word)) & 0xffffff)
 	}
 
-	return uint32(ram.mem[idx])<<24 |
+	value := uint32(ram.mem[idx])<<24 |
 		uint32(ram.mem[idx+1])<<16 |
 		uint32(ram.mem[idx+2])<<8 |
-		uint32(ram.mem[idx+3]), true, nil
+		uint32(ram.mem[idx+3])
+	ctx := accessContext{functionCode: cpu.programFunctionCode()}
+	if cpu.shouldTraceBusAccess(ctx) {
+		cpu.traceBusAccess(Long, address, value, ctx)
+	}
+	return value, true, nil
 }
 
 func (cpu *cpu) recordProgramFault(address uint32, err error) {
@@ -1333,30 +1690,77 @@ func (cpu *cpu) dispatchException(info ExceptionInfo) {
 	cpu.lastExceptionValid = true
 	cpu.stepException = info
 	cpu.stepExceptionValid = true
+	cpu.appendHistory(HistoryEntry{Kind: HistoryException, Exception: info})
 	if cpu.exceptionTrap != nil {
 		cpu.exceptionTrap(info)
 	}
 }
 
+func (cpu *cpu) dispatchInterrupt(info InterruptInfo) {
+	cpu.lastInterrupt = info
+	cpu.lastInterruptValid = true
+	cpu.stepInterrupt = info
+	cpu.stepInterruptValid = true
+	cpu.appendHistory(HistoryEntry{Kind: HistoryInterrupt, Interrupt: info})
+	if cpu.interruptTrap != nil {
+		cpu.interruptTrap(info)
+	}
+}
+
+func (cpu *cpu) shouldTraceBusAccess(ctx accessContext) bool {
+	if ctx.instructionFetch() && !ctx.write && cpu.traceInstructions {
+		return true
+	}
+	return cpu.traceBus
+}
+
+// traceBusAccess is the single funnel for memory access reporting. It updates
+// fetched-byte tracking, step-local stop data, the rolling history buffer, and
+// the external callback with the same normalized record.
 func (cpu *cpu) traceBusAccess(size Size, address uint32, value uint32, ctx accessContext) {
+	info := BusAccessInfo{
+		Address:          address & 0xffffff,
+		Size:             size,
+		Value:            value & size.mask(),
+		Write:            ctx.write,
+		InstructionFetch: ctx.instructionFetch(),
+		PC:               cpu.debugPC(),
+	}
+
 	if ctx.instructionFetch() && !ctx.write {
 		cpu.traceBytes = appendTraceValue(cpu.traceBytes, size, value)
+	}
+	if cpu.collectStepBus {
+		cpu.stepBusAccesses = append(cpu.stepBusAccesses, info)
+	}
+	if len(cpu.history) != 0 {
+		cpu.appendHistory(HistoryEntry{Kind: HistoryBusAccess, BusAccess: info})
 	}
 
 	if cpu.busTrap == nil {
 		return
 	}
 
-	cpu.busTrap(BusAccessInfo{
-		Address:          address & 0xffffff,
-		Size:             size,
-		Value:            value & size.mask(),
-		Write:            ctx.write,
-		InstructionFetch: ctx.instructionFetch(),
-	})
+	cpu.busTrap(info)
 }
 
-func (cpu *cpu) runStopReason(options RunUntilOptions) (RunStopReason, bool) {
+func (cpu *cpu) runStopReason(options RunUntilOptions, result *RunResult) (RunStopReason, bool) {
+	if options.StopPredicate != nil && options.StopPredicate(cpu.runPredicateInfo(result)) {
+		return RunStopPredicate, true
+	}
+	if matched, ok := cpu.matchStopAtPC(options); ok {
+		if result != nil {
+			result.PC = matched
+		}
+		return RunStopPC, true
+	}
+	if matched, ok := cpu.matchStepBusAccess(options); ok {
+		if result != nil {
+			result.BusAccess = matched
+			result.HasBusAccess = true
+		}
+		return RunStopBusAccess, true
+	}
 	if options.StopOnIllegal && cpu.stepExceptionValid && isIllegalException(cpu.stepException.Vector) {
 		return RunStopIllegalOpcode, true
 	}
@@ -1428,6 +1832,139 @@ func isIllegalException(vector uint32) bool {
 	default:
 		return false
 	}
+}
+
+func (cpu *cpu) matchStopAtPC(options RunUntilOptions) (uint32, bool) {
+	for _, target := range options.StopAtPC {
+		if cpu.regs.PC&0xffffff == target&0xffffff {
+			return cpu.regs.PC & 0xffffff, true
+		}
+	}
+	return 0, false
+}
+
+func (cpu *cpu) matchStepBusAccess(options RunUntilOptions) (BusAccessInfo, bool) {
+	if options.StopOnBusAccess == nil {
+		return BusAccessInfo{}, false
+	}
+	for _, access := range cpu.stepBusAccesses {
+		if options.StopOnBusAccess(access) {
+			return access, true
+		}
+	}
+	return BusAccessInfo{}, false
+}
+
+func (cpu *cpu) runPredicateInfo(result *RunResult) RunPredicateInfo {
+	info := RunPredicateInfo{
+		Registers:     cpu.regs,
+		Cycles:        cpu.cycles,
+		LastException: cpu.stepException,
+		HasException:  cpu.stepExceptionValid,
+		LastInterrupt: cpu.stepInterrupt,
+		HasInterrupt:  cpu.stepInterruptValid,
+	}
+	if result != nil {
+		info.Instructions = result.Instructions
+	}
+	if len(cpu.stepBusAccesses) != 0 {
+		info.LastBusAccess = cpu.stepBusAccesses[len(cpu.stepBusAccesses)-1]
+		info.HasBusAccess = true
+	}
+	return info
+}
+
+func (cpu *cpu) appendHistory(entry HistoryEntry) {
+	if len(cpu.history) == 0 {
+		return
+	}
+	cpu.history[cpu.historyNext] = cloneHistoryEntry(entry)
+	cpu.historyNext = (cpu.historyNext + 1) % len(cpu.history)
+	if cpu.historyCount < len(cpu.history) {
+		cpu.historyCount++
+	}
+}
+
+func cloneHistoryEntry(entry HistoryEntry) HistoryEntry {
+	entry.Trace = cloneTraceInfo(entry.Trace)
+	entry.Exception = cloneExceptionInfo(entry.Exception)
+	return entry
+}
+
+func cloneTraceInfo(info TraceInfo) TraceInfo {
+	info.Bytes = append([]byte(nil), info.Bytes...)
+	return info
+}
+
+func cloneExceptionInfo(info ExceptionInfo) ExceptionInfo {
+	return info
+}
+
+// ReadExceptionStackFrame decodes a 68000 exception frame directly from memory
+// without requiring the caller to know the byte layout.
+func ReadExceptionStackFrame(bus AddressBus, sp uint32, format ExceptionStackFrameFormat) (ExceptionStackFrame, error) {
+	frame := ExceptionStackFrame{
+		Format:       format,
+		StackPointer: sp & 0xffffff,
+	}
+
+	switch format {
+	case ExceptionStackFrameGroup12:
+		sr, err := bus.Read(Word, sp)
+		if err != nil {
+			return ExceptionStackFrame{}, err
+		}
+		pc, err := bus.Read(Long, sp+uint32(Word))
+		if err != nil {
+			return ExceptionStackFrame{}, err
+		}
+		frame.SR = uint16(sr)
+		frame.PC = pc
+		return frame, nil
+	case ExceptionStackFrameGroup0:
+		statusWord, err := bus.Read(Word, sp)
+		if err != nil {
+			return ExceptionStackFrame{}, err
+		}
+		faultAddress, err := bus.Read(Long, sp+2)
+		if err != nil {
+			return ExceptionStackFrame{}, err
+		}
+		ir, err := bus.Read(Word, sp+6)
+		if err != nil {
+			return ExceptionStackFrame{}, err
+		}
+		sr, err := bus.Read(Word, sp+8)
+		if err != nil {
+			return ExceptionStackFrame{}, err
+		}
+		pc, err := bus.Read(Long, sp+10)
+		if err != nil {
+			return ExceptionStackFrame{}, err
+		}
+		frame.StatusWord = uint16(statusWord)
+		frame.FaultAddress = faultAddress
+		frame.InstructionRegister = uint16(ir)
+		frame.SR = uint16(sr)
+		frame.PC = pc
+		return frame, nil
+	default:
+		return ExceptionStackFrame{}, fmt.Errorf("unknown exception stack frame format %d", format)
+	}
+}
+
+// CurrentExceptionFrame rereads the most recent exception frame from the stack,
+// which is useful after a handler has inspected or modified it in memory.
+func (cpu *cpu) CurrentExceptionFrame() (ExceptionStackFrame, bool, error) {
+	if !cpu.lastExceptionValid || !cpu.lastException.FrameValid {
+		return ExceptionStackFrame{}, false, nil
+	}
+
+	frame, err := ReadExceptionStackFrame(cpu.bus, cpu.lastException.StackPointer, cpu.lastException.Frame.Format)
+	if err != nil {
+		return ExceptionStackFrame{}, true, err
+	}
+	return frame, true, nil
 }
 
 func (cpu *cpu) traceInstructionBytes(pc uint32) []byte {

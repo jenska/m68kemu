@@ -13,6 +13,9 @@ This project provides a Motorola 68000 CPU emulator for retro-computing projects
 * Correct short exception frames for group 1/2 exceptions and 68000 group 0 bus/address error frames.
 * 24-bit address bus with support for multiple devices, fixed-range mappings, and Atari ST-style region layout.
 * Tracing, breakpoints, cycle-budgeted execution, and verbose logging helpers with instruction-range disassembly.
+* Rich debug hooks for per-instruction trace, pre-instruction snapshots, exceptions, bus accesses, and accepted interrupts.
+* `RunUntil` stop conditions for instruction budgets, exact PC stops, PC ranges, exceptions, bus-access matches, and custom predicates.
+* Optional rolling debug history plus helpers to inspect the last exception stack frame.
 * Optional cycle scheduler hooks for machine-level devices such as timers, video, DMA, and interrupt controllers.
 
 ## Current Status
@@ -157,6 +160,52 @@ TRACE PC 00002000 OPCODE 7005 DELTA 4 CYCLES 4 MOVEQ #5, D0
 ```
 
 These helpers use the bus `Peek` path when available so debug output does not trigger device side effects, and the verbose logger prefers `TraceInfo.Bytes` for disassembly so the trace remains accurate even when fetch-side effects would make a second bus read misleading.
+
+### Debug Hooks
+
+For emulator bring-up and TOS failure analysis, the CPU exposes several debugger-oriented callbacks:
+
+```go
+cpu.SetPreTracer(func(info m68kemu.PreTraceInfo) {
+	// Inspect registers before the instruction executes.
+})
+
+cpu.SetTracer(func(info m68kemu.TraceInfo) {
+	// Instruction address, opcode bytes, mnemonic, before/after registers,
+	// per-instruction cycle delta, and total cycle count.
+})
+
+cpu.SetExceptionTracer(func(info m68kemu.ExceptionInfo) {
+	// Vector, trapping opcode address, stacked/reported PC, SR before/after,
+	// new handler PC, and decoded stack-frame details.
+})
+
+cpu.SetBusTracer(func(info m68kemu.BusAccessInfo) {
+	// Address, size, read/write, value, instruction-fetch flag, and current instruction PC.
+})
+
+cpu.SetInterruptTracer(func(info m68kemu.InterruptInfo) {
+	// Accepted IRQ level, vector, autovector/explicit, and PC/SR at acceptance.
+})
+```
+
+`RunUntil` can also stop on richer conditions:
+
+```go
+result, err := cpu.RunUntil(m68kemu.RunUntilOptions{
+	MaxInstructions: 1000,
+	StopAtPC:        []uint32{0x00fc1234},
+	StopOnException: true,
+	StopOnBusAccess: func(info m68kemu.BusAccessInfo) bool {
+		return !info.InstructionFetch && info.Address == 0x00ff8209
+	},
+	StopPredicate: func(info m68kemu.RunPredicateInfo) bool {
+		return info.Registers.D[0] == 0xdeadbeef
+	},
+})
+```
+
+If you want a rolling "what just happened?" buffer without always logging, call `cpu.SetHistoryLimit(n)` and inspect `cpu.History()`. After an exception, `cpu.CurrentExceptionFrame()` and `m68kemu.ReadExceptionStackFrame(...)` can decode the pushed 68000 frame directly from memory.
 
 ## Testing
 

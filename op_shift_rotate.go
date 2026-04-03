@@ -16,7 +16,7 @@ func shiftRotate(cpu *cpu) error {
 	countField := int((opcode >> 9) & 0x7)
 	left := (opcode>>8)&0x1 == 1
 	sizeField := (opcode >> 6) & 0x3
-	operation := int((opcode >> 3) & 0x7)
+	operation := (opcode >> 3) & 0x7
 	register := int(opcode & 0x7)
 
 	registerCount := false
@@ -62,7 +62,7 @@ func shiftRotate(cpu *cpu) error {
 
 func shiftRotateMemory(cpu *cpu) error {
 	opcode := cpu.regs.IR
-	operation := int((opcode >> 9) & 0x3)
+	operation := (opcode >> 9) & 0x3
 	left := ((opcode >> 8) & 0x1) != 0
 
 	ea, err := cpu.ResolveSrcEA(Word)
@@ -92,7 +92,7 @@ type shiftRotateFlags struct {
 	overflow     bool
 }
 
-func doShiftRotate(value uint32, count int, width int, operation int, left bool, extend bool) (uint32, shiftRotateFlags) {
+func doShiftRotate(value uint32, count int, width int, operation uint16, left bool, extend bool) (uint32, shiftRotateFlags) {
 	mask := uint32((1 << width) - 1)
 	value &= mask
 
