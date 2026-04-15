@@ -317,5 +317,5 @@ func init() {
 // trap handles TRAP #n instructions by stacking the exception frame and
 // loading the handler address from the vector table.
 func trap(cpu *cpu) error {
-	return cpu.exception(XTrap + uint32(cpu.regs.IR&0x000f))
+	return cpu.trapException(XTrap + uint32(cpu.regs.IR&0x000f))
 }

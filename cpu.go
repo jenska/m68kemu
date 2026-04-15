@@ -883,6 +883,19 @@ func (cpu *cpu) raiseException(vector uint32, newSR uint16) error {
 	return cpu.raiseExceptionWithPC(vector, newSR, cpu.regs.PC, cpu.regs.PC)
 }
 
+func (cpu *cpu) synchronousException(vector uint32, newSR uint16, stackedPC uint32) error {
+	return cpu.raiseExceptionWithPC(vector, newSR, stackedPC, stackedPC)
+}
+
+func (cpu *cpu) trapException(vector uint32) error {
+	stackedPC := cpu.regs.PC & 0xffffff
+	instructionPC := cpu.currentOpcodeAddress(stackedPC)
+	if stackedPC == instructionPC {
+		stackedPC = (instructionPC + uint32(Word)) & 0xffffff
+	}
+	return cpu.synchronousException(vector, cpu.regs.SR|srSupervisor, stackedPC)
+}
+
 func (cpu *cpu) raiseExceptionWithPC(vector uint32, newSR uint16, stackedPC uint32, exceptionPC uint32) error {
 	if vector > 255 {
 		return fmt.Errorf("invalid vector %d", vector)
