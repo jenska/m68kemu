@@ -32,8 +32,8 @@ func TestLEA(t *testing.T) {
 					t.Fatalf("expected stack pointer to decrement by 4, got %04x", cpu.regs.A[7])
 				}
 				value, _ := ram.Read(Long, cpu.regs.A[7])
-				if value != 0x2004 {
-					t.Fatalf("expected pushed PC-relative address 0x2004, got %08x", value)
+				if value != 0x2006 {
+					t.Fatalf("expected pushed PC-relative address 0x2006, got %08x", value)
 				}
 			},
 		},

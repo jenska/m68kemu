@@ -95,23 +95,6 @@ func main() {
 }
 ```
 
-### Atari ST-Oriented Bus Setup
-
-The bus can also be built from explicit 24-bit address ranges, which is useful when wiring together an Atari ST memory map:
-
-```go
-ram := m68kemu.NewRAM(0x000000, 512*1024)
-tos := m68kemu.NewRAM(m68kemu.STTOSStart, 192*1024)
-
-bus := m68kemu.NewAtariSTBus(
- m68kemu.STRegionMapping{Start: 0x000000, End: 0x07ffff, Device: ram},
- m68kemu.STRegionMapping{Start: m68kemu.STTOSStart, End: m68kemu.STTOSEnd, Device: tos},
-)
-```
-
-The built-in Atari ST constants map TOS ROM to `0xFC0000-0xFEFFFF` and MMIO to `0xFF8000-0xFFFFFF`.
-For now this is just a convenient fixed-range decoder; the actual ST devices still need to be implemented on top of it.
-
 ### Cycle Scheduler
 
 Machine devices can follow CPU time by attaching a scheduler:
@@ -133,20 +116,20 @@ The emulator includes helpers for both one-off disassembly and trace logging:
 
 ```go
 logger := m68kemu.NewVerboseLogger(cpu, bus, os.Stdout, m68kemu.VerboseLoggerOptions{
-	IncludeRegisters: true,
-	IncludeCycles:    true,
-	MemoryRanges: []m68kemu.MemoryRange{
-		{Start: 0x2000, Length: 0x10, Label: "program"},
-	},
+  IncludeRegisters: true,
+  IncludeCycles:    true,
+  MemoryRanges: []m68kemu.MemoryRange{
+    {Start: 0x2000, Length: 0x10, Label: "program"},
+  },
 })
 cpu.SetTracer(logger.Trace)
 
 lines, err := m68kemu.DisassembleMemoryRange(bus, 0x2000, 0x10)
 if err != nil {
-	log.Fatalf("disassembly failed: %v", err)
+ log.Fatalf("disassembly failed: %v", err)
 }
 for _, line := range lines {
-	fmt.Println(line)
+ fmt.Println(line)
 }
 ```
 
@@ -164,25 +147,25 @@ For emulator bring-up and TOS failure analysis, the CPU exposes several debugger
 
 ```go
 cpu.SetPreTracer(func(info m68kemu.PreTraceInfo) {
-	// Inspect registers before the instruction executes.
+ // Inspect registers before the instruction executes.
 })
 
 cpu.SetTracer(func(info m68kemu.TraceInfo) {
-	// Instruction address, opcode bytes, mnemonic, before/after registers,
-	// per-instruction cycle delta, and total cycle count.
+ // Instruction address, opcode bytes, mnemonic, before/after registers,
+ // per-instruction cycle delta, and total cycle count.
 })
 
 cpu.SetExceptionTracer(func(info m68kemu.ExceptionInfo) {
-	// Vector, trapping opcode address, stacked/reported PC, SR before/after,
-	// new handler PC, and decoded stack-frame details.
+ // Vector, trapping opcode address, stacked/reported PC, SR before/after,
+ // new handler PC, and decoded stack-frame details.
 })
 
 cpu.SetBusTracer(func(info m68kemu.BusAccessInfo) {
-	// Address, size, read/write, value, instruction-fetch flag, and current instruction PC.
+ // Address, size, read/write, value, instruction-fetch flag, and current instruction PC.
 })
 
 cpu.SetInterruptTracer(func(info m68kemu.InterruptInfo) {
-	// Accepted IRQ level, vector, autovector/explicit, and PC/SR at acceptance.
+ // Accepted IRQ level, vector, autovector/explicit, and PC/SR at acceptance.
 })
 ```
 
@@ -190,15 +173,15 @@ cpu.SetInterruptTracer(func(info m68kemu.InterruptInfo) {
 
 ```go
 result, err := cpu.RunUntil(m68kemu.RunUntilOptions{
-	MaxInstructions: 1000,
-	StopAtPC:        []uint32{0x00fc1234},
-	StopOnException: true,
-	StopOnBusAccess: func(info m68kemu.BusAccessInfo) bool {
-		return !info.InstructionFetch && info.Address == 0x00ff8209
-	},
-	StopPredicate: func(info m68kemu.RunPredicateInfo) bool {
-		return info.Registers.D[0] == 0xdeadbeef
-	},
+ MaxInstructions: 1000,
+ StopAtPC:        []uint32{0x00fc1234},
+ StopOnException: true,
+ StopOnBusAccess: func(info m68kemu.BusAccessInfo) bool {
+  return !info.InstructionFetch && info.Address == 0x00ff8209
+ },
+ StopPredicate: func(info m68kemu.RunPredicateInfo) bool {
+  return info.Registers.D[0] == 0xdeadbeef
+ },
 })
 ```
 

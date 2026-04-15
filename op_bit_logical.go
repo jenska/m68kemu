@@ -280,22 +280,23 @@ func notInstruction(cpu *cpu) error {
 }
 
 func init() {
-	// Data alterable destinations for bit instructions (data register or memory,
-	// excluding address registers, PC-relative modes, and immediates).
-	dataAlterable := eaMaskDataRegister | eaMaskIndirect | eaMaskPostIncrement |
+	// Valid bit-instruction destinations include data registers plus the memory
+	// forms this emulator supports, including PC-relative operands.
+	bitOperandMask := eaMaskDataRegister | eaMaskIndirect | eaMaskPostIncrement |
 		eaMaskPreDecrement | eaMaskDisplacement | eaMaskIndex |
-		eaMaskAbsoluteShort | eaMaskAbsoluteLong
+		eaMaskAbsoluteShort | eaMaskAbsoluteLong |
+		eaMaskPCDisplacement | eaMaskPCIndex
 
 	// Dynamic bit number (from Dx) uses opcodes with bit 11 clear and op type in bits 8-6.
 	for op := uint16(0); op < 4; op++ {
 		match := uint16(0x0100) | ((op + 4) << 6)
-		registerInstruction(bitDynamic, match, 0xf1c0, dataAlterable, bitCycleCalculator(false, op))
+		registerInstruction(bitDynamic, match, 0xf1c0, bitOperandMask, bitCycleCalculator(false, op))
 	}
 
 	// Static bit number (immediate) uses opcodes with bit 11 set and op type in bits 8-6.
 	for op := uint16(0); op < 4; op++ {
 		match := uint16(0x0800) | (op << 6)
-		registerInstruction(bitImmediate, match, 0xffc0, dataAlterable, bitCycleCalculator(true, op))
+		registerInstruction(bitImmediate, match, 0xffc0, bitOperandMask, bitCycleCalculator(true, op))
 	}
 }
 
