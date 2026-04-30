@@ -170,3 +170,71 @@ func TestLogicalInstructions(t *testing.T) {
 		})
 	}
 }
+
+func TestLogicalInstructionAcceptsImmediateSourceEA(t *testing.T) {
+	tests := []struct {
+		name   string
+		opcode uint16
+		ext    uint16
+		setup  func(*cpu)
+		check  func(*testing.T, *cpu)
+	}{
+		{
+			name:   "ANDImmediateToDataRegister",
+			opcode: 0xce7c,
+			ext:    0x0003,
+			setup: func(c *cpu) {
+				c.regs.D[7] = 0x0007
+				c.regs.SR = srExtend | srCarry
+			},
+			check: func(t *testing.T, c *cpu) {
+				if got := c.regs.D[7] & 0xffff; got != 0x0003 {
+					t.Fatalf("unexpected D7 after immediate-source AND: %04x", got)
+				}
+				if c.regs.SR&(srCarry|srOverflow) != 0 {
+					t.Fatalf("carry/overflow not cleared after immediate-source AND: SR=%04x", c.regs.SR)
+				}
+				if c.regs.SR&srExtend == 0 {
+					t.Fatalf("extend flag should be preserved after immediate-source AND: SR=%04x", c.regs.SR)
+				}
+			},
+		},
+		{
+			name:   "ORImmediateToDataRegister",
+			opcode: 0x8e7c,
+			ext:    0x0003,
+			setup: func(c *cpu) {
+				c.regs.D[7] = 0x0004
+			},
+			check: func(t *testing.T, c *cpu) {
+				if got := c.regs.D[7] & 0xffff; got != 0x0007 {
+					t.Fatalf("unexpected D7 after immediate-source OR: %04x", got)
+				}
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cpu, ram := newEnvironment(t)
+			tt.setup(cpu)
+
+			code := []uint16{tt.opcode, tt.ext}
+			for i, word := range code {
+				if err := ram.Write(Word, cpu.regs.PC+uint32(i*2), uint32(word)); err != nil {
+					t.Fatalf("failed to write word %d: %v", i, err)
+				}
+			}
+
+			opcode, err := cpu.fetchOpcode()
+			if err != nil {
+				t.Fatalf("failed to fetch opcode: %v", err)
+			}
+			if err := cpu.executeInstruction(opcode); err != nil {
+				t.Fatalf("failed to execute opcode %04x: %v", opcode, err)
+			}
+
+			tt.check(t, cpu)
+		})
+	}
+}
