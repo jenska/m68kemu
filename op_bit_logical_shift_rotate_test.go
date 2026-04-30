@@ -130,6 +130,38 @@ func TestShiftZeroCountPreservesExtend(t *testing.T) {
 	}
 }
 
+func TestRotateWordByFullWidthPreservesValueAndCarry(t *testing.T) {
+	cpu, ram := newEnvironment(t)
+	cpu.regs.D[0] = 0x8000
+	cpu.regs.D[1] = 16
+	cpu.regs.SR &^= srCarry | srZero | srNegative | srOverflow
+
+	runSingleInstruction(t, cpu, ram, "ROL.W D1,D0")
+
+	if got := uint32(cpu.regs.D[0]) & 0xffff; got != 0x8000 {
+		t.Fatalf("expected value 0x8000, got %04x", got)
+	}
+	if cpu.regs.SR&srCarry != 0 {
+		t.Fatalf("expected carry clear for ROL.W D1,D0 with count 16, got SR=%04x", cpu.regs.SR)
+	}
+}
+
+func TestRotateRightWordByFullWidthPreservesValueAndCarry(t *testing.T) {
+	cpu, ram := newEnvironment(t)
+	cpu.regs.D[0] = 0x7fff
+	cpu.regs.D[1] = 16
+	cpu.regs.SR &^= srCarry | srZero | srNegative | srOverflow
+
+	runSingleInstruction(t, cpu, ram, "ROR.W D1,D0")
+
+	if got := uint32(cpu.regs.D[0]) & 0xffff; got != 0x7fff {
+		t.Fatalf("expected value 0x7fff, got %04x", got)
+	}
+	if cpu.regs.SR&srCarry != 0 {
+		t.Fatalf("expected carry clear for ROR.W D1,D0 with count 16, got SR=%04x", cpu.regs.SR)
+	}
+}
+
 func TestShiftRotateMemoryLogicalRight(t *testing.T) {
 	cpu, ram := newEnvironment(t)
 	cpu.regs.A[0] = 0x200

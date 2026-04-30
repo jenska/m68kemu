@@ -656,7 +656,8 @@ func rol(value uint32, count, width int) (uint32, shiftRotateFlags) {
 	value &= mask
 	shift := count % width
 	if shift == 0 {
-		return value, shiftRotateFlags{carryOut: ^uint32(0)}
+		carry := value & 1
+		return value, shiftRotateFlags{carryOut: carry, changeCarry: true}
 	}
 	carry := (value >> (width - shift)) & 1
 	result := ((value << shift) | (value >> (width - shift))) & mask
@@ -668,7 +669,8 @@ func ror(value uint32, count, width int) (uint32, shiftRotateFlags) {
 	value &= mask
 	shift := count % width
 	if shift == 0 {
-		return value, shiftRotateFlags{carryOut: ^uint32(0)}
+		carry := (value >> (width - 1)) & 1
+		return value, shiftRotateFlags{carryOut: carry, changeCarry: true}
 	}
 	carry := (value >> (shift - 1)) & 1
 	result := ((value >> shift) | (value << (width - shift))) & mask

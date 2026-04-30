@@ -35,10 +35,18 @@ Still missing for a complete Atari ST:
 
 This package is designed to be used as a library in your own projects.
 
+The repository also includes a small example command in `cmd/qsortdemo`, which assembles and executes the `testdata/qsort.s` quicksort demo.
+
 ### Installation
 
 ```sh
 go get github.com/jenska/m68kemu
+```
+
+If you want the demo binary, install it directly:
+
+```sh
+go install github.com/jenska/m68kemu/cmd/qsortdemo@latest
 ```
 
 ### Example Usage
