@@ -1,6 +1,20 @@
 package m68kemu
 
 func init() {
+
+	registerInstruction(swapInstruction, 0x4840, 0xfff8, 0, constantCycles(4))
+	registerInstruction(extInstruction, 0x4880, 0xfff8, 0, constantCycles(4))
+	registerInstruction(extInstruction, 0x48c0, 0xfff8, 0, constantCycles(4))
+	registerInstruction(tasInstruction, 0x4ac0, 0xffc0, eaMaskDataRegister|eaMaskIndirect|eaMaskPostIncrement|
+		eaMaskPreDecrement|eaMaskDisplacement|eaMaskIndex|eaMaskAbsoluteShort|eaMaskAbsoluteLong, clrTstCycleCalculator())
+
+	registerExgInstruction(0xc140, constantCycles(6))
+	registerExgInstruction(0xc148, constantCycles(6))
+	registerExgInstruction(0xc188, constantCycles(8))
+
+	registerInstruction(illegalInstruction, 0x4afc, 0xffff, 0, constantCycles(4))
+	registerInstruction(nop, 0x4e71, 0xffff, 0, constantCycles(4))
+
 	registerInstruction(trapv, 0x4e76, 0xffff, 0, constantCycles(4))
 	registerInstruction(resetInstruction, 0x4e70, 0xffff, 0, constantCycles(132))
 	registerInstruction(stop, 0x4e72, 0xffff, 0, constantCycles(4))
@@ -186,21 +200,6 @@ func rtr(cpu *cpu) error {
 	cpu.setSR(preserved | uint16(ccr&0xff))
 	cpu.regs.PC = pc
 	return nil
-}
-
-func init() {
-	registerInstruction(swapInstruction, 0x4840, 0xfff8, 0, constantCycles(4))
-	registerInstruction(extInstruction, 0x4880, 0xfff8, 0, constantCycles(4))
-	registerInstruction(extInstruction, 0x48c0, 0xfff8, 0, constantCycles(4))
-	registerInstruction(tasInstruction, 0x4ac0, 0xffc0, eaMaskDataRegister|eaMaskIndirect|eaMaskPostIncrement|
-		eaMaskPreDecrement|eaMaskDisplacement|eaMaskIndex|eaMaskAbsoluteShort|eaMaskAbsoluteLong, clrTstCycleCalculator())
-
-	registerExgInstruction(0xc140, constantCycles(6))
-	registerExgInstruction(0xc148, constantCycles(6))
-	registerExgInstruction(0xc188, constantCycles(8))
-
-	registerInstruction(illegalInstruction, 0x4afc, 0xffff, 0, constantCycles(4))
-	registerInstruction(nop, 0x4e71, 0xffff, 0, constantCycles(4))
 }
 
 // nop implements the 68000 NOP instruction (opcode 0x4E71).

@@ -2,6 +2,554 @@ package m68kemu
 
 import "testing"
 
+func runSingleInstruction(t *testing.T, cpu *cpu, ram *RAM, asmSrc string) {
+	t.Helper()
+
+	code := assemble(t, asmSrc)
+	for i := range code {
+		addr := cpu.regs.PC + uint32(i)
+		if err := ram.Write(Byte, addr, uint32(code[i])); err != nil {
+			t.Fatalf("failed to write byte to %04x: %v", addr, err)
+		}
+	}
+
+	opcode, err := cpu.fetchOpcode()
+	if err != nil {
+		t.Fatalf("failed to fetch opcode: %v", err)
+	}
+	if err := cpu.executeInstruction(opcode); err != nil {
+		t.Fatalf("failed to execute opcode %04x: %v", opcode, err)
+	}
+}
+
+func TestABCDRegister(t *testing.T) {
+	cpu, ram := newEnvironment(t)
+	cpu.regs.SR &^= srExtend | srCarry | srZero
+
+	cpu.regs.D[0] = 0x09
+	cpu.regs.D[1] = 0x01
+
+	runSingleInstruction(t, cpu, ram, "ABCD D0,D1")
+
+	if got := cpu.regs.D[1] & 0xff; got != 0x10 {
+		t.Fatalf("expected 0x10 in D1 low byte, got %02x", got)
+	}
+	if cpu.regs.SR&(srCarry|srExtend) != 0 {
+		t.Fatalf("carry/extend should be cleared, SR=%04x", cpu.regs.SR)
+	}
+	if cpu.regs.SR&srZero != 0 {
+		t.Fatalf("zero flag should be cleared, SR=%04x", cpu.regs.SR)
+	}
+}
+
+func TestABCDCarryAndZero(t *testing.T) {
+	cpu, ram := newEnvironment(t)
+	cpu.regs.D[0] = 0x01
+	cpu.regs.D[1] = 0x99
+
+	runSingleInstruction(t, cpu, ram, "ABCD D0,D1")
+
+	if got := cpu.regs.D[1] & 0xff; got != 0x00 {
+		t.Fatalf("expected 0x00 in D1 low byte, got %02x", got)
+	}
+	if cpu.regs.SR&(srCarry|srExtend) != srCarry|srExtend {
+		t.Fatalf("carry/extend should be set, SR=%04x", cpu.regs.SR)
+	}
+	if cpu.regs.SR&srZero != 0 {
+		t.Fatalf("zero flag should remain clear without prior zero, SR=%04x", cpu.regs.SR)
+	}
+}
+
+func TestABCDMemory(t *testing.T) {
+	cpu, ram := newEnvironment(t)
+	cpu.regs.A[0] = 0x0201
+	cpu.regs.A[1] = 0x0101
+
+	if err := ram.Write(Byte, 0x0200, 0x01); err != nil {
+		t.Fatalf("failed to seed destination: %v", err)
+	}
+	if err := ram.Write(Byte, 0x0100, 0x09); err != nil {
+		t.Fatalf("failed to seed source: %v", err)
+	}
+
+	runSingleInstruction(t, cpu, ram, "ABCD -(A1),-(A0)")
+
+	if cpu.regs.A[0] != 0x0200 || cpu.regs.A[1] != 0x0100 {
+		t.Fatalf("addresses not decremented correctly: A0=%04x A1=%04x", cpu.regs.A[0], cpu.regs.A[1])
+	}
+	if value, _ := ram.Read(Byte, 0x0200); value != 0x10 {
+		t.Fatalf("expected destination memory to hold 0x10, got %02x", value)
+	}
+}
+
+func TestSBCDBorrow(t *testing.T) {
+	cpu, ram := newEnvironment(t)
+	cpu.regs.D[0] = 0x01
+	cpu.regs.D[1] = 0x00
+
+	runSingleInstruction(t, cpu, ram, "SBCD D0,D1")
+
+	if got := cpu.regs.D[1] & 0xff; got != 0x99 {
+		t.Fatalf("expected 0x99 in D1 low byte, got %02x", got)
+	}
+	if cpu.regs.SR&(srCarry|srExtend) != srCarry|srExtend {
+		t.Fatalf("carry/extend should be set, SR=%04x", cpu.regs.SR)
+	}
+	if cpu.regs.SR&srZero != 0 {
+		t.Fatalf("zero flag should be cleared, SR=%04x", cpu.regs.SR)
+	}
+}
+
+func TestNBCDRegister(t *testing.T) {
+	cpu, ram := newEnvironment(t)
+	cpu.regs.SR |= srExtend
+	cpu.regs.D[3] = 0x01
+
+	runSingleInstruction(t, cpu, ram, "NBCD D3")
+
+	if got := cpu.regs.D[3] & 0xff; got != 0x98 {
+		t.Fatalf("expected 0x98 in D3 low byte, got %02x", got)
+	}
+	if cpu.regs.SR&(srCarry|srExtend) != srCarry|srExtend {
+		t.Fatalf("carry/extend should be set after borrow, SR=%04x", cpu.regs.SR)
+	}
+	if cpu.regs.SR&srZero != 0 {
+		t.Fatalf("zero flag should be cleared, SR=%04x", cpu.regs.SR)
+	}
+}
+
+func TestBCDZeroPropagation(t *testing.T) {
+	tests := []struct {
+		name    string
+		setupSR uint16
+		src     uint8
+		dst     uint8
+		asm     string
+		wantSRZ bool
+		wantDst uint8
+	}{
+		{"ABCDZeroStaysSet", srZero, 0x00, 0x00, "ABCD D0,D1", true, 0x00},
+		{"ABCDZeroClears", srZero, 0x01, 0x00, "ABCD D0,D1", false, 0x01},
+		{"ABCDZeroNeedsPriorZ", 0, 0x00, 0x00, "ABCD D0,D1", false, 0x00},
+		{"SBCDZeroClears", srZero, 0x00, 0x01, "SBCD D0,D1", false, 0x01},
+		{"SBCDZeroNeedsPriorZ", 0, 0x00, 0x00, "SBCD D0,D1", false, 0x00},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cpu, ram := newEnvironment(t)
+			cpu.regs.SR &^= srCarry | srExtend | srZero
+			cpu.regs.SR |= tt.setupSR
+			cpu.regs.D[0] = int32(tt.src)
+			cpu.regs.D[1] = int32(tt.dst)
+
+			runSingleInstruction(t, cpu, ram, tt.asm)
+
+			if got := cpu.regs.D[1] & 0xff; got != int32(tt.wantDst) {
+				t.Fatalf("expected %02x in destination, got %02x", tt.wantDst, got)
+			}
+			if zSet := cpu.regs.SR&srZero != 0; zSet != tt.wantSRZ {
+				t.Fatalf("zero flag mismatch: want %v got %v (SR=%04x)", tt.wantSRZ, zSet, cpu.regs.SR)
+			}
+		})
+	}
+}
+
+func TestNBCDZeroAndExtend(t *testing.T) {
+	cpu, ram := newEnvironment(t)
+	cpu.regs.SR &^= srExtend | srZero
+	cpu.regs.D[2] = 0x00
+
+	runSingleInstruction(t, cpu, ram, "NBCD D2")
+
+	if got := cpu.regs.D[2] & 0xff; got != 0x00 {
+		t.Fatalf("expected NBCD of zero to stay zero, got %02x", got)
+	}
+	if cpu.regs.SR&srZero == 0 {
+		t.Fatalf("zero flag should be set for NBCD of zero, SR=%04x", cpu.regs.SR)
+	}
+	if cpu.regs.SR&(srCarry|srExtend) != 0 {
+		t.Fatalf("carry/extend should remain clear without borrow, SR=%04x", cpu.regs.SR)
+	}
+}
+
+func TestNbcdByteUsesWordStepForA7(t *testing.T) {
+	cpu, ram := newEnvironment(t)
+	cpu.regs.A[7] = 0x3002
+
+	if err := ram.Write(Byte, 0x3000, 0x01); err != nil {
+		t.Fatalf("seed memory: %v", err)
+	}
+
+	runSingleInstruction(t, cpu, ram, "NBCD -(A7)")
+
+	if cpu.regs.A[7] != 0x3000 {
+		t.Fatalf("A7 should predecrement by 2 for byte NBCD, got %04x", cpu.regs.A[7])
+	}
+	if got, _ := ram.Read(Byte, 0x3000); got != 0x99 {
+		t.Fatalf("unexpected NBCD result %02x", got)
+	}
+}
+
+func TestCmpDoesNotAffectExtend(t *testing.T) {
+	cpu, ram := newEnvironment(t)
+	cpu.regs.D[0] = 3
+	cpu.regs.D[1] = 5
+	cpu.regs.SR |= srExtend
+
+	code := assemble(t, "CMP.L D1,D0\n")
+	for i, b := range code {
+		if err := ram.Write(Byte, cpu.regs.PC+uint32(i), uint32(b)); err != nil {
+			t.Fatalf("write code: %v", err)
+		}
+	}
+
+	opcode, err := cpu.fetchOpcode()
+	if err != nil {
+		t.Fatalf("fetch: %v", err)
+	}
+	if err := cpu.executeInstruction(opcode); err != nil {
+		t.Fatalf("exec: %v", err)
+	}
+
+	if cpu.regs.D[0] != 3 {
+		t.Fatalf("CMP modified destination register: %08x", cpu.regs.D[0])
+	}
+	if cpu.regs.SR&srExtend == 0 {
+		t.Fatalf("CMP should leave extend bit unchanged")
+	}
+	expected := uint16(srNegative | srCarry)
+	if got := cpu.regs.SR & (srNegative | srZero | srOverflow | srCarry); got != expected {
+		t.Fatalf("unexpected condition codes %04x", got)
+	}
+}
+
+func TestCmpiImmediate(t *testing.T) {
+	cpu, ram := newEnvironment(t)
+	cpu.regs.D[2] = 0x12
+	cpu.regs.SR |= srExtend
+
+	code := assemble(t, "CMPI.B #$12,D2\n")
+	for i, b := range code {
+		if err := ram.Write(Byte, cpu.regs.PC+uint32(i), uint32(b)); err != nil {
+			t.Fatalf("write code: %v", err)
+		}
+	}
+
+	opcode, err := cpu.fetchOpcode()
+	if err != nil {
+		t.Fatalf("fetch: %v", err)
+	}
+	if err := cpu.executeInstruction(opcode); err != nil {
+		t.Fatalf("exec: %v", err)
+	}
+
+	if cpu.regs.D[2] != 0x12 {
+		t.Fatalf("CMPI modified destination register: %08x", cpu.regs.D[2])
+	}
+	if cpu.regs.SR&srExtend == 0 {
+		t.Fatalf("CMPI should leave extend bit unchanged")
+	}
+	expected := uint16(srZero)
+	if got := cpu.regs.SR & (srNegative | srZero | srOverflow | srCarry); got != expected {
+		t.Fatalf("unexpected condition codes %04x", got)
+	}
+}
+
+func TestCmpiLongAbsoluteDestination(t *testing.T) {
+	cpu, ram := newEnvironment(t)
+	cpu.regs.SR |= srExtend
+	if err := ram.Write(Long, 0x3000, 3); err != nil {
+		t.Fatalf("write dst: %v", err)
+	}
+
+	code := assemble(t, "CMPI.L #2,$3000\n")
+	for i, b := range code {
+		if err := ram.Write(Byte, cpu.regs.PC+uint32(i), uint32(b)); err != nil {
+			t.Fatalf("write code: %v", err)
+		}
+	}
+
+	opcode, err := cpu.fetchOpcode()
+	if err != nil {
+		t.Fatalf("fetch: %v", err)
+	}
+	if err := cpu.executeInstruction(opcode); err != nil {
+		t.Fatalf("exec: %v", err)
+	}
+
+	if got, err := ram.Read(Long, 0x3000); err != nil || got != 3 {
+		t.Fatalf("CMPI modified destination memory: %08x err=%v", got, err)
+	}
+	if cpu.regs.SR&srExtend == 0 {
+		t.Fatalf("CMPI should leave extend bit unchanged")
+	}
+	if got := cpu.regs.SR & (srNegative | srZero | srOverflow | srCarry); got != 0 {
+		t.Fatalf("unexpected condition codes %04x", got)
+	}
+}
+
+func TestCmpmPostIncrement(t *testing.T) {
+	cpu, ram := newEnvironment(t)
+	cpu.regs.A[0] = 0x3000
+	cpu.regs.A[1] = 0x4000
+
+	if err := ram.Write(Word, cpu.regs.A[0], 3); err != nil {
+		t.Fatalf("write src: %v", err)
+	}
+	if err := ram.Write(Word, cpu.regs.A[1], 5); err != nil {
+		t.Fatalf("write dst: %v", err)
+	}
+
+	code := assemble(t, "CMPM.W (A0)+,(A1)+\n")
+	for i, b := range code {
+		if err := ram.Write(Byte, cpu.regs.PC+uint32(i), uint32(b)); err != nil {
+			t.Fatalf("write code: %v", err)
+		}
+	}
+
+	opcode, err := cpu.fetchOpcode()
+	if err != nil {
+		t.Fatalf("fetch: %v", err)
+	}
+	if err := cpu.executeInstruction(opcode); err != nil {
+		t.Fatalf("exec: %v", err)
+	}
+
+	if cpu.regs.A[0] != 0x3000+uint32(Word) || cpu.regs.A[1] != 0x4000+uint32(Word) {
+		t.Fatalf("address registers not incremented correctly: A0=%04x A1=%04x", cpu.regs.A[0], cpu.regs.A[1])
+	}
+	expected := uint16(0)
+	if got := cpu.regs.SR & (srNegative | srZero | srOverflow | srCarry); got != expected {
+		t.Fatalf("unexpected condition codes %04x", got)
+	}
+}
+
+func TestCmpaWordSignExtendsSource(t *testing.T) {
+	cpu, ram := newEnvironment(t)
+	cpu.regs.A[0] = 0xffffffff
+	cpu.regs.SR |= srExtend
+
+	code := assemble(t, "CMPA.W #-1,A0\n")
+	for i, b := range code {
+		if err := ram.Write(Byte, cpu.regs.PC+uint32(i), uint32(b)); err != nil {
+			t.Fatalf("write code: %v", err)
+		}
+	}
+
+	opcode, err := cpu.fetchOpcode()
+	if err != nil {
+		t.Fatalf("fetch: %v", err)
+	}
+	if err := cpu.executeInstruction(opcode); err != nil {
+		t.Fatalf("exec: %v", err)
+	}
+
+	if cpu.regs.A[0] != 0xffffffff {
+		t.Fatalf("CMPA modified address register: %08x", cpu.regs.A[0])
+	}
+	if cpu.regs.SR&srExtend == 0 {
+		t.Fatalf("CMPA should leave extend bit unchanged")
+	}
+	expected := uint16(srZero)
+	if got := cpu.regs.SR & (srNegative | srZero | srOverflow | srCarry); got != expected {
+		t.Fatalf("unexpected condition codes %04x", got)
+	}
+}
+
+func TestCmpaLongUsesFullWidthSource(t *testing.T) {
+	cpu, ram := newEnvironment(t)
+	cpu.regs.A[1] = 0x12345678
+
+	code := assemble(t, "CMPA.L #$12345678,A1\n")
+	for i, b := range code {
+		if err := ram.Write(Byte, cpu.regs.PC+uint32(i), uint32(b)); err != nil {
+			t.Fatalf("write code: %v", err)
+		}
+	}
+
+	opcode, err := cpu.fetchOpcode()
+	if err != nil {
+		t.Fatalf("fetch: %v", err)
+	}
+	if err := cpu.executeInstruction(opcode); err != nil {
+		t.Fatalf("exec: %v", err)
+	}
+
+	if cpu.regs.A[1] != 0x12345678 {
+		t.Fatalf("CMPA modified address register: %08x", cpu.regs.A[1])
+	}
+	expected := uint16(srZero)
+	if got := cpu.regs.SR & (srNegative | srZero | srOverflow | srCarry); got != expected {
+		t.Fatalf("unexpected condition codes %04x", got)
+	}
+}
+
+func TestCmpmByteUsesWordStepForA7(t *testing.T) {
+	cpu, ram := newEnvironment(t)
+	cpu.regs.A[7] = 0x3000
+	cpu.regs.A[0] = 0x4000
+
+	if err := ram.Write(Byte, 0x3000, 0x12); err != nil {
+		t.Fatalf("write src: %v", err)
+	}
+	if err := ram.Write(Byte, 0x4000, 0x12); err != nil {
+		t.Fatalf("write dst: %v", err)
+	}
+
+	code := assemble(t, "CMPM.B (A7)+,(A0)+\n")
+	for i, b := range code {
+		if err := ram.Write(Byte, cpu.regs.PC+uint32(i), uint32(b)); err != nil {
+			t.Fatalf("write code: %v", err)
+		}
+	}
+
+	opcode, err := cpu.fetchOpcode()
+	if err != nil {
+		t.Fatalf("fetch: %v", err)
+	}
+	if err := cpu.executeInstruction(opcode); err != nil {
+		t.Fatalf("exec: %v", err)
+	}
+
+	if cpu.regs.A[7] != 0x3002 {
+		t.Fatalf("A7 should advance by 2 for byte CMPM, got %04x", cpu.regs.A[7])
+	}
+	if cpu.regs.A[0] != 0x4001 {
+		t.Fatalf("A0 should advance by 1 for byte CMPM, got %04x", cpu.regs.A[0])
+	}
+}
+
+func TestAddxDataRegistersWithExtend(t *testing.T) {
+	cpu, ram := newEnvironment(t)
+	cpu.regs.D[0] = 1
+	cpu.regs.D[1] = 1
+	cpu.regs.SR = srExtend | srZero
+
+	code := assemble(t, "ADDX.L D0,D1\n")
+	for i, b := range code {
+		if err := ram.Write(Byte, cpu.regs.PC+uint32(i), uint32(b)); err != nil {
+			t.Fatalf("write code: %v", err)
+		}
+	}
+
+	opcode, err := cpu.fetchOpcode()
+	if err != nil {
+		t.Fatalf("fetch: %v", err)
+	}
+	if err := cpu.executeInstruction(opcode); err != nil {
+		t.Fatalf("exec: %v", err)
+	}
+
+	if got := cpu.regs.D[1]; got != 3 {
+		t.Fatalf("expected D1=3 got %d", got)
+	}
+	if cpu.regs.SR&(srZero|srCarry|srExtend|srOverflow|srNegative) != 0 {
+		t.Fatalf("unexpected flags %04x", cpu.regs.SR)
+	}
+}
+
+func TestSubxPreservesZeroFlagAcrossOperations(t *testing.T) {
+	cpu, ram := newEnvironment(t)
+	cpu.regs.D[0] = 1
+	cpu.regs.D[1] = 1
+	cpu.regs.SR = srZero | srExtend
+
+	code := assemble(t, "SUBX.W D0,D1\n")
+	for i, b := range code {
+		if err := ram.Write(Byte, cpu.regs.PC+uint32(i), uint32(b)); err != nil {
+			t.Fatalf("write code: %v", err)
+		}
+	}
+
+	opcode, err := cpu.fetchOpcode()
+	if err != nil {
+		t.Fatalf("fetch: %v", err)
+	}
+	if err := cpu.executeInstruction(opcode); err != nil {
+		t.Fatalf("exec: %v", err)
+	}
+
+	if got := cpu.regs.D[1] & 0xffff; got != 0xffff {
+		t.Fatalf("unexpected result %04x", got)
+	}
+	if cpu.regs.SR&srZero != 0 {
+		t.Fatalf("expected zero flag cleared, got %04x", cpu.regs.SR)
+	}
+	if cpu.regs.SR&(srCarry|srExtend) == 0 {
+		t.Fatalf("expected borrow/extend to be set, got %04x", cpu.regs.SR)
+	}
+}
+
+func TestNegxClearsZeroWhenResultNonZero(t *testing.T) {
+	cpu, ram := newEnvironment(t)
+	cpu.regs.D[2] = 1
+	cpu.regs.SR = srZero | srExtend
+
+	code := assemble(t, "NEGX.B D2\n")
+	for i, b := range code {
+		if err := ram.Write(Byte, cpu.regs.PC+uint32(i), uint32(b)); err != nil {
+			t.Fatalf("write code: %v", err)
+		}
+	}
+
+	opcode, err := cpu.fetchOpcode()
+	if err != nil {
+		t.Fatalf("fetch: %v", err)
+	}
+	if err := cpu.executeInstruction(opcode); err != nil {
+		t.Fatalf("exec: %v", err)
+	}
+
+	if got := cpu.regs.D[2] & 0xff; got != 0xfe {
+		t.Fatalf("unexpected result %02x", got)
+	}
+	if cpu.regs.SR&srZero != 0 {
+		t.Fatalf("expected zero flag cleared, got %04x", cpu.regs.SR)
+	}
+	if cpu.regs.SR&(srCarry|srExtend) == 0 {
+		t.Fatalf("expected borrow to set carry/extend, got %04x", cpu.regs.SR)
+	}
+}
+
+func TestAddxByteUsesWordStepForA7(t *testing.T) {
+	cpu, ram := newEnvironment(t)
+	cpu.regs.A[7] = 0x3002
+	cpu.regs.A[0] = 0x4001
+
+	if err := ram.Write(Byte, 0x3000, 0x01); err != nil {
+		t.Fatalf("seed src: %v", err)
+	}
+	if err := ram.Write(Byte, 0x4000, 0x02); err != nil {
+		t.Fatalf("seed dst: %v", err)
+	}
+
+	code := assemble(t, "ADDX.B -(A7),-(A0)\n")
+	for i, b := range code {
+		if err := ram.Write(Byte, cpu.regs.PC+uint32(i), uint32(b)); err != nil {
+			t.Fatalf("write code: %v", err)
+		}
+	}
+
+	opcode, err := cpu.fetchOpcode()
+	if err != nil {
+		t.Fatalf("fetch: %v", err)
+	}
+	if err := cpu.executeInstruction(opcode); err != nil {
+		t.Fatalf("exec: %v", err)
+	}
+
+	if cpu.regs.A[7] != 0x3000 {
+		t.Fatalf("A7 should predecrement by 2 for byte ADDX, got %04x", cpu.regs.A[7])
+	}
+	if cpu.regs.A[0] != 0x4000 {
+		t.Fatalf("A0 should predecrement by 1 for byte ADDX, got %04x", cpu.regs.A[0])
+	}
+	if got, _ := ram.Read(Byte, 0x4000); got != 0x03 {
+		t.Fatalf("unexpected result byte %02x", got)
+	}
+}
+
 func TestAddDataRegisterToDataRegister(t *testing.T) {
 	cpu, ram := newEnvironment(t)
 	cpu.regs.D[0] = 2

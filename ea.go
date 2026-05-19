@@ -126,7 +126,46 @@ var (
 		&eaPCIndirectIndex{eaIndirectIndex{eaRegisterIndirect{eaRegister{areg: nil}, 0}, ix68000}},
 		&eaStatusRegister{},
 	}
+
+	opcodeMetaTable [0x10000]opcodeMeta
 )
+
+type opcodeMeta struct {
+	x        uint8
+	y        uint8
+	srcMode  uint8
+	srcIndex uint8
+	dstMode  uint8
+	dstIndex uint8
+	opSize   Size
+}
+
+func init() {
+	for opcode := 0; opcode < len(opcodeMetaTable); opcode++ {
+		ir := uint16(opcode)
+		srcMode := (ir >> 3) & 0x7
+		srcIndex := srcMode
+		if srcMode == 7 {
+			srcIndex += ir & 0x7
+		}
+
+		dstMode := (ir >> 6) & 0x7
+		dstIndex := dstMode
+		if dstMode == 7 {
+			dstIndex += (ir >> 9) & 0x7
+		}
+
+		opcodeMetaTable[opcode] = opcodeMeta{
+			x:        uint8((ir >> 9) & 0x7),
+			y:        uint8(ir & 0x7),
+			srcMode:  uint8(srcMode),
+			srcIndex: uint8(srcIndex),
+			dstMode:  uint8(dstMode),
+			dstIndex: uint8(dstIndex),
+			opSize:   opSizes[(ir>>6)&0x3],
+		}
+	}
+}
 
 func (cpu *cpu) ResolveSrcEA(o Size) (modifier, error) {
 	meta := opcodeMetaTable[cpu.regs.IR]

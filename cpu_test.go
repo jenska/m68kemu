@@ -1,6 +1,180 @@
 package m68kemu
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
+
+type debugPeekBus struct {
+	mem       map[uint32]uint8
+	readCount int
+	peekCount int
+}
+
+func newDebugPeekBus() *debugPeekBus {
+	return &debugPeekBus{mem: make(map[uint32]uint8)}
+}
+
+func (b *debugPeekBus) Read(size Size, address uint32) (uint32, error) {
+	b.readCount++
+	return b.readMemory(size, address)
+}
+
+func (b *debugPeekBus) Peek(size Size, address uint32) (uint32, error) {
+	b.peekCount++
+	return b.readMemory(size, address)
+}
+
+func (b *debugPeekBus) Write(size Size, address uint32, value uint32) error {
+	switch size {
+	case Byte:
+		b.mem[address] = uint8(value)
+	case Word:
+		b.mem[address] = uint8(value >> 8)
+		b.mem[address+1] = uint8(value)
+	case Long:
+		b.mem[address] = uint8(value >> 24)
+		b.mem[address+1] = uint8(value >> 16)
+		b.mem[address+2] = uint8(value >> 8)
+		b.mem[address+3] = uint8(value)
+	}
+	return nil
+}
+
+func (b *debugPeekBus) Reset() {}
+
+func (b *debugPeekBus) readMemory(size Size, address uint32) (uint32, error) {
+	switch size {
+	case Byte:
+		return uint32(b.mem[address]), nil
+	case Word:
+		return uint32(b.mem[address])<<8 | uint32(b.mem[address+1]), nil
+	case Long:
+		return uint32(b.mem[address])<<24 | uint32(b.mem[address+1])<<16 | uint32(b.mem[address+2])<<8 | uint32(b.mem[address+3]), nil
+	default:
+		return 0, nil
+	}
+}
+
+func TestCPUStringIncludesCurrentDisassembly(t *testing.T) {
+	cpu, ram := newEnvironment(t)
+
+	code := assemble(t, "MOVEQ #5,D0\n")
+	for i, b := range code {
+		if err := ram.Write(Byte, cpu.regs.PC+uint32(i), uint32(b)); err != nil {
+			t.Fatalf("failed to write program byte: %v", err)
+		}
+	}
+
+	text := cpu.String()
+
+	if !strings.Contains(text, "DISASM 00002000: MOVEQ #5, D0") {
+		t.Fatalf("CPU.String missing disassembly, got:\n%s", text)
+	}
+	if !strings.Contains(text, "SR 2700 PC 00002000") {
+		t.Fatalf("CPU.String missing register dump, got:\n%s", text)
+	}
+}
+
+func TestCPUStringUsesPeekInsteadOfLiveReads(t *testing.T) {
+	bus := newDebugPeekBus()
+	if err := bus.Write(Long, 0, 0x1000); err != nil {
+		t.Fatalf("seed SSP: %v", err)
+	}
+	if err := bus.Write(Long, 4, 0x2000); err != nil {
+		t.Fatalf("seed PC: %v", err)
+	}
+	if err := bus.Write(Word, 0x2000, 0x7005); err != nil {
+		t.Fatalf("seed opcode: %v", err)
+	}
+
+	processor, err := NewCPU(bus)
+	if err != nil {
+		t.Fatalf("create CPU: %v", err)
+	}
+
+	impl, ok := processor.(*cpu)
+	if !ok {
+		t.Fatalf("unexpected CPU implementation %T", processor)
+	}
+
+	readsAfterReset := bus.readCount
+	text := impl.String()
+
+	if bus.readCount != readsAfterReset {
+		t.Fatalf("CPU.String used Read: got %d reads after reset, want %d", bus.readCount, readsAfterReset)
+	}
+	if bus.peekCount == 0 {
+		t.Fatalf("CPU.String did not use Peek")
+	}
+	if !strings.Contains(text, "DISASM 00002000: MOVEQ #5, D0") {
+		t.Fatalf("CPU.String missing disassembly, got:\n%s", text)
+	}
+}
+
+func TestFetchOpcodeFastPathRecordsSupervisorProgramFault(t *testing.T) {
+	cpu, _ := newEnvironment(t)
+	cpu.regs.PC = 0x2001 // odd opcode fetch => address fault
+
+	_, err := cpu.fetchOpcode()
+	expectAddressError(t, err)
+
+	state := cpu.DebugState()
+	if !state.LastFault.Valid {
+		t.Fatalf("expected valid fault info")
+	}
+	if state.LastFault.FunctionCode != functionCodeSupervisorProg {
+		t.Fatalf("function code = %d, want %d", state.LastFault.FunctionCode, functionCodeSupervisorProg)
+	}
+	if !state.LastFault.InstructionFetch {
+		t.Fatalf("expected instruction fetch fault")
+	}
+	if state.LastFault.Address != 0x2001 {
+		t.Fatalf("fault address = %08x, want %08x", state.LastFault.Address, 0x2001)
+	}
+}
+
+func TestFetchOpcodeFastPathRecordsUserProgramFault(t *testing.T) {
+	cpu, _ := newEnvironment(t)
+	cpu.regs.SR &^= srSupervisor // user mode
+	cpu.regs.PC = 0x800000       // outside test RAM => bus error
+
+	_, err := cpu.fetchOpcode()
+	expectBusError(t, err)
+
+	state := cpu.DebugState()
+	if !state.LastFault.Valid {
+		t.Fatalf("expected valid fault info")
+	}
+	if state.LastFault.FunctionCode != functionCodeUserProgram {
+		t.Fatalf("function code = %d, want %d", state.LastFault.FunctionCode, functionCodeUserProgram)
+	}
+	if !state.LastFault.InstructionFetch {
+		t.Fatalf("expected instruction fetch fault")
+	}
+	if state.LastFault.Address != 0x800000 {
+		t.Fatalf("fault address = %08x, want %08x", state.LastFault.Address, 0x800000)
+	}
+}
+
+func TestPopPcFastLongFaultUsesSecondCycleAddress(t *testing.T) {
+	cpu, _ := newEnvironment(t)
+	cpu.regs.PC = 0x0000fffe // aligned; first word in range, second word out of range
+
+	_, err := cpu.popPc(Long)
+	expectBusError(t, err)
+
+	state := cpu.DebugState()
+	if !state.LastFault.Valid {
+		t.Fatalf("expected valid fault info")
+	}
+	if state.LastFault.Address != 0x00010000 {
+		t.Fatalf("fault address = %08x, want %08x", state.LastFault.Address, 0x00010000)
+	}
+	if state.LastFault.FunctionCode != functionCodeSupervisorProg {
+		t.Fatalf("function code = %d, want %d", state.LastFault.FunctionCode, functionCodeSupervisorProg)
+	}
+}
 
 func TestCycleCounterBasicSequence(t *testing.T) {
 	cpu, ram := newEnvironment(t)
