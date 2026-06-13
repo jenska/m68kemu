@@ -29,7 +29,7 @@ loop:   MOVE.L D1,D3
 	}
 
 	endPC := startPC + uint32(len(program))
-	for steps := 0; steps < 200; steps++ {
+	for steps := range 200 {
 		if err := cpu.Step(); err != nil {
 			t.Fatalf("step %d: %v", steps, err)
 		}
@@ -84,7 +84,7 @@ return: RTS
 	}
 
 	endPC := startPC + uint32(len(program))
-	for steps := 0; steps < 500; steps++ {
+	for steps := range 500 {
 		if err := cpu.Step(); err != nil {
 			t.Fatalf("step %d: %v", steps, err)
 		}

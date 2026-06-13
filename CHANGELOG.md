@@ -5,6 +5,19 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/SemVer).
 
+## [1.3.0] - 2026-06-13
+
+### Changed
+- Updated the module to target Go 1.26 and applied Go 1.26 modernizers
+- Updated m68kasm to v1.3.1
+- Converted benchmarks to `testing.B.Loop`
+- Refreshed README and benchmark documentation with current Go 1.26.3 results
+
+### Performance
+- Cached the single-RAM fast path for buses without wait-state devices
+- Reduced normal interpreter hot-path work when tracing and debug history are disabled
+- Avoided unnecessary register snapshots and bus-trace bookkeeping in untraced execution
+
 ## [1.2.3] - 2026-04-02
 
 ### Fixed

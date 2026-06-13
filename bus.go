@@ -40,6 +40,7 @@ type Bus struct {
 	waitHook            WaitHook
 	singleDevice        Device
 	singleRAM           *RAM
+	fastRAM             *RAM
 	hasWaitStateDevices bool
 	hasPageMap          bool
 	pageRanges          [256][]pageRange
@@ -80,6 +81,7 @@ func (b *Bus) AddDevice(device Device) {
 // transaction when a WaitHook is configured.
 func (b *Bus) SetWaitStates(states uint32) {
 	b.waitStates = states
+	b.refreshFastRAM()
 }
 
 // SetWaitHook installs a callback that receives the configured wait states for
@@ -212,6 +214,7 @@ func (b *Bus) writeCycle(s Size, address uint32, value uint32) error {
 func (b *Bus) refreshTopology() {
 	b.singleDevice = nil
 	b.singleRAM = nil
+	b.fastRAM = nil
 	b.hasWaitStateDevices = false
 	b.hasPageMap = false
 	b.pageRanges = [256][]pageRange{}
@@ -237,10 +240,7 @@ func (b *Bus) refreshTopology() {
 			b.hasPageMap = true
 			for page := start >> 16; page <= end>>16; page++ {
 				pageStart := page << 16
-				rangeStart := start
-				if rangeStart < pageStart {
-					rangeStart = pageStart
-				}
+				rangeStart := max(start, pageStart)
 				rangeEnd := end
 				pageEnd := pageStart | 0xffff
 				if rangeEnd > pageEnd {
@@ -250,6 +250,16 @@ func (b *Bus) refreshTopology() {
 			}
 		}
 	}
+
+	b.refreshFastRAM()
+}
+
+func (b *Bus) refreshFastRAM() {
+	b.fastRAM = nil
+	if b.waitStates != 0 || b.hasWaitStateDevices {
+		return
+	}
+	b.fastRAM = b.singleRAM
 }
 
 func (b *Bus) findDevice(address uint32) Device {

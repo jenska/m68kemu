@@ -5,13 +5,13 @@
 Profiled with:
 
 ```sh
-go test -run '^$' -bench BenchmarkRecursiveFibonacci -cpuprofile /tmp/m68kemu_after.cpu.out
-go tool pprof -top /tmp/m68kemu_after.cpu.out
+go test -run '^$' -bench BenchmarkRecursiveFibonacci -cpuprofile /tmp/m68kemu_recursive_2026-06-13.cpu.out .
+go tool pprof -top /tmp/m68kemu_recursive_2026-06-13.cpu.out
 ```
 
-Observed benchmark result on March 25, 2026:
+Observed representative result on June 13, 2026 on Apple M1 (`darwin/arm64`, Go 1.26.3):
 
-* `BenchmarkRecursiveFibonacci`: about `28.6 ms/op`
+* `BenchmarkRecursiveFibonacci`: about `26.6 ms/op`
 * `0 B/op, 0 allocs/op`
 
 ## Profile Highlights
@@ -25,10 +25,10 @@ The recursive Fibonacci workload is still useful because it stresses:
 
 Recent profiling showed these as the main remaining costs:
 
-* `(*Bus).wait`
-* `(*Bus).Read`
-* `(*cpu).read`
-* `(*cpu).fetchOpcode`
+* `(*cpu).executeNext`
+* `(*cpu).RunCycles`
+* `readProgramFastWord`
+* `executeInstruction`
 * `movel`
 * `ResolveSrcEA` / `ResolveDstEA`
 
@@ -37,8 +37,10 @@ Recent profiling showed these as the main remaining costs:
 Several previously identified bottlenecks have already been addressed:
 
 * single-device and fixed-range bus fast paths reduced repeated device-lookup overhead
+* the single-RAM fast path is cached when no wait-state devices are present
 * unnecessary dynamic wait-state work for plain RAM was removed
 * reset-time allocations in the benchmark path were eliminated
+* untraced execution avoids unnecessary register snapshots and fetch trace context
 * some decode metadata is now precomputed instead of rebuilt on every instruction
 
 That means the profile has shifted from "obvious structural overhead" toward the remaining core interpreter work.

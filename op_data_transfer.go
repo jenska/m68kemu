@@ -37,19 +37,19 @@ func moveq(cpu *cpu) error {
 
 func registerMoveA(base uint16, handler instruction, calc cycleCalculator) {
 	const dstMode = uint16(1)
-	for dstReg := uint16(0); dstReg < 8; dstReg++ {
+	for dstReg := range uint16(8) {
 		match := base | (dstReg << 9) | (dstMode << 6)
 		registerInstruction(handler, match, 0xffc0, moveSourceEAMask, calc)
 	}
 }
 
 func registerMove(ins instruction, base uint16, calc cycleCalculator) {
-	for dstMode := uint16(0); dstMode < 8; dstMode++ {
+	for dstMode := range uint16(8) {
 		// Address register destinations are handled by MOVEA.
 		if dstMode == 1 {
 			continue
 		}
-		for dstReg := uint16(0); dstReg < 8; dstReg++ {
+		for dstReg := range uint16(8) {
 			// Destination must be alterable: exclude PC relative and immediate forms.
 			if dstMode == 7 && (dstReg == 2 || dstReg == 3 || dstReg == 4) {
 				continue
@@ -198,8 +198,8 @@ func init() {
 }
 
 func registerMovemInstruction(match, sizeBits uint16, ins instruction, eaMask uint16) {
-	for mode := uint16(0); mode < 8; mode++ {
-		for reg := uint16(0); reg < 8; reg++ {
+	for mode := range uint16(8) {
+		for reg := range uint16(8) {
 			opcode := match | sizeBits | (mode << 3) | reg
 			if !validEA(opcode, eaMask) {
 				continue
@@ -239,7 +239,7 @@ func movemRegisterOrder(mask uint16, reverse bool) []int {
 		return order
 	}
 
-	for reg := 0; reg < 16; reg++ {
+	for reg := range 16 {
 		if mask&(1<<reg) != 0 {
 			order = append(order, reg)
 		}

@@ -490,7 +490,7 @@ func TestLogicalImmediateCcrAndSr(t *testing.T) {
 	ram.Write(Word, addr+uint32(5*Word), 0x003f)
 	cpu.regs.PC = addr
 
-	for i := 0; i < 3; i++ {
+	for i := range 3 {
 		if err := cpu.Step(); err != nil {
 			t.Fatalf("step %d failed: %v", i, err)
 		}

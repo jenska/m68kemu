@@ -336,7 +336,7 @@ func TestMovemStoreAndLoad(t *testing.T) {
 		}
 	}
 
-	for i := 0; i < 2; i++ {
+	for i := range 2 {
 		if err := cpu.Step(); err != nil {
 			t.Fatalf("step %d failed: %v", i, err)
 		}
@@ -414,7 +414,7 @@ func TestMovemLongStoresSequentialWordsForControlMode(t *testing.T) {
 		}
 	}
 
-	for step := 0; step < 2; step++ {
+	for step := range 2 {
 		if err := cpu.Step(); err != nil {
 			t.Fatalf("step %d failed: %v", step, err)
 		}

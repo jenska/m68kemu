@@ -37,6 +37,10 @@ This package is designed to be used as a library in your own projects.
 
 The repository also includes a small example command in `cmd/qsortdemo`, which assembles and executes the `testdata/qsort.s` quicksort demo.
 
+### Requirements
+
+This module targets Go 1.26.
+
 ### Installation
 
 ```sh
@@ -222,19 +226,21 @@ go test -run '^$' -bench 'Benchmark(BubbleSort|PrimeSieve|RunEightMillionCycles|
 Recent profiling work focused on the interpreter hot path:
 
 * bus fast paths for simple and fixed-range mappings
+* cached single-RAM fast path when the bus has no wait-state devices
 * precomputed page-range lookup for mapped devices
 * amortized scheduler event dispatch without per-event slice shifting
 * reduced wait-state overhead when no device contributes extra wait states
-* fewer allocations on reset / benchmark loops
+* fewer allocations and less debug bookkeeping in normal benchmark loops
 * predecoded opcode metadata for common decode fields
+* Go 1.26 benchmark loops using `testing.B.Loop`
 
-Representative results on April 3, 2026 on Apple M1 (`darwin/arm64`) were:
+Representative results on June 13, 2026 on Apple M1 (`darwin/arm64`, Go 1.26.3) were:
 
-* `BenchmarkBubbleSort`: ~2.80 ms/op
-* `BenchmarkPrimeSieve`: ~5.56 ms/op
-* `BenchmarkRunEightMillionCycles`: ~27.1 ms/op
-* `BenchmarkRecursiveFibonacci`: ~27.0 ms/op
-* `BenchmarkCycleSchedulerAdvanceBurst`: ~3.16 us/op
+* `BenchmarkBubbleSort`: ~2.54 ms/op
+* `BenchmarkPrimeSieve`: ~4.98 ms/op
+* `BenchmarkRunEightMillionCycles`: ~25.6 ms/op
+* `BenchmarkRecursiveFibonacci`: ~26.5 ms/op
+* `BenchmarkCycleSchedulerAdvanceBurst`: ~3.29 us/op
 * `BenchmarkBusReadMappedRanges`: ~15.5 ns/op
 
 See [doc/benchmark_report.md](doc/benchmark_report.md) for more detail.

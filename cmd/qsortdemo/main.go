@@ -58,7 +58,7 @@ func main() {
 
 	base := cpu.Registers().A[0]
 	fmt.Printf("Sorted array at 0x%04x:\n", base)
-	for i := 0; i < 10; i++ {
+	for i := range 10 {
 		value, err := ram.Read(m68kemu.Long, base+uint32(i*4))
 		if err != nil {
 			log.Fatalf("failed to read sorted value %d: %v", i, err)

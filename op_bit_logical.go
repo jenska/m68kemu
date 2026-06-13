@@ -36,7 +36,7 @@ func init() {
 	}
 
 	// EOR Dn,<ea>
-	for size := uint16(0); size < 3; size++ {
+	for size := range uint16(3) {
 		match := uint16(0xb100) | (size << 6)
 		registerLogicalInstruction(eorInstruction, match, 0xf1c0, logicalDestinationMask, logicalCycleCalculator(size, true))
 	}
@@ -45,7 +45,7 @@ func init() {
 	immediateMask := eaMaskDataRegister | eaMaskIndirect | eaMaskPostIncrement |
 		eaMaskPreDecrement | eaMaskDisplacement | eaMaskIndex |
 		eaMaskAbsoluteShort | eaMaskAbsoluteLong
-	for size := uint16(0); size < 3; size++ {
+	for size := range uint16(3) {
 		registerInstruction(oriImmediate, uint16(0x0000)|(size<<6), 0xffc0, immediateMask, logicalImmediateCycleCalculator())
 		registerInstruction(andiImmediate, uint16(0x0200)|(size<<6), 0xffc0, immediateMask, logicalImmediateCycleCalculator())
 		registerInstruction(eoriImmediate, uint16(0x0a00)|(size<<6), 0xffc0, immediateMask, logicalImmediateCycleCalculator())
@@ -54,7 +54,7 @@ func init() {
 	// NOT <ea>
 	notMask := eaMaskDataRegister | eaMaskIndirect | eaMaskPostIncrement | eaMaskPreDecrement |
 		eaMaskDisplacement | eaMaskIndex | eaMaskAbsoluteShort | eaMaskAbsoluteLong
-	for size := uint16(0); size < 3; size++ {
+	for size := range uint16(3) {
 		match := uint16(0x4600) | (size << 6)
 		registerInstruction(notInstruction, match, 0xffc0, notMask, clrTstCycleCalculator())
 	}
@@ -289,13 +289,13 @@ func init() {
 		eaMaskPCDisplacement | eaMaskPCIndex
 
 	// Dynamic bit number (from Dx) uses opcodes with bit 11 clear and op type in bits 8-6.
-	for op := uint16(0); op < 4; op++ {
+	for op := range uint16(4) {
 		match := uint16(0x0100) | ((op + 4) << 6)
 		registerInstruction(bitDynamic, match, 0xf1c0, bitOperandMask, bitCycleCalculator(false, op))
 	}
 
 	// Static bit number (immediate) uses opcodes with bit 11 set and op type in bits 8-6.
-	for op := uint16(0); op < 4; op++ {
+	for op := range uint16(4) {
 		match := uint16(0x0800) | (op << 6)
 		registerInstruction(bitImmediate, match, 0xffc0, bitOperandMask, bitCycleCalculator(true, op))
 	}
@@ -571,7 +571,7 @@ func asl(value uint32, count, width int) (uint32, shiftRotateFlags) {
 	value &= mask
 	var carry uint32
 	overflow := false
-	for i := 0; i < count; i++ {
+	for range count {
 		carry = (value >> (width - 1)) & 1
 		value = (value << 1) & mask
 		newMsb := (value >> (width - 1)) & 1
@@ -593,7 +593,7 @@ func asr(value uint32, count, width int) (uint32, shiftRotateFlags) {
 	value &= mask
 	sign := value & (1 << (width - 1))
 	var carry uint32
-	for i := 0; i < count; i++ {
+	for range count {
 		carry = value & 1
 		value >>= 1
 		if sign != 0 {
@@ -607,7 +607,7 @@ func lsl(value uint32, count, width int) (uint32, shiftRotateFlags) {
 	mask := uint32((1 << width) - 1)
 	value &= mask
 	var carry uint32
-	for i := 0; i < count; i++ {
+	for range count {
 		carry = (value >> (width - 1)) & 1
 		value = (value << 1) & mask
 	}
@@ -618,7 +618,7 @@ func lsr(value uint32, count, width int) (uint32, shiftRotateFlags) {
 	mask := uint32((1 << width) - 1)
 	value &= mask
 	var carry uint32
-	for i := 0; i < count; i++ {
+	for range count {
 		carry = value & 1
 		value >>= 1
 	}
@@ -630,7 +630,7 @@ func roxl(value uint32, count, width int, extend bool) (uint32, shiftRotateFlags
 	value &= mask
 	shift := count % (width + 1)
 	var carry uint32
-	for i := 0; i < shift; i++ {
+	for range shift {
 		carry = b2i(extend)
 		extend = (value>>(width-1))&1 != 0
 		value = ((value << 1) | carry) & mask
@@ -643,7 +643,7 @@ func roxr(value uint32, count, width int, extend bool) (uint32, shiftRotateFlags
 	value &= mask
 
 	shift := count % (width + 1)
-	for i := 0; i < shift; i++ {
+	for range shift {
 		carry := extend
 		extend = value&1 != 0
 		value = (value >> 1) | (b2i(carry) << (width - 1))

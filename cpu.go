@@ -6,7 +6,7 @@ import (
 )
 
 const (
-	Version           = "1.2.3"
+	Version           = "1.3.0"
 	XBusError         = 2
 	XAddressError     = 3
 	XIllegal          = 4
@@ -560,10 +560,7 @@ func (cpu *cpu) fastRAMDevice() *RAM {
 	if cpu.busFast == nil {
 		return nil
 	}
-	if cpu.busFast.waitStates != 0 || cpu.busFast.hasWaitStateDevices {
-		return nil
-	}
-	return cpu.busFast.singleRAM
+	return cpu.busFast.fastRAM
 }
 
 func (cpu *cpu) fastRAMRead(size Size, address uint32) (uint32, bool, error) {
@@ -1124,8 +1121,14 @@ func (cpu *cpu) executeNext() error {
 	}
 
 	pc := cpu.regs.PC
-	beforeRegs := cpu.regs
-	beforeCycles := cpu.cycles
+	var beforeRegs Registers
+	if cpu.preTrap != nil || cpu.traceInstructions {
+		beforeRegs = cpu.regs
+	}
+	var beforeCycles uint64
+	if cpu.traceInstructions {
+		beforeCycles = cpu.cycles
+	}
 	cpu.beginInstructionContext(pc)
 
 	opcode, err := cpu.fetchOpcode()
@@ -1206,7 +1209,7 @@ func (cpu *cpu) RunCycles(budget uint64) error {
 }
 
 func (cpu *cpu) RunInstructions(count uint64) error {
-	for i := uint64(0); i < count; i++ {
+	for range count {
 		if err := cpu.Step(); err != nil {
 			return err
 		}
@@ -1582,9 +1585,11 @@ func (cpu *cpu) readProgramFastWord(address uint32) (uint16, bool, error) {
 	}
 
 	value := uint16(ram.mem[idx])<<8 | uint16(ram.mem[idx+1])
-	ctx := accessContext{functionCode: cpu.programFunctionCode()}
-	if cpu.shouldTraceBusAccess(ctx) {
-		cpu.traceBusAccess(Word, address, uint32(value), ctx)
+	if cpu.traceInstructions || cpu.traceBus {
+		ctx := accessContext{functionCode: cpu.programFunctionCode()}
+		if cpu.shouldTraceBusAccess(ctx) {
+			cpu.traceBusAccess(Word, address, uint32(value), ctx)
+		}
 	}
 	return value, true, nil
 }
@@ -1620,9 +1625,11 @@ func (cpu *cpu) readProgramFastLong(address uint32) (uint32, bool, error) {
 		uint32(ram.mem[idx+1])<<16 |
 		uint32(ram.mem[idx+2])<<8 |
 		uint32(ram.mem[idx+3])
-	ctx := accessContext{functionCode: cpu.programFunctionCode()}
-	if cpu.shouldTraceBusAccess(ctx) {
-		cpu.traceBusAccess(Long, address, value, ctx)
+	if cpu.traceInstructions || cpu.traceBus {
+		ctx := accessContext{functionCode: cpu.programFunctionCode()}
+		if cpu.shouldTraceBusAccess(ctx) {
+			cpu.traceBusAccess(Long, address, value, ctx)
+		}
 	}
 	return value, true, nil
 }

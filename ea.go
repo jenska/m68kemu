@@ -141,7 +141,7 @@ type opcodeMeta struct {
 }
 
 func init() {
-	for opcode := 0; opcode < len(opcodeMetaTable); opcode++ {
+	for opcode := range len(opcodeMetaTable) {
 		ir := uint16(opcode)
 		srcMode := (ir >> 3) & 0x7
 		srcIndex := srcMode

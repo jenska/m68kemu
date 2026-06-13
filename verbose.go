@@ -160,7 +160,7 @@ func decodeInstruction(bus AddressBus, address uint32) (*m68kdasm.Instruction, e
 
 	address &= 0xffffff
 	data := make([]byte, 0, maxDisassemblyBytes)
-	for i := uint32(0); i < maxDisassemblyBytes; i++ {
+	for i := range uint32(maxDisassemblyBytes) {
 		value, err := peeker.Peek(Byte, (address+i)&0xffffff)
 		if err != nil {
 			break

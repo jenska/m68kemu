@@ -109,7 +109,12 @@ func TestBTSTAllowsPCRelativeOperands(t *testing.T) {
 	cpu.regs.D[0] = 0
 	start := cpu.regs.PC
 
-	code := assemble(t, "BTST D0,target(PC)\n.WORD 0\ntarget:\n.BYTE 1\n")
+	code := []byte{
+		0x01, 0x3a, // BTST D0,d16(PC)
+		0x00, 0x04, // target at start+6, relative to PC after opcode fetch
+		0x00, 0x00,
+		0x01,
+	}
 	for i, b := range code {
 		if err := ram.Write(Byte, start+uint32(i), uint32(b)); err != nil {
 			t.Fatalf("failed to write opcode byte: %v", err)
@@ -134,14 +139,14 @@ func TestBTSTAllowsPCRelativeOperands(t *testing.T) {
 func TestBitModifyAllowsPCRelativeOperands(t *testing.T) {
 	tests := []struct {
 		name     string
-		src      string
+		opcode   uint16
 		initial  byte
 		want     byte
 		wantZero bool
 	}{
-		{name: "BCHG", src: "BCHG D0,target(PC)\n", initial: 0x01, want: 0x00, wantZero: false},
-		{name: "BCLR", src: "BCLR D0,target(PC)\n", initial: 0x01, want: 0x00, wantZero: false},
-		{name: "BSET", src: "BSET D0,target(PC)\n", initial: 0x00, want: 0x01, wantZero: true},
+		{name: "BCHG", opcode: 0x017a, initial: 0x01, want: 0x00, wantZero: false},
+		{name: "BCLR", opcode: 0x01ba, initial: 0x01, want: 0x00, wantZero: false},
+		{name: "BSET", opcode: 0x01fa, initial: 0x00, want: 0x01, wantZero: true},
 	}
 
 	for _, tc := range tests {
@@ -150,7 +155,12 @@ func TestBitModifyAllowsPCRelativeOperands(t *testing.T) {
 			cpu.regs.D[0] = 0
 			start := cpu.regs.PC
 
-			code := assemble(t, tc.src+".WORD 0\ntarget:\n.BYTE "+byteLiteral(tc.initial)+"\n")
+			code := []byte{
+				byte(tc.opcode >> 8), byte(tc.opcode), // <op> D0,d16(PC)
+				0x00, 0x04, // target at start+6, relative to PC after opcode fetch
+				0x00, 0x00,
+				tc.initial,
+			}
 			for i, b := range code {
 				if err := ram.Write(Byte, start+uint32(i), uint32(b)); err != nil {
 					t.Fatalf("failed to write opcode byte: %v", err)
@@ -182,13 +192,6 @@ func TestBitModifyAllowsPCRelativeOperands(t *testing.T) {
 			}
 		})
 	}
-}
-
-func byteLiteral(value byte) string {
-	return "$" + string([]byte{
-		"0123456789ABCDEF"[value>>4],
-		"0123456789ABCDEF"[value&0x0f],
-	})
 }
 
 func TestLogicalInstructions(t *testing.T) {

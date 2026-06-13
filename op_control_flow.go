@@ -2,12 +2,12 @@ package m68kemu
 
 func init() {
 	// BRA/Bcc with 8- or 16-bit displacement (no 32-bit on 68000)
-	for cond := uint16(0); cond < 16; cond++ {
+	for cond := range uint16(16) {
 		match := uint16(0x6000) | (cond << 8)
 		registerInstruction(branch, match, 0xff00, 0, constantCycles(10))
 	}
 
-	for cond := uint16(0); cond < 16; cond++ {
+	for cond := range uint16(16) {
 		match := uint16(0x50c8) | (cond << 8)
 		registerInstruction(dbcc, match, 0xfff8, 0, constantCycles(12))
 	}
@@ -163,7 +163,7 @@ func jmpCycleCalculator() cycleCalculator {
 }
 
 func registerMoveUsp() {
-	for reg := uint16(0); reg < 8; reg++ {
+	for reg := range uint16(8) {
 		toUSP := uint16(0x4e60) | reg
 		fromUSP := uint16(0x4e68) | reg
 		opcodeTable[toUSP] = moveToUsp

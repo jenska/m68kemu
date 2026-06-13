@@ -55,7 +55,7 @@ func init() {
 		eaMaskPostIncrement | eaMaskPreDecrement | eaMaskDisplacement |
 		eaMaskIndex | eaMaskAbsoluteShort | eaMaskAbsoluteLong
 
-	for size := uint16(0); size < 3; size++ {
+	for size := range uint16(3) {
 		registerInstruction(addq, 0x5000|(size<<6), 0xf1c0, alterableMask, addqSubqCycleCalculator())
 		registerInstruction(subq, 0x5100|(size<<6), 0xf1c0, alterableMask, addqSubqCycleCalculator())
 	}
@@ -73,12 +73,12 @@ func init() {
 		eaMaskPreDecrement | eaMaskDisplacement | eaMaskIndex |
 		eaMaskAbsoluteShort | eaMaskAbsoluteLong
 
-	for size := uint16(0); size < 3; size++ {
+	for size := range uint16(3) {
 		registerInstruction(addi, uint16(0x0600)|(size<<6), 0xffc0, alterableNoAddr, arithmeticImmediateCycleCalculator())
 		registerInstruction(subi, uint16(0x0400)|(size<<6), 0xffc0, alterableNoAddr, arithmeticImmediateCycleCalculator())
 	}
 
-	for size := uint16(0); size < 3; size++ {
+	for size := range uint16(3) {
 		match := uint16(0x4400) | (size << 6)
 		registerInstruction(negInstruction, match, 0xffc0, alterableNoAddr, clrTstCycleCalculator())
 	}
@@ -570,12 +570,12 @@ func init() {
 	cmpiMask := eaMaskDataRegister | eaMaskIndirect | eaMaskPostIncrement |
 		eaMaskPreDecrement | eaMaskDisplacement | eaMaskIndex |
 		eaMaskAbsoluteShort | eaMaskAbsoluteLong
-	for size := uint16(0); size < 3; size++ {
+	for size := range uint16(3) {
 		match := uint16(0x0c00) | (size << 6)
 		registerInstruction(cmpi, match, 0xffc0, cmpiMask, cmpiCycleCalculator())
 	}
 
-	for size := uint16(0); size < 3; size++ {
+	for size := range uint16(3) {
 		match := uint16(0xb108) | (size << 6)
 		registerInstruction(cmpm, match, 0xf1f8, 0, cmpmCycleCalculator())
 	}
@@ -717,7 +717,7 @@ func init() {
 	registerExtendInstruction(addx, 0xd100, addxSubxCycleCalculator)
 	registerExtendInstruction(subx, 0x9100, addxSubxCycleCalculator)
 
-	for size := uint16(0); size < 3; size++ {
+	for size := range uint16(3) {
 		match := uint16(0x4000) | (size << 6)
 		registerInstruction(negx, match, 0xffc0, eaMaskDataRegister|eaMaskIndirect|
 			eaMaskPostIncrement|eaMaskPreDecrement|eaMaskDisplacement|
@@ -831,9 +831,9 @@ func extendOperands(cpu *cpu, size Size) (extendOperand, extendOperand, error) {
 }
 
 func registerExtendInstruction(op instruction, base uint16, calc cycleCalculator) {
-	for size := uint16(0); size < 3; size++ {
-		for dst := uint16(0); dst < 8; dst++ {
-			for src := uint16(0); src < 8; src++ {
+	for size := range uint16(3) {
+		for dst := range uint16(8) {
+			for src := range uint16(8) {
 				for mode := uint16(0); mode <= 1; mode++ {
 					opcode := base | (dst << 9) | (size << 6) | (mode << 3) | src
 					opcodeTable[opcode] = op
@@ -1136,7 +1136,7 @@ func init() {
 		eaMaskPreDecrement | eaMaskDisplacement | eaMaskIndex |
 		eaMaskAbsoluteShort | eaMaskAbsoluteLong
 
-	for size := uint16(0); size < 3; size++ {
+	for size := range uint16(3) {
 		match := uint16(0x4200) | (size << 6)
 		registerInstruction(clr, match, 0xffc0, alterableNoAddr, clrTstCycleCalculator())
 

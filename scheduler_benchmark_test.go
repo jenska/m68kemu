@@ -6,17 +6,17 @@ func BenchmarkCycleSchedulerAdvanceBurst(b *testing.B) {
 	const eventCount = 1024
 
 	b.ReportAllocs()
-	b.StopTimer()
-	for i := 0; i < b.N; i++ {
+	b.ResetTimer()
+	for b.Loop() {
+		b.StopTimer()
 		scheduler := NewCycleScheduler()
-		for event := 0; event < eventCount; event++ {
+		for event := range eventCount {
 			at := uint64(event + 1)
 			scheduler.Schedule(at, func(uint64) {})
 		}
 
 		b.StartTimer()
 		scheduler.Advance(eventCount)
-		b.StopTimer()
 	}
 }
 
@@ -28,7 +28,7 @@ func BenchmarkBusReadMappedRanges(b *testing.B) {
 	)
 
 	devices := make([]Device, 0, deviceCount)
-	for i := 0; i < deviceCount; i++ {
+	for i := range deviceCount {
 		start := uint32(i * regionSize)
 		end := start + regionSize - 1
 		devices = append(devices, newStubMappedDevice(start, end))
@@ -42,7 +42,7 @@ func BenchmarkBusReadMappedRanges(b *testing.B) {
 
 	b.ReportAllocs()
 	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		value, err := bus.Read(Byte, targetAddress)
 		if err != nil {
 			b.Fatalf("read failed: %v", err)

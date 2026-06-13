@@ -35,7 +35,7 @@ next:   ADDQ.L  #2,A1           ; Advance pointer
 done:   BRA.S   done            ; Spin until budget exhausted
 `)
 
-	cpu, ram := newEnvironment(b)
+	cpu, ram := newBenchmarkEnvironment(b, 64*1024)
 	startPC := cpu.regs.PC
 
 	// Load program
@@ -53,7 +53,7 @@ done:   BRA.S   done            ; Spin until budget exhausted
 	}
 
 	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		// Reset CPU state
 		if err := cpu.Reset(); err != nil {
 			b.Fatalf("cpu reset failed: %v", err)
@@ -107,7 +107,7 @@ next_iter:
 done:   BRA.S   done            ; Spin
 `)
 
-	cpu, ram := newEnvironment(b)
+	cpu, ram := newBenchmarkEnvironment(b, 128*1024)
 	startPC := cpu.regs.PC
 
 	for i, val := range program {
@@ -117,7 +117,7 @@ done:   BRA.S   done            ; Spin
 	}
 
 	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		if err := cpu.Reset(); err != nil {
 			b.Fatalf("cpu reset failed: %v", err)
 		}
@@ -127,4 +127,27 @@ done:   BRA.S   done            ; Spin
 			b.Fatalf("RunCycles failed: %v", err)
 		}
 	}
+}
+
+func newBenchmarkEnvironment(b *testing.B, ramSize uint32) (*cpu, *RAM) {
+	b.Helper()
+
+	ram := NewRAM(0, ramSize)
+	bus := NewBus(ram)
+	if err := ram.Write(Long, 0, 0x1000); err != nil {
+		b.Fatalf("failed to seed SSP vector: %v", err)
+	}
+	if err := ram.Write(Long, 4, 0x2000); err != nil {
+		b.Fatalf("failed to seed PC vector: %v", err)
+	}
+
+	processor, err := NewCPU(bus)
+	if err != nil {
+		b.Fatalf("failed to create CPU: %v", err)
+	}
+	impl, ok := processor.(*cpu)
+	if !ok {
+		b.Fatalf("CPU implementation has unexpected type %T", processor)
+	}
+	return impl, ram
 }

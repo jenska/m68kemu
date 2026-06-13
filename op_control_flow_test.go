@@ -235,7 +235,7 @@ func TestJmp(t *testing.T) {
 		}
 	}
 
-	for i := 0; i < 3; i++ {
+	for i := range 3 {
 		if err := cpu.Step(); err != nil {
 			t.Fatalf("step %d: %v", i, err)
 		}
@@ -263,7 +263,7 @@ func TestMoveUsp(t *testing.T) {
 		}
 	}
 
-	for i := 0; i < 5; i++ {
+	for i := range 5 {
 		if err := cpu.Step(); err != nil {
 			t.Fatalf("step %d: %v", i, err)
 		}
@@ -278,7 +278,7 @@ func TestMoveUsp(t *testing.T) {
 }
 
 func TestMoveUspAllRegisterForms(t *testing.T) {
-	for reg := uint16(0); reg < 8; reg++ {
+	for reg := range uint16(8) {
 		t.Run(fmt.Sprintf("A%d", reg), func(t *testing.T) {
 			cpu, _ := newEnvironment(t)
 			cpu.regs.SR = srSupervisor
@@ -335,7 +335,7 @@ func TestMoveUspPrivilegeViolationAllRegisterForms(t *testing.T) {
 		reg    uint16
 	}, 0, 16)
 
-	for reg := uint16(0); reg < 8; reg++ {
+	for reg := range uint16(8) {
 		tests = append(tests,
 			struct {
 				name   string
@@ -420,7 +420,7 @@ func TestLinkUnlk(t *testing.T) {
 		}
 	}
 
-	for i := 0; i < 4; i++ {
+	for i := range 4 {
 		if err := cpu.Step(); err != nil {
 			t.Fatalf("step %d: %v", i, err)
 		}
@@ -458,7 +458,7 @@ func TestChk(t *testing.T) {
 		}
 	}
 
-	for i := 0; i < 3; i++ {
+	for i := range 3 {
 		if err := cpu.Step(); err != nil {
 			t.Fatalf("step %d: %v", i, err)
 		}

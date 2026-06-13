@@ -294,8 +294,8 @@ func tasInstruction(cpu *cpu) error {
 }
 
 func registerExgInstruction(match uint16, calc cycleCalculator) {
-	for rx := uint16(0); rx < 8; rx++ {
-		for ry := uint16(0); ry < 8; ry++ {
+	for rx := range uint16(8) {
+		for ry := range uint16(8) {
 			opcode := match | (ry << 9) | rx
 			opcodeTable[opcode] = exgInstruction
 			if calc != nil {
