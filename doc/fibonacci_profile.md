@@ -25,9 +25,9 @@ The recursive Fibonacci workload is still useful because it stresses:
 
 Recent profiling showed these as the main remaining costs:
 
-* `(*CPU).executeNext`
-* `(*CPU).RunCycles`
-* `(*Bus).Read`
+* `(*cpu).executeNext`
+* `(*cpu).RunCycles`
+* `readProgramFastWord`
 * `executeInstruction`
 * `movel`
 * `ResolveSrcEA` / `ResolveDstEA`
@@ -36,7 +36,9 @@ Recent profiling showed these as the main remaining costs:
 
 Several previously identified bottlenecks have already been addressed:
 
-* the bus was simplified to linear device lookup
+* single-device and fixed-range bus fast paths reduced repeated device-lookup overhead
+* the single-RAM fast path is cached when no wait-state devices are present
+* unnecessary dynamic wait-state work for plain RAM was removed
 * reset-time allocations in the benchmark path were eliminated
 * untraced execution avoids unnecessary register snapshots and fetch trace context
 * some decode metadata is now precomputed instead of rebuilt on every instruction

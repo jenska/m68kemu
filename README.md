@@ -11,8 +11,11 @@ This project provides a Motorola 68000 CPU emulator for retro-computing projects
 * Supervisor and user modes.
 * Interrupt handling and exception processing.
 * Correct short exception frames for group 1/2 exceptions and 68000 group 0 bus/address error frames.
-* 24-bit address bus with multiple memory-devices.
-* Compact per-instruction tracing and cycle-budgeted execution.
+* 24-bit address bus with support for multiple devices, fixed-range mappings, and Atari ST-style region layout.
+* Tracing, breakpoints, cycle-budgeted execution, and verbose logging helpers with instruction-range disassembly.
+* Rich debug hooks for per-instruction trace, pre-instruction snapshots, exceptions, bus accesses, and accepted interrupts.
+* `RunUntil` stop conditions for instruction budgets, exact PC stops, PC ranges, exceptions, bus-access matches, and custom predicates.
+* Optional rolling debug history plus helpers to inspect the last exception stack frame.
 * Optional cycle scheduler hooks for machine-level devices such as timers, video, DMA, and interrupt controllers.
 
 ## Current Status
@@ -22,7 +25,7 @@ The CPU core is in good shape for integration work:
 * Instruction execution, stack behavior, interrupts, and most commonly used addressing modes are covered by tests.
 * `RESET` now follows machine-friendly semantics for an Atari ST integration: the CPU instruction resets attached devices but does not erase RAM contents.
 * Bus and address faults now use the richer 68000 group 0 stack frame, which is important for realistic system error handling.
-* The bus is intentionally simple: it performs linear device lookup and common 68000 alignment checks.
+* The bus has fast paths for simple memory setups and fixed-range mappings, which keeps the core practical for full-machine emulation.
 
 Still missing for a complete Atari ST:
 
@@ -119,17 +122,82 @@ scheduler.ScheduleAfter(512, func(now uint64) {
 
 The scheduler is intentionally small at this stage. It is meant as a foundation for ST components rather than a finished machine-timing framework.
 
-### Tracing
+### Verbose Logging And Range Disassembly
 
-The CPU exposes one optional trace callback for instruction-level logging:
+The emulator includes helpers for both one-off disassembly and trace logging:
 
 ```go
+logger := m68kemu.NewVerboseLogger(cpu, bus, os.Stdout, m68kemu.VerboseLoggerOptions{
+  IncludeRegisters: true,
+  IncludeCycles:    true,
+  MemoryRanges: []m68kemu.MemoryRange{
+    {Start: 0x2000, Length: 0x10, Label: "program"},
+  },
+})
+cpu.SetTracer(logger.Trace)
+
+lines, err := m68kemu.DisassembleMemoryRange(bus, 0x2000, 0x10)
+if err != nil {
+ log.Fatalf("disassembly failed: %v", err)
+}
+for _, line := range lines {
+ fmt.Println(line)
+}
+```
+
+Verbose trace lines include the current PC, decoded assembly, and optionally the total cycle count. When the tracer has access to the fetched instruction bytes, the logger also includes the raw opcode and per-instruction cycle delta, for example:
+
+```text
+TRACE PC 00002000 OPCODE 7005 DELTA 4 CYCLES 4 MOVEQ #5, D0
+```
+
+These helpers use the bus `Peek` path when available so debug output does not trigger device side effects, and the verbose logger prefers `TraceInfo.Bytes` for disassembly so the trace remains accurate even when fetch-side effects would make a second bus read misleading.
+
+### Debug Hooks
+
+For emulator bring-up and TOS failure analysis, the CPU exposes several debugger-oriented callbacks:
+
+```go
+cpu.SetPreTracer(func(info m68kemu.PreTraceInfo) {
+ // Inspect registers before the instruction executes.
+})
+
 cpu.SetTracer(func(info m68kemu.TraceInfo) {
- log.Printf("pc=%08x opcode=%04x cycles=%d", info.PC, info.Opcode, info.Cycles)
+ // Instruction address, opcode bytes, mnemonic, before/after registers,
+ // per-instruction cycle delta, and total cycle count.
+})
+
+cpu.SetExceptionTracer(func(info m68kemu.ExceptionInfo) {
+ // Vector, trapping opcode address, stacked/reported PC, SR before/after,
+ // new handler PC, and decoded stack-frame details.
+})
+
+cpu.SetBusTracer(func(info m68kemu.BusAccessInfo) {
+ // Address, size, read/write, value, instruction-fetch flag, and current instruction PC.
+})
+
+cpu.SetInterruptTracer(func(info m68kemu.InterruptInfo) {
+ // Accepted IRQ level, vector, autovector/explicit, and PC/SR at acceptance.
 })
 ```
 
-For normal execution control, use `Step`, `RunInstructions`, or `RunCycles`.
+`RunUntil` can also stop on richer conditions:
+
+```go
+result, err := cpu.RunUntil(m68kemu.RunUntilOptions{
+ MaxInstructions: 1000,
+ StopAtPC:        []uint32{0x00fc1234},
+ StopOnException: true,
+ StopOnBusAccess: func(info m68kemu.BusAccessInfo) bool {
+  return !info.InstructionFetch && info.Address == 0x00ff8209
+ },
+ StopPredicate: func(info m68kemu.RunPredicateInfo) bool {
+  return info.Registers.D[0] == 0xdeadbeef
+ },
+})
+```
+
+If you want a rolling "what just happened?" buffer without always logging, call `cpu.SetHistoryLimit(n)` and inspect `cpu.History()`. After an exception, `cpu.CurrentExceptionFrame()` and `m68kemu.ReadExceptionStackFrame(...)` can decode the pushed 68000 frame directly from memory.
 
 ## Testing
 
@@ -150,14 +218,18 @@ go test -bench=. ./...
 To run the core CPU and infrastructure benchmarks without test noise:
 
 ```sh
-go test -run '^$' -bench 'Benchmark(BubbleSort|PrimeSieve|RunEightMillionCycles|RecursiveFibonacci|CycleSchedulerAdvanceBurst|BusReadManyDevices)$' -benchmem ./...
+go test -run '^$' -bench 'Benchmark(BubbleSort|PrimeSieve|RunEightMillionCycles|RecursiveFibonacci|CycleSchedulerAdvanceBurst|BusReadMappedRanges)$' -benchmem ./...
 ```
 
 ## Performance Notes
 
 Recent profiling work focused on the interpreter hot path:
 
+* bus fast paths for simple and fixed-range mappings
+* cached single-RAM fast path when the bus has no wait-state devices
+* precomputed page-range lookup for mapped devices
 * amortized scheduler event dispatch without per-event slice shifting
+* reduced wait-state overhead when no device contributes extra wait states
 * fewer allocations and less debug bookkeeping in normal benchmark loops
 * predecoded opcode metadata for common decode fields
 * Go 1.26 benchmark loops using `testing.B.Loop`
@@ -169,7 +241,7 @@ Representative results on June 13, 2026 on Apple M1 (`darwin/arm64`, Go 1.26.3) 
 * `BenchmarkRunEightMillionCycles`: ~25.6 ms/op
 * `BenchmarkRecursiveFibonacci`: ~26.5 ms/op
 * `BenchmarkCycleSchedulerAdvanceBurst`: ~3.29 us/op
-* `BenchmarkBusReadManyDevices`: linear lookup across devices
+* `BenchmarkBusReadMappedRanges`: ~15.5 ns/op
 
 See [doc/benchmark_report.md](doc/benchmark_report.md) for more detail.
 

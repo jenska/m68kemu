@@ -10,57 +10,81 @@ func init() {
 		eaMaskPreDecrement | eaMaskDisplacement | eaMaskIndex |
 		eaMaskAbsoluteShort | eaMaskAbsoluteLong
 
-	registerOpmodes(
-		opmodeRegistration{add, 0xd000, 0, 0, 0xf1c0, addSubEAMask, addSubCycles},
-		opmodeRegistration{add, 0xd000, 1, 2, 0xf1c0, addSubWordLongEAMask, addSubCycles},
-		opmodeRegistration{add, 0xd000, 4, 6, 0xf1c0, addSubAlterableMask, addSubCycles},
-		opmodeRegistration{sub, 0x9000, 0, 0, 0xf1c0, addSubEAMask, addSubCycles},
-		opmodeRegistration{sub, 0x9000, 1, 2, 0xf1c0, addSubWordLongEAMask, addSubCycles},
-		opmodeRegistration{sub, 0x9000, 4, 6, 0xf1c0, addSubAlterableMask, addSubCycles},
-	)
+	// ADD.B <ea>,Dn
+	registerInstruction(add, 0xd000, 0xf1c0, addSubEAMask, addCycleCalculator(0, false))
+
+	// ADD.W/L <ea>,Dn
+	for opmode := uint16(1); opmode <= 2; opmode++ {
+		match := uint16(0xd000) | (opmode << 6)
+		registerInstruction(add, match, 0xf1c0, addSubWordLongEAMask, addCycleCalculator(opmode, false))
+	}
+
+	// ADD Dn,<ea>
+	for opmode := uint16(4); opmode <= 6; opmode++ {
+		match := uint16(0xd000) | (opmode << 6)
+		registerInstruction(add, match, 0xf1c0, addSubAlterableMask, addCycleCalculator(opmode, true))
+	}
+
+	// SUB.B <ea>,Dn
+	registerInstruction(sub, 0x9000, 0xf1c0, addSubEAMask, addCycleCalculator(0, false))
+
+	// SUB.W/L <ea>,Dn
+	for opmode := uint16(1); opmode <= 2; opmode++ {
+		match := uint16(0x9000) | (opmode << 6)
+		registerInstruction(sub, match, 0xf1c0, addSubWordLongEAMask, addCycleCalculator(opmode, false))
+	}
+
+	// SUB Dn,<ea>
+	for opmode := uint16(4); opmode <= 6; opmode++ {
+		match := uint16(0x9000) | (opmode << 6)
+		registerInstruction(sub, match, 0xf1c0, addSubAlterableMask, addCycleCalculator(opmode, true))
+	}
 
 	addaSubaMask := eaMaskDataRegister | eaMaskAddressRegister | eaMaskIndirect | eaMaskPostIncrement |
 		eaMaskPreDecrement | eaMaskDisplacement | eaMaskIndex |
 		eaMaskAbsoluteShort | eaMaskAbsoluteLong | eaMaskPCDisplacement | eaMaskPCIndex | eaMaskImmediate
-	registerInstructions(
-		instructionRegistration{adda, 0xd0c0, 0xf1c0, addaSubaMask, addaSubaCycles},
-		instructionRegistration{adda, 0xd1c0, 0xf1c0, addaSubaMask, addaSubaCycles},
-		instructionRegistration{suba, 0x90c0, 0xf1c0, addaSubaMask, addaSubaCycles},
-		instructionRegistration{suba, 0x91c0, 0xf1c0, addaSubaMask, addaSubaCycles},
-	)
+	for opmode := uint16(3); opmode <= 7; opmode += 4 { // 3=word, 7=long
+		match := uint16(0xd000) | (opmode << 6)
+		registerInstruction(adda, match, 0xf1c0, addaSubaMask, addaSubaCycleCalculator())
+
+		match = uint16(0x9000) | (opmode << 6)
+		registerInstruction(suba, match, 0xf1c0, addaSubaMask, addaSubaCycleCalculator())
+	}
 
 	alterableMask := eaMaskDataRegister | eaMaskAddressRegister | eaMaskIndirect |
 		eaMaskPostIncrement | eaMaskPreDecrement | eaMaskDisplacement |
 		eaMaskIndex | eaMaskAbsoluteShort | eaMaskAbsoluteLong
 
-	registerOpmodes(
-		opmodeRegistration{addq, 0x5000, 0, 2, 0xf1c0, alterableMask, addqSubqCycles},
-		opmodeRegistration{subq, 0x5100, 0, 2, 0xf1c0, alterableMask, addqSubqCycles},
-	)
+	for size := range uint16(3) {
+		registerInstruction(addq, 0x5000|(size<<6), 0xf1c0, alterableMask, addqSubqCycleCalculator())
+		registerInstruction(subq, 0x5100|(size<<6), 0xf1c0, alterableMask, addqSubqCycleCalculator())
+	}
 
 	divMulMask := eaMaskDataRegister | eaMaskIndirect | eaMaskPostIncrement |
 		eaMaskPreDecrement | eaMaskDisplacement | eaMaskIndex |
 		eaMaskAbsoluteShort | eaMaskAbsoluteLong | eaMaskPCDisplacement | eaMaskPCIndex |
 		eaMaskImmediate
-	registerInstructions(
-		instructionRegistration{divu, 0x80c0, 0xf1c0, divMulMask, constantCycles(140)},
-		instructionRegistration{divs, 0x81c0, 0xf1c0, divMulMask, constantCycles(158)},
-		instructionRegistration{mulu, 0xc0c0, 0xf1c0, divMulMask, constantCycles(70)},
-		instructionRegistration{muls, 0xc1c0, 0xf1c0, divMulMask, constantCycles(70)},
-	)
+	registerInstruction(divu, 0x80c0, 0xf1c0, divMulMask, constantCycles(140))
+	registerInstruction(divs, 0x81c0, 0xf1c0, divMulMask, constantCycles(158))
+	registerInstruction(mulu, 0xc0c0, 0xf1c0, divMulMask, constantCycles(70))
+	registerInstruction(muls, 0xc1c0, 0xf1c0, divMulMask, constantCycles(70))
 
 	alterableNoAddr := eaMaskDataRegister | eaMaskIndirect | eaMaskPostIncrement |
 		eaMaskPreDecrement | eaMaskDisplacement | eaMaskIndex |
 		eaMaskAbsoluteShort | eaMaskAbsoluteLong
 
-	registerOpmodes(
-		opmodeRegistration{addi, 0x0600, 0, 2, 0xffc0, alterableNoAddr, immediateEACycles},
-		opmodeRegistration{subi, 0x0400, 0, 2, 0xffc0, alterableNoAddr, immediateEACycles},
-		opmodeRegistration{negInstruction, 0x4400, 0, 2, 0xffc0, alterableNoAddr, clrTstCycles},
-	)
+	for size := range uint16(3) {
+		registerInstruction(addi, uint16(0x0600)|(size<<6), 0xffc0, alterableNoAddr, arithmeticImmediateCycleCalculator())
+		registerInstruction(subi, uint16(0x0400)|(size<<6), 0xffc0, alterableNoAddr, arithmeticImmediateCycleCalculator())
+	}
+
+	for size := range uint16(3) {
+		match := uint16(0x4400) | (size << 6)
+		registerInstruction(negInstruction, match, 0xffc0, alterableNoAddr, clrTstCycleCalculator())
+	}
 }
 
-func add(cpu *CPU) error {
+func add(cpu *cpu) error {
 	opmode := (cpu.regs.IR >> 6) & 0x7
 	size := operandSizeFromOpmode(opmode)
 
@@ -101,7 +125,7 @@ func add(cpu *CPU) error {
 	return nil
 }
 
-func sub(cpu *CPU) error {
+func sub(cpu *cpu) error {
 	opmode := (cpu.regs.IR >> 6) & 0x7
 	size := operandSizeFromOpmode(opmode)
 
@@ -141,7 +165,7 @@ func sub(cpu *CPU) error {
 	return nil
 }
 
-func addq(cpu *CPU) error {
+func addq(cpu *cpu) error {
 	size := operandSizeFromOpcode(cpu.regs.IR)
 	quick := uint32((cpu.regs.IR >> 9) & 0x7)
 	if quick == 0 {
@@ -174,7 +198,7 @@ func addq(cpu *CPU) error {
 	return nil
 }
 
-func subq(cpu *CPU) error {
+func subq(cpu *cpu) error {
 	size := operandSizeFromOpcode(cpu.regs.IR)
 	quick := uint32((cpu.regs.IR >> 9) & 0x7)
 	if quick == 0 {
@@ -207,15 +231,15 @@ func subq(cpu *CPU) error {
 	return nil
 }
 
-func addi(cpu *CPU) error {
+func addi(cpu *cpu) error {
 	return arithmeticImmediate(cpu, addWithFlags)
 }
 
-func subi(cpu *CPU) error {
+func subi(cpu *cpu) error {
 	return arithmeticImmediate(cpu, subWithFlags)
 }
 
-func arithmeticImmediate(cpu *CPU, op func(src, dst uint32, size Size) (uint32, uint16)) error {
+func arithmeticImmediate(cpu *cpu, op func(src, dst uint32, size Size) (uint32, uint16)) error {
 	size := operandSizeFromOpcode(cpu.regs.IR)
 
 	immSize := size
@@ -298,36 +322,43 @@ func divExceptionCycles(opcode uint16) uint32 {
 	return exceptionCyclesDivByZero + eaAccessCycles(mode, reg, Word)
 }
 
-func addSubCycles(opcode uint16) uint32 {
-	opmode := (opcode >> 6) & 0x7
-	base := uint32(4)
-	if opmode >= 4 {
-		base = 8
+func addCycleCalculator(opmode uint16, toEA bool) cycleCalculator {
+	return func(opcode uint16) uint32 {
+		mode := (opcode >> 3) & 0x7
+		reg := opcode & 0x7
+		if toEA {
+			return 8 + eaAccessCycles(mode, reg, operandSizeFromOpmode(opmode))
+		}
+		return 4 + eaAccessCycles(mode, reg, operandSizeFromOpmode(opmode))
 	}
-	mode := (opcode >> 3) & 0x7
-	reg := opcode & 0x7
-	return base + eaAccessCycles(mode, reg, operandSizeFromOpmode(opmode))
 }
 
-func addqSubqCycles(opcode uint16) uint32 {
-	mode := (opcode >> 3) & 0x7
-	reg := opcode & 0x7
-	size := Size((opcode >> 6) & 0x3)
-	base := uint32(8)
-	if mode == 0 {
-		base = 4
+func addqSubqCycleCalculator() cycleCalculator {
+	return func(opcode uint16) uint32 {
+		mode := (opcode >> 3) & 0x7
+		reg := opcode & 0x7
+		size := Size((opcode >> 6) & 0x3)
+
+		if mode == 0 {
+			return 4 + eaAccessCycles(mode, reg, size)
+		}
+		if mode == 1 {
+			return 8 + eaAccessCycles(mode, reg, size)
+		}
+		return 8 + eaAccessCycles(mode, reg, size)
 	}
-	return base + eaAccessCycles(mode, reg, size)
 }
 
-func immediateEACycles(opcode uint16) uint32 {
-	size := operandSizeFromOpcode(opcode)
-	mode := (opcode >> 3) & 0x7
-	reg := opcode & 0x7
-	return 8 + eaAccessCycles(mode, reg, size)
+func arithmeticImmediateCycleCalculator() cycleCalculator {
+	return func(opcode uint16) uint32 {
+		size := operandSizeFromOpcode(opcode)
+		mode := (opcode >> 3) & 0x7
+		reg := opcode & 0x7
+		return 8 + eaAccessCycles(mode, reg, size)
+	}
 }
 
-func divu(cpu *CPU) error {
+func divu(cpu *cpu) error {
 	src, err := cpu.ResolveSrcEA(Word)
 	if err != nil {
 		return err
@@ -361,7 +392,7 @@ func divu(cpu *CPU) error {
 	return nil
 }
 
-func divs(cpu *CPU) error {
+func divs(cpu *cpu) error {
 	src, err := cpu.ResolveSrcEA(Word)
 	if err != nil {
 		return err
@@ -396,7 +427,7 @@ func divs(cpu *CPU) error {
 	return nil
 }
 
-func mulu(cpu *CPU) error {
+func mulu(cpu *cpu) error {
 	src, err := cpu.ResolveSrcEA(Word)
 	if err != nil {
 		return err
@@ -420,7 +451,7 @@ func mulu(cpu *CPU) error {
 	return nil
 }
 
-func muls(cpu *CPU) error {
+func muls(cpu *cpu) error {
 	src, err := cpu.ResolveSrcEA(Word)
 	if err != nil {
 		return err
@@ -444,7 +475,7 @@ func muls(cpu *CPU) error {
 	return nil
 }
 
-func adda(cpu *CPU) error {
+func adda(cpu *cpu) error {
 	size := Word
 	if (cpu.regs.IR>>6)&0x7 == 7 {
 		size = Long
@@ -467,7 +498,7 @@ func adda(cpu *CPU) error {
 	return nil
 }
 
-func suba(cpu *CPU) error {
+func suba(cpu *cpu) error {
 	size := Word
 	if (cpu.regs.IR>>6)&0x7 == 7 {
 		size = Long
@@ -491,14 +522,16 @@ func suba(cpu *CPU) error {
 	return nil
 }
 
-func addaSubaCycles(opcode uint16) uint32 {
-	mode := (opcode >> 3) & 0x7
-	reg := opcode & 0x7
-	size := operandSizeFromOpcode(opcode)
-	return 8 + eaAccessCycles(mode, reg, size)
+func addaSubaCycleCalculator() cycleCalculator {
+	return func(opcode uint16) uint32 {
+		mode := (opcode >> 3) & 0x7
+		reg := opcode & 0x7
+		size := operandSizeFromOpcode(opcode)
+		return 8 + eaAccessCycles(mode, reg, size)
+	}
 }
 
-func negInstruction(cpu *CPU) error {
+func negInstruction(cpu *cpu) error {
 	size := operandSizeFromOpcode(cpu.regs.IR)
 
 	dst, err := cpu.ResolveSrcEA(size)
@@ -525,22 +558,30 @@ func init() {
 		eaMaskAbsoluteShort | eaMaskAbsoluteLong | eaMaskImmediate |
 		eaMaskPCDisplacement | eaMaskPCIndex
 
-	registerOpmodes(opmodeRegistration{cmpInstruction, 0xb000, 0, 2, 0xf1c0, cmpEAMask, addSubCycles})
-	registerInstructions(
-		instructionRegistration{cmpa, 0xb0c0, 0xf1c0, cmpEAMask, cmpaCycles},
-		instructionRegistration{cmpa, 0xb1c0, 0xf1c0, cmpEAMask, cmpaCycles},
-	)
+	for opmode := uint16(0); opmode <= 2; opmode++ {
+		match := uint16(0xb000) | (opmode << 6)
+		registerInstruction(cmpInstruction, match, 0xf1c0, cmpEAMask, addCycleCalculator(opmode, false))
+	}
+	for _, opmode := range []uint16{3, 7} {
+		match := uint16(0xb000) | (opmode << 6)
+		registerInstruction(cmpa, match, 0xf1c0, cmpEAMask, cmpaCycleCalculator())
+	}
 
 	cmpiMask := eaMaskDataRegister | eaMaskIndirect | eaMaskPostIncrement |
 		eaMaskPreDecrement | eaMaskDisplacement | eaMaskIndex |
 		eaMaskAbsoluteShort | eaMaskAbsoluteLong
-	registerOpmodes(
-		opmodeRegistration{cmpi, 0x0c00, 0, 2, 0xffc0, cmpiMask, immediateEACycles},
-		opmodeRegistration{cmpm, 0xb108, 0, 2, 0xf1f8, 0, cmpmCycles},
-	)
+	for size := range uint16(3) {
+		match := uint16(0x0c00) | (size << 6)
+		registerInstruction(cmpi, match, 0xffc0, cmpiMask, cmpiCycleCalculator())
+	}
+
+	for size := range uint16(3) {
+		match := uint16(0xb108) | (size << 6)
+		registerInstruction(cmpm, match, 0xf1f8, 0, cmpmCycleCalculator())
+	}
 }
 
-func cmpInstruction(cpu *CPU) error {
+func cmpInstruction(cpu *cpu) error {
 	size := operandSizeFromOpcode(cpu.regs.IR)
 
 	src, err := cpu.ResolveSrcEA(size)
@@ -558,7 +599,7 @@ func cmpInstruction(cpu *CPU) error {
 	return nil
 }
 
-func cmpa(cpu *CPU) error {
+func cmpa(cpu *cpu) error {
 	size := cmpaOperandSize(cpu.regs.IR)
 
 	src, err := cpu.ResolveSrcEA(size)
@@ -579,7 +620,7 @@ func cmpa(cpu *CPU) error {
 	return nil
 }
 
-func cmpi(cpu *CPU) error {
+func cmpi(cpu *cpu) error {
 	size := operandSizeFromOpcode(cpu.regs.IR)
 
 	immSize := size
@@ -607,7 +648,7 @@ func cmpi(cpu *CPU) error {
 	return nil
 }
 
-func cmpm(cpu *CPU) error {
+func cmpm(cpu *cpu) error {
 	size := operandSizeFromOpcode(cpu.regs.IR)
 	srcReg := cpu.regs.IR & 0x7
 	dstReg := (cpu.regs.IR >> 9) & 0x7
@@ -632,14 +673,25 @@ func cmpm(cpu *CPU) error {
 	return nil
 }
 
-func cmpmCycles(opcode uint16) uint32 {
-	switch operandSizeFromOpcode(opcode) {
-	case Byte, Word:
-		return 12
-	case Long:
-		return 20
-	default:
-		return 0
+func cmpiCycleCalculator() cycleCalculator {
+	return func(opcode uint16) uint32 {
+		size := operandSizeFromOpcode(opcode)
+		mode := (opcode >> 3) & 0x7
+		reg := opcode & 0x7
+		return 8 + eaAccessCycles(mode, reg, size)
+	}
+}
+
+func cmpmCycleCalculator() cycleCalculator {
+	return func(opcode uint16) uint32 {
+		switch operandSizeFromOpcode(opcode) {
+		case Byte, Word:
+			return 12
+		case Long:
+			return 20
+		default:
+			return 0
+		}
 	}
 }
 
@@ -650,24 +702,30 @@ func cmpaOperandSize(opcode uint16) Size {
 	return Word
 }
 
-func cmpaCycles(opcode uint16) uint32 {
-	mode := (opcode >> 3) & 0x7
-	reg := opcode & 0x7
-	return 8 + eaAccessCycles(mode, reg, cmpaOperandSize(opcode))
+func cmpaCycleCalculator() cycleCalculator {
+	return func(opcode uint16) uint32 {
+		mode := (opcode >> 3) & 0x7
+		reg := opcode & 0x7
+		size := cmpaOperandSize(opcode)
+		return 8 + eaAccessCycles(mode, reg, size)
+	}
 }
 
 func init() {
 	// ADDX and SUBX operate on either data registers or pre-decrement
 	// memory operands depending on bit 3 of the opcode.
-	registerExtendInstruction(addx, 0xd100, addxSubxCycles)
-	registerExtendInstruction(subx, 0x9100, addxSubxCycles)
+	registerExtendInstruction(addx, 0xd100, addxSubxCycleCalculator)
+	registerExtendInstruction(subx, 0x9100, addxSubxCycleCalculator)
 
-	registerOpmodes(opmodeRegistration{negx, 0x4000, 0, 2, 0xffc0, eaMaskDataRegister | eaMaskIndirect |
-		eaMaskPostIncrement | eaMaskPreDecrement | eaMaskDisplacement |
-		eaMaskIndex | eaMaskAbsoluteShort | eaMaskAbsoluteLong, clrTstCycles})
+	for size := range uint16(3) {
+		match := uint16(0x4000) | (size << 6)
+		registerInstruction(negx, match, 0xffc0, eaMaskDataRegister|eaMaskIndirect|
+			eaMaskPostIncrement|eaMaskPreDecrement|eaMaskDisplacement|
+			eaMaskIndex|eaMaskAbsoluteShort|eaMaskAbsoluteLong, clrTstCycleCalculator())
+	}
 }
 
-func addx(cpu *CPU) error {
+func addx(cpu *cpu) error {
 	size := operandSizeFromOpcode(cpu.regs.IR)
 
 	src, dst, err := extendOperands(cpu, size)
@@ -687,7 +745,7 @@ func addx(cpu *CPU) error {
 	return nil
 }
 
-func subx(cpu *CPU) error {
+func subx(cpu *cpu) error {
 	size := operandSizeFromOpcode(cpu.regs.IR)
 
 	src, dst, err := extendOperands(cpu, size)
@@ -707,7 +765,7 @@ func subx(cpu *CPU) error {
 	return nil
 }
 
-func negx(cpu *CPU) error {
+func negx(cpu *cpu) error {
 	size := operandSizeFromOpcode(cpu.regs.IR)
 
 	operand, err := cpu.ResolveSrcEA(size)
@@ -736,7 +794,7 @@ type extendOperand struct {
 	write func(uint32) error
 }
 
-func extendOperands(cpu *CPU, size Size) (extendOperand, extendOperand, error) {
+func extendOperands(cpu *cpu, size Size) (extendOperand, extendOperand, error) {
 	if (cpu.regs.IR>>3)&0x1 == 0 {
 		src := dy(cpu)
 		dst := udx(cpu)
@@ -847,7 +905,7 @@ func boolToUint32(v bool) uint32 {
 	return 0
 }
 
-func addxSubxCycles(opcode uint16) uint32 {
+func addxSubxCycleCalculator(opcode uint16) uint32 {
 	if (opcode>>3)&0x1 == 0 {
 		return 4
 	}
@@ -855,17 +913,15 @@ func addxSubxCycles(opcode uint16) uint32 {
 }
 
 func init() {
-	registerInstructions(
-		instructionRegistration{abcd, 0xc100, 0xf1f8, 0, abcdCycles},
-		instructionRegistration{abcd, 0xc108, 0xf1f8, 0, abcdCycles},
-		instructionRegistration{sbcd, 0x8100, 0xf1f8, 0, sbcdCycles},
-		instructionRegistration{sbcd, 0x8108, 0xf1f8, 0, sbcdCycles},
-		instructionRegistration{nbcd, 0x4800, 0xfff8, 0, nbcdCycles},
-		instructionRegistration{nbcd, 0x4820, 0xfff8, 0, nbcdCycles},
-	)
+	registerInstruction(abcd, 0xc100, 0xf1f8, 0, abcdCycleCalculator)
+	registerInstruction(abcd, 0xc108, 0xf1f8, 0, abcdCycleCalculator)
+	registerInstruction(sbcd, 0x8100, 0xf1f8, 0, sbcdCycleCalculator)
+	registerInstruction(sbcd, 0x8108, 0xf1f8, 0, sbcdCycleCalculator)
+	registerInstruction(nbcd, 0x4800, 0xfff8, 0, nbcdCycleCalculator)
+	registerInstruction(nbcd, 0x4820, 0xfff8, 0, nbcdCycleCalculator)
 }
 
-func abcd(cpu *CPU) error {
+func abcd(cpu *cpu) error {
 	src, dst, err := bcdOperands(cpu)
 	if err != nil {
 		return err
@@ -882,7 +938,7 @@ func abcd(cpu *CPU) error {
 	return nil
 }
 
-func sbcd(cpu *CPU) error {
+func sbcd(cpu *cpu) error {
 	src, dst, err := bcdOperands(cpu)
 	if err != nil {
 		return err
@@ -899,7 +955,7 @@ func sbcd(cpu *CPU) error {
 	return nil
 }
 
-func nbcd(cpu *CPU) error {
+func nbcd(cpu *cpu) error {
 	operand, err := bcdDestination(cpu)
 	if err != nil {
 		return err
@@ -916,7 +972,7 @@ func nbcd(cpu *CPU) error {
 	return nil
 }
 
-func updateBCDFlags(cpu *CPU, result byte, carry bool, prevZero bool, propagateZero bool) {
+func updateBCDFlags(cpu *cpu, result byte, carry bool, prevZero bool, propagateZero bool) {
 	cpu.regs.SR &^= srCarry | srOverflow | srNegative
 	if carry {
 		cpu.regs.SR |= srCarry | srExtend
@@ -984,7 +1040,7 @@ type bcdSourceDest struct {
 	write func(byte) error
 }
 
-func bcdOperands(cpu *CPU) (bcdOperand, bcdOperand, error) {
+func bcdOperands(cpu *cpu) (bcdOperand, bcdOperand, error) {
 	if (cpu.regs.IR>>3)&0x1 == 0 {
 		srcReg := dy(cpu)
 		dstReg := udx(cpu)
@@ -1021,7 +1077,7 @@ func bcdOperands(cpu *CPU) (bcdOperand, bcdOperand, error) {
 	}, nil
 }
 
-func bcdDestination(cpu *CPU) (bcdSourceDest, error) {
+func bcdDestination(cpu *cpu) (bcdSourceDest, error) {
 	mode := (cpu.regs.IR >> 3) & 0x7
 	reg := y(cpu.regs.IR)
 
@@ -1054,21 +1110,21 @@ func bcdDestination(cpu *CPU) (bcdSourceDest, error) {
 	}, nil
 }
 
-func abcdCycles(opcode uint16) uint32 {
+func abcdCycleCalculator(opcode uint16) uint32 {
 	if (opcode>>3)&0x1 == 0 {
 		return 6
 	}
 	return 18
 }
 
-func sbcdCycles(opcode uint16) uint32 {
+func sbcdCycleCalculator(opcode uint16) uint32 {
 	if (opcode>>3)&0x1 == 0 {
 		return 6
 	}
 	return 18
 }
 
-func nbcdCycles(opcode uint16) uint32 {
+func nbcdCycleCalculator(opcode uint16) uint32 {
 	if (opcode>>3)&0x1 == 0 {
 		return 6
 	}
@@ -1080,13 +1136,16 @@ func init() {
 		eaMaskPreDecrement | eaMaskDisplacement | eaMaskIndex |
 		eaMaskAbsoluteShort | eaMaskAbsoluteLong
 
-	registerOpmodes(
-		opmodeRegistration{clr, 0x4200, 0, 2, 0xffc0, alterableNoAddr, clrTstCycles},
-		opmodeRegistration{tst, 0x4a00, 0, 2, 0xffc0, alterableNoAddr | eaMaskPCDisplacement | eaMaskPCIndex | eaMaskImmediate, clrTstCycles},
-	)
+	for size := range uint16(3) {
+		match := uint16(0x4200) | (size << 6)
+		registerInstruction(clr, match, 0xffc0, alterableNoAddr, clrTstCycleCalculator())
+
+		match = uint16(0x4a00) | (size << 6)
+		registerInstruction(tst, match, 0xffc0, alterableNoAddr|eaMaskPCDisplacement|eaMaskPCIndex|eaMaskImmediate, clrTstCycleCalculator())
+	}
 }
 
-func clr(cpu *CPU) error {
+func clr(cpu *cpu) error {
 	size := operandSizeFromOpcode(cpu.regs.IR)
 
 	dst, err := cpu.ResolveSrcEA(size)
@@ -1102,7 +1161,7 @@ func clr(cpu *CPU) error {
 	return nil
 }
 
-func tst(cpu *CPU) error {
+func tst(cpu *cpu) error {
 	size := operandSizeFromOpcode(cpu.regs.IR)
 
 	src, err := cpu.ResolveSrcEA(size)

@@ -2,7 +2,7 @@ package m68kemu
 
 import "testing"
 
-func runSingleInstruction(t *testing.T, cpu *CPU, ram *RAM, asmSrc string) {
+func runSingleInstruction(t *testing.T, cpu *cpu, ram *RAM, asmSrc string) {
 	t.Helper()
 
 	code := assemble(t, asmSrc)

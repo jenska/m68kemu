@@ -6,16 +6,16 @@ func TestLEA(t *testing.T) {
 	tests := []struct {
 		name  string
 		code  string
-		setup func(cpu *CPU, ram *RAM)
-		check func(t *testing.T, cpu *CPU, ram *RAM)
+		setup func(cpu *cpu, ram *RAM)
+		check func(t *testing.T, cpu *cpu, ram *RAM)
 	}{
 		{
 			name: "PostIncrementAddressing",
 			code: "LEA (A1)+,A0\n",
-			setup: func(cpu *CPU, _ *RAM) {
+			setup: func(cpu *cpu, _ *RAM) {
 				cpu.regs.A[1] = 0x3000
 			},
-			check: func(t *testing.T, cpu *CPU, _ *RAM) {
+			check: func(t *testing.T, cpu *cpu, _ *RAM) {
 				if cpu.regs.A[0] != 0x3000 {
 					t.Fatalf("expected A0 to capture original A1, got %04x", cpu.regs.A[0])
 				}
@@ -27,7 +27,7 @@ func TestLEA(t *testing.T) {
 		{
 			name: "PCRelativeDisplacement",
 			code: "PEA 4(PC)\n LEA (A7),A1\n", // second instruction used to read back pushed address
-			check: func(t *testing.T, cpu *CPU, ram *RAM) {
+			check: func(t *testing.T, cpu *cpu, ram *RAM) {
 				if cpu.regs.A[7] != 0x0ffc {
 					t.Fatalf("expected stack pointer to decrement by 4, got %04x", cpu.regs.A[7])
 				}
@@ -93,13 +93,13 @@ func TestMoveInstruction(t *testing.T) {
 	tests := []struct {
 		name  string
 		src   string
-		setup func(cpu *CPU, ram *RAM)
-		check func(t *testing.T, cpu *CPU, ram *RAM)
+		setup func(cpu *cpu, ram *RAM)
+		check func(t *testing.T, cpu *cpu, ram *RAM)
 	}{
 		{
 			name: "MoveqImmediateToDataRegisters",
 			src:  "MOVEQ #-1,D1\nMOVEQ #1, D2\n",
-			check: func(t *testing.T, cpu *CPU, _ *RAM) {
+			check: func(t *testing.T, cpu *cpu, _ *RAM) {
 				if cpu.Registers().D[1] != -1 && cpu.Registers().D[2] == 1 {
 					t.Fatalf("expected D1 to be -1, got %d", cpu.Registers().D[1])
 				}
@@ -108,7 +108,7 @@ func TestMoveInstruction(t *testing.T) {
 		{
 			name: "MoveByteImmediateToDataRegister",
 			src:  "MOVE.B #0,D0\n",
-			check: func(t *testing.T, cpu *CPU, _ *RAM) {
+			check: func(t *testing.T, cpu *cpu, _ *RAM) {
 				if got := cpu.Registers().D[0] & 0xff; got != 0 {
 					t.Fatalf("expected D0 low byte to be 0, got %02x", got)
 				}
@@ -123,7 +123,7 @@ func TestMoveInstruction(t *testing.T) {
 		{
 			name: "MoveWordImmediateSetsNegative",
 			src:  "MOVE.W #$ffff,D1\n",
-			check: func(t *testing.T, cpu *CPU, _ *RAM) {
+			check: func(t *testing.T, cpu *cpu, _ *RAM) {
 				if got := cpu.Registers().D[1] & 0xffff; got != 0xffff {
 					t.Fatalf("expected D1 low word to be ffff, got %04x", got)
 				}
@@ -138,11 +138,11 @@ func TestMoveInstruction(t *testing.T) {
 		{
 			name: "MoveLongRegisterToPostIncrement",
 			src:  "MOVE.L D0,(A1)+\n",
-			setup: func(cpu *CPU, _ *RAM) {
+			setup: func(cpu *cpu, _ *RAM) {
 				cpu.regs.D[0] = 0x12345678
 				cpu.regs.A[1] = 0x2100
 			},
-			check: func(t *testing.T, cpu *CPU, ram *RAM) {
+			check: func(t *testing.T, cpu *cpu, ram *RAM) {
 				for i, b := range []byte{0x12, 0x34, 0x56, 0x78} {
 					addr := uint32(0x2100 + i)
 					if got, _ := ram.Read(Byte, addr); got != uint32(b) {
@@ -157,12 +157,12 @@ func TestMoveInstruction(t *testing.T) {
 		{
 			name: "MoveWordPostIncrementToPreDecrement",
 			src:  "MOVE.W (A0)+,-(A1)\n",
-			setup: func(cpu *CPU, ram *RAM) {
+			setup: func(cpu *cpu, ram *RAM) {
 				cpu.regs.A[0] = 0x3000
 				ram.Write(Word, 0x3000, 0x0)
 				cpu.regs.A[1] = 0x3102
 			},
-			check: func(t *testing.T, cpu *CPU, ram *RAM) {
+			check: func(t *testing.T, cpu *cpu, ram *RAM) {
 				if cpu.regs.A[0] != 0x3002 {
 					t.Fatalf("expected A0 to post-increment to 0x3002, got %04x", cpu.regs.A[0])
 				}
@@ -210,17 +210,17 @@ func TestMovep(t *testing.T) {
 	tests := []struct {
 		name  string
 		src   string
-		setup func(cpu *CPU, ram *RAM)
-		check func(t *testing.T, cpu *CPU, ram *RAM)
+		setup func(cpu *cpu, ram *RAM)
+		check func(t *testing.T, cpu *cpu, ram *RAM)
 	}{
 		{
 			name: "MovepWordRegisterToMemory",
 			src:  "MOVEP.W D0,(16,A1)",
-			setup: func(cpu *CPU, _ *RAM) {
+			setup: func(cpu *cpu, _ *RAM) {
 				cpu.regs.D[0] = 0x1234
 				cpu.regs.A[1] = 0x2000
 			},
-			check: func(t *testing.T, cpu *CPU, ram *RAM) {
+			check: func(t *testing.T, cpu *cpu, ram *RAM) {
 				if got, _ := ram.Read(Byte, 0x2010); got != 0x12 {
 					t.Fatalf("expected high byte at 0x2010 to be 0x12, got %02x", got)
 				}
@@ -235,13 +235,13 @@ func TestMovep(t *testing.T) {
 		{
 			name: "MovepWordMemoryToRegister",
 			src:  "MOVEP.W (16,A2),D2",
-			setup: func(cpu *CPU, ram *RAM) {
+			setup: func(cpu *cpu, ram *RAM) {
 				cpu.regs.D[2] = 0x11110000
 				cpu.regs.A[2] = 0x2100
 				ram.Write(Byte, 0x2110, 0xab)
 				ram.Write(Byte, 0x2112, 0xcd)
 			},
-			check: func(t *testing.T, cpu *CPU, _ *RAM) {
+			check: func(t *testing.T, cpu *cpu, _ *RAM) {
 				if got := cpu.regs.D[2]; got != 0x1111abcd {
 					t.Fatalf("expected D2 to be 0x1111abcd, got %08x", uint32(got))
 				}
@@ -253,11 +253,11 @@ func TestMovep(t *testing.T) {
 		{
 			name: "MovepLongRegisterToMemory",
 			src:  "MOVEP.L D3,(4,A0)",
-			setup: func(cpu *CPU, _ *RAM) {
+			setup: func(cpu *cpu, _ *RAM) {
 				cpu.regs.D[3] = -0x76543211
 				cpu.regs.A[0] = 0x3000
 			},
-			check: func(t *testing.T, cpu *CPU, ram *RAM) {
+			check: func(t *testing.T, cpu *cpu, ram *RAM) {
 				for i, b := range []byte{0x89, 0xab, 0xcd, 0xef} {
 					addr := uint32(0x3004 + i*2)
 					if got, _ := ram.Read(Byte, addr); got != uint32(b) {
@@ -272,14 +272,14 @@ func TestMovep(t *testing.T) {
 		{
 			name: "MovepLongMemoryToRegister",
 			src:  "MOVEP.L (8,A4),D4",
-			setup: func(cpu *CPU, ram *RAM) {
+			setup: func(cpu *cpu, ram *RAM) {
 				cpu.regs.A[4] = 0x4000
 				ram.Write(Byte, 0x4008, 0xfe)
 				ram.Write(Byte, 0x400a, 0xdc)
 				ram.Write(Byte, 0x400c, 0xba)
 				ram.Write(Byte, 0x400e, 0x98)
 			},
-			check: func(t *testing.T, cpu *CPU, _ *RAM) {
+			check: func(t *testing.T, cpu *cpu, _ *RAM) {
 				if got := cpu.regs.D[4]; got != -0x01234568 {
 					t.Fatalf("expected D4 to be 0xfedcba98, got %08x", uint32(got))
 				}

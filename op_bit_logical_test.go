@@ -197,20 +197,20 @@ func TestBitModifyAllowsPCRelativeOperands(t *testing.T) {
 func TestLogicalInstructions(t *testing.T) {
 	tests := []struct {
 		name  string
-		setup func(*CPU, *RAM)
+		setup func(*cpu, *RAM)
 		src   string
-		check func(*CPU, *RAM)
+		check func(*cpu, *RAM)
 	}{
 		{
 			name: "ANDSourceEAToDataRegister",
-			setup: func(c *CPU, ram *RAM) {
+			setup: func(c *cpu, ram *RAM) {
 				c.regs.D[0] = 0xf0
 				c.regs.A[0] = 0x1000
 				c.regs.SR = srExtend | srCarry
 				_ = ram.Write(Byte, 0x1000, 0x0f)
 			},
 			src: "AND.B (A0),D0\n",
-			check: func(c *CPU, _ *RAM) {
+			check: func(c *cpu, _ *RAM) {
 				if got := c.regs.D[0] & 0xff; got != 0x00 {
 					t.Fatalf("unexpected D0 after AND: %02x", got)
 				}
@@ -227,13 +227,13 @@ func TestLogicalInstructions(t *testing.T) {
 		},
 		{
 			name: "ANDDestinationMemory",
-			setup: func(c *CPU, ram *RAM) {
+			setup: func(c *cpu, ram *RAM) {
 				c.regs.D[0] = 0x0f
 				c.regs.A[0] = 0x1000
 				_ = ram.Write(Byte, 0x1000, 0xf3)
 			},
 			src: "AND.B D0,(A0)\n",
-			check: func(c *CPU, ram *RAM) {
+			check: func(c *cpu, ram *RAM) {
 				value, _ := ram.Read(Byte, 0x1000)
 				if value != 0x03 {
 					t.Fatalf("unexpected AND result in memory: %02x", value)
@@ -245,12 +245,12 @@ func TestLogicalInstructions(t *testing.T) {
 		},
 		{
 			name: "ANDIDestinationDataRegister",
-			setup: func(c *CPU, _ *RAM) {
+			setup: func(c *cpu, _ *RAM) {
 				c.regs.D[0] = 0xf0f0
 				c.regs.SR = srExtend | srCarry
 			},
 			src: "ANDI.W #$0f0f,D0\n",
-			check: func(c *CPU, _ *RAM) {
+			check: func(c *cpu, _ *RAM) {
 				if got := c.regs.D[0] & 0xffff; got != 0x0000 {
 					t.Fatalf("unexpected D0 after ANDI: %04x", got)
 				}
@@ -267,13 +267,13 @@ func TestLogicalInstructions(t *testing.T) {
 		},
 		{
 			name: "ORDestinationMemory",
-			setup: func(c *CPU, ram *RAM) {
+			setup: func(c *cpu, ram *RAM) {
 				c.regs.D[0] = 0x0f
 				c.regs.A[0] = 0x1000
 				_ = ram.Write(Byte, 0x1000, 0xf0)
 			},
 			src: "OR.B D0,(A0)\n",
-			check: func(c *CPU, ram *RAM) {
+			check: func(c *cpu, ram *RAM) {
 				value, _ := ram.Read(Byte, 0x1000)
 				if value != 0xff {
 					t.Fatalf("unexpected OR result in memory: %02x", value)
@@ -288,12 +288,12 @@ func TestLogicalInstructions(t *testing.T) {
 		},
 		{
 			name: "EORDestinationData",
-			setup: func(c *CPU, _ *RAM) {
+			setup: func(c *cpu, _ *RAM) {
 				c.regs.D[0] = 0x55
 				c.regs.D[1] = 0xaa
 			},
 			src: "EOR.B D0,D1\n",
-			check: func(c *CPU, _ *RAM) {
+			check: func(c *cpu, _ *RAM) {
 				if got := c.regs.D[1] & 0xff; got != 0xff {
 					t.Fatalf("unexpected EOR result: %02x", got)
 				}
@@ -304,12 +304,12 @@ func TestLogicalInstructions(t *testing.T) {
 		},
 		{
 			name: "NOTMemory",
-			setup: func(c *CPU, ram *RAM) {
+			setup: func(c *cpu, ram *RAM) {
 				c.regs.A[0] = 0x1000
 				_ = ram.Write(Byte, 0x1000, 0x00)
 			},
 			src: "NOT.B (A0)\n",
-			check: func(c *CPU, ram *RAM) {
+			check: func(c *cpu, ram *RAM) {
 				value, _ := ram.Read(Byte, 0x1000)
 				if value != 0xff {
 					t.Fatalf("unexpected NOT result: %02x", value)
@@ -321,11 +321,11 @@ func TestLogicalInstructions(t *testing.T) {
 		},
 		{
 			name: "EORIImmediateMemory",
-			setup: func(c *CPU, ram *RAM) {
+			setup: func(c *cpu, ram *RAM) {
 				_ = ram.Write(Long, 0x3000, 0xaaaa5555)
 			},
 			src: "EORI.L #$ffff0000,$3000\n",
-			check: func(c *CPU, ram *RAM) {
+			check: func(c *cpu, ram *RAM) {
 				value, _ := ram.Read(Long, 0x3000)
 				if value != 0x55555555 {
 					t.Fatalf("unexpected EORI result: %08x", value)
@@ -368,18 +368,18 @@ func TestLogicalInstructionAcceptsImmediateSourceEA(t *testing.T) {
 		name   string
 		opcode uint16
 		ext    uint16
-		setup  func(*CPU)
-		check  func(*testing.T, *CPU)
+		setup  func(*cpu)
+		check  func(*testing.T, *cpu)
 	}{
 		{
 			name:   "ANDImmediateToDataRegister",
 			opcode: 0xce7c,
 			ext:    0x0003,
-			setup: func(c *CPU) {
+			setup: func(c *cpu) {
 				c.regs.D[7] = 0x0007
 				c.regs.SR = srExtend | srCarry
 			},
-			check: func(t *testing.T, c *CPU) {
+			check: func(t *testing.T, c *cpu) {
 				if got := c.regs.D[7] & 0xffff; got != 0x0003 {
 					t.Fatalf("unexpected D7 after immediate-source AND: %04x", got)
 				}
@@ -395,10 +395,10 @@ func TestLogicalInstructionAcceptsImmediateSourceEA(t *testing.T) {
 			name:   "ORImmediateToDataRegister",
 			opcode: 0x8e7c,
 			ext:    0x0003,
-			setup: func(c *CPU) {
+			setup: func(c *cpu) {
 				c.regs.D[7] = 0x0004
 			},
-			check: func(t *testing.T, c *CPU) {
+			check: func(t *testing.T, c *cpu) {
 				if got := c.regs.D[7] & 0xffff; got != 0x0007 {
 					t.Fatalf("unexpected D7 after immediate-source OR: %04x", got)
 				}

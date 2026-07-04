@@ -5,32 +5,40 @@ import (
 	"testing"
 )
 
-type stubDevice struct {
+type stubMappedDevice struct {
 	start uint32
 	end   uint32
 	data  map[uint32]uint32
 }
 
-func newStubDevice(start, end uint32) *stubDevice {
-	return &stubDevice{
+func newStubMappedDevice(start, end uint32) *stubMappedDevice {
+	return &stubMappedDevice{
 		start: start,
 		end:   end,
 		data:  make(map[uint32]uint32),
 	}
 }
 
-func (d *stubDevice) Contains(address uint32) bool {
+func (d *stubMappedDevice) AddressRange() (uint32, uint32) {
+	return d.start, d.end
+}
+
+func (d *stubMappedDevice) Contains(address uint32) bool {
 	return address >= d.start && address <= d.end
 }
 
-func (d *stubDevice) Read(_ Size, address uint32) (uint32, error) {
+func (d *stubMappedDevice) Read(_ Size, address uint32) (uint32, error) {
 	if address < d.start || address > d.end {
 		return 0, BusError(address)
 	}
 	return d.data[address], nil
 }
 
-func (d *stubDevice) Write(_ Size, address uint32, value uint32) error {
+func (d *stubMappedDevice) Peek(size Size, address uint32) (uint32, error) {
+	return d.Read(size, address)
+}
+
+func (d *stubMappedDevice) Write(_ Size, address uint32, value uint32) error {
 	if address < d.start || address > d.end {
 		return BusError(address)
 	}
@@ -38,7 +46,7 @@ func (d *stubDevice) Write(_ Size, address uint32, value uint32) error {
 	return nil
 }
 
-func (d *stubDevice) Reset() {}
+func (d *stubMappedDevice) Reset() {}
 
 func TestBusAlignmentErrors(t *testing.T) {
 	ram := NewRAM(0x0000, 0x0010)
@@ -96,10 +104,10 @@ func TestBusWaitHook(t *testing.T) {
 	}
 }
 
-func TestBusDeviceRangeLookup(t *testing.T) {
+func TestBusMappedDeviceRangeLookup(t *testing.T) {
 	low := NewRAM(0x0000, 0x0010)
 	high := NewRAM(0xFC0000, 0x0010)
-	bus := NewBus(low, high)
+	bus := NewBus(MapDevice(0x0000, 0x000F, low), MapDevice(0xFC0000, 0xFC000F, high))
 
 	if err := bus.Write(Byte, 0x0002, 0x11); err != nil {
 		t.Fatalf("write low region failed: %v", err)
@@ -117,8 +125,8 @@ func TestBusDeviceRangeLookup(t *testing.T) {
 }
 
 func TestBusPrefersEarlierOverlappingDeviceAfterROMHit(t *testing.T) {
-	overlay := newStubDevice(0xFF8000, 0xFF8007)
-	rom := newStubDevice(0xFC0000, 0xFFFFFF)
+	overlay := newStubMappedDevice(0xFF8000, 0xFF8007)
+	rom := newStubMappedDevice(0xFC0000, 0xFFFFFF)
 	overlay.data[0xFF8006] = 0x12
 	rom.data[0xFF8006] = 0x34
 	rom.data[0xFC0000] = 0x56
@@ -134,18 +142,18 @@ func TestBusPrefersEarlierOverlappingDeviceAfterROMHit(t *testing.T) {
 	}
 }
 
-func TestBusSingleDeviceRejectsUnmappedAddresses(t *testing.T) {
+func TestBusSingleMappedDeviceRejectsUnmappedAddresses(t *testing.T) {
 	ram := NewRAM(0x2000, 0x0010)
-	bus := NewBus(ram)
+	bus := NewBus(MapDevice(0x2000, 0x200F, ram))
 
 	if _, err := bus.Read(Byte, 0x1fff); err == nil {
-		t.Fatalf("read below device range unexpectedly succeeded")
+		t.Fatalf("read below mapped region unexpectedly succeeded")
 	} else {
 		expectBusError(t, err)
 	}
 
 	if err := bus.Write(Byte, 0x2010, 0x55); err == nil {
-		t.Fatalf("write above device range unexpectedly succeeded")
+		t.Fatalf("write above mapped region unexpectedly succeeded")
 	} else {
 		expectBusError(t, err)
 	}
