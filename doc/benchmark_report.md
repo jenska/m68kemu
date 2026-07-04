@@ -5,7 +5,7 @@
 Benchmarks were run on June 13, 2026 on an Apple M1 (`darwin/arm64`) with Go 1.26.3:
 
 ```sh
-go test -run '^$' -bench 'Benchmark(BubbleSort|PrimeSieve|RunEightMillionCycles|RecursiveFibonacci|CycleSchedulerAdvanceBurst|BusReadMappedRanges)$' -benchmem -count=5 .
+go test -run '^$' -bench 'Benchmark(BubbleSort|PrimeSieve|RunEightMillionCycles|RecursiveFibonacci|CycleSchedulerAdvanceBurst|BusReadManyDevices)$' -benchmem -count=5 .
 ```
 
 Representative medians from the runs:
@@ -17,20 +17,16 @@ Representative medians from the runs:
 | `BenchmarkRunEightMillionCycles` | `25526229 ns/op` | `0 B/op, 0 allocs/op` |
 | `BenchmarkRecursiveFibonacci` | `26577540 ns/op` | `0 B/op, 0 allocs/op` |
 | `BenchmarkCycleSchedulerAdvanceBurst` | `3291 ns/op` | `0 B/op, 0 allocs/op` |
-| `BenchmarkBusReadMappedRanges` | `15.53 ns/op` | `0 B/op, 0 allocs/op` |
+| `BenchmarkBusReadManyDevices` | linear device lookup | `0 B/op, 0 allocs/op` |
 
 ## What Improved
 
 Compared with the earlier benchmark notes in this repository, the current core remains materially faster and cleaner in the common execution path:
 
-* bus access now has direct fast paths for single-device setups
-* single-RAM bus fast paths are cached when no wait-state devices are attached
-* fixed-range device mappings can be indexed efficiently by 24-bit address pages
-* RAM no longer advertises zero wait states through the dynamic wait-state interface, which removes unnecessary bookkeeping
+* the bus was simplified to linear device lookup and global wait-state accounting
 * reset / benchmark loops no longer allocate in the common CPU path
 * opcode metadata used by EA decoding is precomputed once up front
-* debug hooks now stay off the hot path unless a tracer, history buffer, or stop-condition collector is actually active
-* untraced execution avoids unnecessary register snapshots and fetch trace context
+* debug hooks were reduced to a compact instruction tracer
 * Go 1.26 benchmark loops use `testing.B.Loop`
 
 These changes were made while also improving correctness:
@@ -56,8 +52,8 @@ go tool pprof -top /tmp/m68kemu_bubble_2026-06-13.cpu.out
 Top remaining costs are still concentrated in the interpreter core:
 
 * `ResolveSrcEA`
-* `(*cpu).fetchOpcode`
-* `readProgramFastWord`
+* `(*CPU).fetchOpcode`
+* `(*Bus).Read`
 * `executeInstruction`
 * `executeNext`
 * `movel`
@@ -68,12 +64,12 @@ This means the project has already harvested the easy debug-path wins, and futur
 
 The hot path is now dominated by:
 
-* `(*cpu).executeNext`
-* `readProgramFastWord`
-* `(*cpu).executeInstruction`
-* `(*cpu).RunCycles`
+* `(*CPU).executeNext`
+* `(*Bus).Read`
+* `(*CPU).executeInstruction`
+* `(*CPU).RunCycles`
 * `branch`
-* `(*cpu).fetchOpcode`
+* `(*CPU).fetchOpcode`
 
 Notably, the remaining time is concentrated in instruction fetch / dispatch and simple memory lookup rather than broad bus indirection, heap allocation, or always-on debug plumbing.
 
@@ -81,7 +77,7 @@ Notably, the remaining time is concentrated in instruction fetch / dispatch and 
 
 If performance becomes the main focus again, the highest-value next steps are:
 
-1. Trim hot-loop instruction fetch overhead in `fetchOpcode`, `readProgramFastWord`, and related bookkeeping.
+1. Trim hot-loop instruction fetch overhead in `fetchOpcode`, bus reads, and related bookkeeping.
 2. Push opcode predecode further so more handlers can avoid repeated mode / register extraction.
 3. Reduce EA setup overhead on common register, displacement, and simple memory forms.
 4. Keep debug hooks behind cached mode flags so new observability features do not drift back into the hot path.

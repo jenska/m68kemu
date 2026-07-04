@@ -20,7 +20,7 @@ func BenchmarkCycleSchedulerAdvanceBurst(b *testing.B) {
 	}
 }
 
-func BenchmarkBusReadMappedRanges(b *testing.B) {
+func BenchmarkBusReadManyDevices(b *testing.B) {
 	const (
 		deviceCount = 64
 		regionSize  = 0x0400
@@ -31,11 +31,11 @@ func BenchmarkBusReadMappedRanges(b *testing.B) {
 	for i := range deviceCount {
 		start := uint32(i * regionSize)
 		end := start + regionSize - 1
-		devices = append(devices, newStubMappedDevice(start, end))
+		devices = append(devices, newStubDevice(start, end))
 	}
 
 	targetAddress := uint32(targetIndex*regionSize + 0x12)
-	targetDevice := devices[targetIndex].(*stubMappedDevice)
+	targetDevice := devices[targetIndex].(*stubDevice)
 	targetDevice.data[targetAddress] = 0x5a
 
 	bus := NewBus(devices...)

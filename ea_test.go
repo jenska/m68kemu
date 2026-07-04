@@ -154,13 +154,9 @@ func TestEAAbsoluteWordUsesSignExtendedAddressForAccess(t *testing.T) {
 	low.Write(Long, 0, 0x1000)
 	low.Write(Long, 4, 0x2000)
 
-	processor, err := NewCPU(bus)
+	cpu, err := NewCPU(bus)
 	if err != nil {
 		t.Fatalf("failed to create CPU: %v", err)
-	}
-	cpu, ok := processor.(*cpu)
-	if !ok {
-		t.Fatalf("CPU implementation has unexpected type %T", processor)
 	}
 
 	if err := high.Write(Byte, 0xFF8001, 0x5A); err != nil {

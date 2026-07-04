@@ -14,7 +14,7 @@ type assembledProgram struct {
 
 type stepTestHelper struct {
 	tb  testing.TB
-	cpu *cpu
+	cpu *CPU
 	ram *RAM
 }
 
@@ -69,7 +69,7 @@ func (h *stepTestHelper) RunCycles(cycles uint64) {
 	}
 }
 
-func (h *stepTestHelper) AssertState(check func(*testing.T, *cpu, *RAM)) {
+func (h *stepTestHelper) AssertState(check func(*testing.T, *CPU, *RAM)) {
 	h.tb.Helper()
 	tester, ok := h.tb.(*testing.T)
 	if !ok {

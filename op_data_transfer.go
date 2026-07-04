@@ -6,12 +6,28 @@ import (
 )
 
 func init() {
-	registerMove(moveb, 0x1000, moveCycleCalculator(Byte))
-	registerMove(movew, 0x3000, moveCycleCalculator(Word))
-	registerMove(movel, 0x2000, moveCycleCalculator(Long))
-	registerMoveA(0x3000, moveaw, moveAddressCycleCalculator(Word))
-	registerMoveA(0x2000, moveal, moveAddressCycleCalculator(Long))
-	registerInstruction(moveq, 0x7000, 0xf100, 0, constantCycles(4))
+	for _, move := range []struct {
+		ins  instruction
+		base uint16
+		size Size
+	}{
+		{moveb, 0x1000, Byte},
+		{movew, 0x3000, Word},
+		{movel, 0x2000, Long},
+	} {
+		registerMove(move.ins, move.base, moveCyclesForSize(move.size))
+	}
+	for _, movea := range []struct {
+		ins  instruction
+		base uint16
+		size Size
+	}{
+		{moveaw, 0x3000, Word},
+		{moveal, 0x2000, Long},
+	} {
+		registerMoveA(movea.base, movea.ins, moveAddressCyclesForSize(movea.size))
+	}
+	registerInstructions(instructionRegistration{moveq, 0x7000, 0xf100, 0, constantCycles(4)})
 }
 
 const moveSourceEAMask = eaMaskDataRegister |
@@ -27,7 +43,7 @@ const moveSourceEAMask = eaMaskDataRegister |
 	eaMaskPCDisplacement |
 	eaMaskPCIndex
 
-func moveq(cpu *cpu) error {
+func moveq(cpu *CPU) error {
 	value := int32(int8(cpu.regs.IR))
 	*dx(cpu) = value
 
@@ -60,7 +76,7 @@ func registerMove(ins instruction, base uint16, calc cycleCalculator) {
 	}
 }
 
-func moveb(cpu *cpu) error {
+func moveb(cpu *CPU) error {
 	src, err := cpu.ResolveSrcEA(Byte)
 	if err != nil {
 		return err
@@ -83,7 +99,7 @@ func moveb(cpu *cpu) error {
 	return nil
 }
 
-func movew(cpu *cpu) error {
+func movew(cpu *CPU) error {
 	src, err := cpu.ResolveSrcEA(Word)
 	if err != nil {
 		return err
@@ -106,7 +122,7 @@ func movew(cpu *cpu) error {
 	return nil
 }
 
-func movel(cpu *cpu) error {
+func movel(cpu *CPU) error {
 	src, err := cpu.ResolveSrcEA(Long)
 	if err != nil {
 		return err
@@ -129,7 +145,7 @@ func movel(cpu *cpu) error {
 	return nil
 }
 
-func moveaw(cpu *cpu) error {
+func moveaw(cpu *CPU) error {
 	src, err := cpu.ResolveSrcEA(Word)
 	if err != nil {
 		return err
@@ -144,7 +160,7 @@ func moveaw(cpu *cpu) error {
 	return nil
 }
 
-func moveal(cpu *cpu) error {
+func moveal(cpu *CPU) error {
 	src, err := cpu.ResolveSrcEA(Long)
 	if err != nil {
 		return err
@@ -174,16 +190,34 @@ func moveAddressCycles(ir uint16, size Size) uint32 {
 	return 4 + eaAccessCycles(srcMode, srcReg, size)
 }
 
-func moveCycleCalculator(size Size) cycleCalculator {
-	return func(opcode uint16) uint32 {
-		return moveCycles(opcode, size)
+func moveCyclesForSize(size Size) cycleCalculator {
+	switch size {
+	case Byte:
+		return moveByteCycles
+	case Word:
+		return moveWordCycles
+	default:
+		return moveLongCycles
 	}
 }
 
-func moveAddressCycleCalculator(size Size) cycleCalculator {
-	return func(opcode uint16) uint32 {
-		return moveAddressCycles(opcode, size)
+func moveAddressCyclesForSize(size Size) cycleCalculator {
+	if size == Word {
+		return moveAddressWordCycles
 	}
+	return moveAddressLongCycles
+}
+
+func moveByteCycles(opcode uint16) uint32 { return moveCycles(opcode, Byte) }
+func moveWordCycles(opcode uint16) uint32 { return moveCycles(opcode, Word) }
+func moveLongCycles(opcode uint16) uint32 { return moveCycles(opcode, Long) }
+
+func moveAddressWordCycles(opcode uint16) uint32 {
+	return moveAddressCycles(opcode, Word)
+}
+
+func moveAddressLongCycles(opcode uint16) uint32 {
+	return moveAddressCycles(opcode, Long)
 }
 
 // MOVEM: move multiple registers to/from memory
@@ -247,7 +281,7 @@ func movemRegisterOrder(mask uint16, reverse bool) []int {
 	return order
 }
 
-func movemReadAddress(cpu *cpu, mode, reg uint16) (uint32, error) {
+func movemReadAddress(cpu *CPU, mode, reg uint16) (uint32, error) {
 	var addr uint32
 
 	switch mode {
@@ -307,7 +341,7 @@ func movemReadAddress(cpu *cpu, mode, reg uint16) (uint32, error) {
 	return addr, nil
 }
 
-func movemToRegisters(cpu *cpu) error {
+func movemToRegisters(cpu *CPU) error {
 	opcode := cpu.regs.IR
 	size, ok := movemSize(opcode)
 	if !ok {
@@ -371,7 +405,7 @@ func movemToRegisters(cpu *cpu) error {
 	return nil
 }
 
-func movemToMemory(cpu *cpu) error {
+func movemToMemory(cpu *CPU) error {
 	opcode := cpu.regs.IR
 	size, ok := movemSize(opcode)
 	if !ok {
@@ -426,13 +460,15 @@ func movemToMemory(cpu *cpu) error {
 }
 
 func init() {
-	registerInstruction(movep, 0x0108, 0xf1f8, 0, movepCycleCalculator)
-	registerInstruction(movep, 0x0148, 0xf1f8, 0, movepCycleCalculator)
-	registerInstruction(movep, 0x0188, 0xf1f8, 0, movepCycleCalculator)
-	registerInstruction(movep, 0x01c8, 0xf1f8, 0, movepCycleCalculator)
+	registerInstructions(
+		instructionRegistration{movep, 0x0108, 0xf1f8, 0, movepCycles},
+		instructionRegistration{movep, 0x0148, 0xf1f8, 0, movepCycles},
+		instructionRegistration{movep, 0x0188, 0xf1f8, 0, movepCycles},
+		instructionRegistration{movep, 0x01c8, 0xf1f8, 0, movepCycles},
+	)
 }
 
-func movep(cpu *cpu) error {
+func movep(cpu *CPU) error {
 	opcode := cpu.regs.IR
 	size := Word
 	if opcode&0x0080 != 0 {
@@ -510,7 +546,7 @@ func movep(cpu *cpu) error {
 	return nil
 }
 
-func movepCycleCalculator(opcode uint16) uint32 {
+func movepCycles(opcode uint16) uint32 {
 	if opcode&0x0080 != 0 {
 		return 24
 	}
@@ -520,11 +556,13 @@ func movepCycleCalculator(opcode uint16) uint32 {
 func init() {
 	const leaPeaAddressMask = eaMaskIndirect | eaMaskPostIncrement | eaMaskPreDecrement | eaMaskDisplacement | eaMaskIndex | eaMaskAbsoluteShort | eaMaskAbsoluteLong | eaMaskPCDisplacement | eaMaskPCIndex
 
-	registerInstruction(lea, 0x41c0, 0xf1c0, leaPeaAddressMask, leaPeaCycleCalculator(4))
-	registerInstruction(pea, 0x4840, 0xffc0, leaPeaAddressMask, leaPeaCycleCalculator(8))
+	registerInstructions(
+		instructionRegistration{lea, 0x41c0, 0xf1c0, leaPeaAddressMask, leaCycles},
+		instructionRegistration{pea, 0x4840, 0xffc0, leaPeaAddressMask, peaCycles},
+	)
 }
 
-func lea(cpu *cpu) error {
+func lea(cpu *CPU) error {
 	mode := (cpu.regs.IR >> 3) & 0x7
 	reg := cpu.regs.IR & 0x7
 	if mode < 2 || (mode == 7 && reg == 4) {
@@ -540,7 +578,7 @@ func lea(cpu *cpu) error {
 	return nil
 }
 
-func pea(cpu *cpu) error {
+func pea(cpu *CPU) error {
 	mode := (cpu.regs.IR >> 3) & 0x7
 	reg := cpu.regs.IR & 0x7
 	if mode < 2 || (mode == 7 && reg == 4) {
@@ -561,8 +599,5 @@ func leaPeaCycles(ir uint16, base uint32) uint32 {
 	return base + eaAccessCycles(mode, reg, Long)
 }
 
-func leaPeaCycleCalculator(base uint32) cycleCalculator {
-	return func(opcode uint16) uint32 {
-		return leaPeaCycles(opcode, base)
-	}
-}
+func leaCycles(opcode uint16) uint32 { return leaPeaCycles(opcode, 4) }
+func peaCycles(opcode uint16) uint32 { return leaPeaCycles(opcode, 8) }

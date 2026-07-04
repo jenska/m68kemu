@@ -6,7 +6,7 @@ import (
 
 type (
 	ea interface {
-		init(cpu *cpu, o Size) (modifier, error)
+		init(cpu *CPU, o Size) (modifier, error)
 		computedAddress() uint32
 		// cycles() int
 	}
@@ -18,8 +18,8 @@ type (
 	}
 
 	eaRegister struct {
-		areg func(cpu *cpu) *uint32
-		cpu  *cpu
+		areg func(cpu *CPU) *uint32
+		cpu  *CPU
 		size Size
 	}
 
@@ -42,11 +42,11 @@ type (
 
 	eaIndirectIndex struct {
 		eaRegisterIndirect
-		index func(cpu *cpu, a uint32) (uint32, error)
+		index func(cpu *CPU, a uint32) (uint32, error)
 	}
 
 	eaAbsolute struct {
-		cpu     *cpu
+		cpu     *CPU
 		eaSize  Size
 		size    Size
 		address uint32
@@ -167,17 +167,17 @@ func init() {
 	}
 }
 
-func (cpu *cpu) ResolveSrcEA(o Size) (modifier, error) {
+func (cpu *CPU) ResolveSrcEA(o Size) (modifier, error) {
 	meta := opcodeMetaTable[cpu.regs.IR]
 	return eaSrc[meta.srcIndex].init(cpu, o)
 }
 
-func (cpu *cpu) ResolveSrcEA2(o Size) (modifier, error) {
+func (cpu *CPU) ResolveSrcEA2(o Size) (modifier, error) {
 	meta := opcodeMetaTable[cpu.regs.IR]
 	return eaSrc2[meta.srcIndex].init(cpu, o)
 }
 
-func (cpu *cpu) ResolveDstEA(o Size) (modifier, error) {
+func (cpu *CPU) ResolveDstEA(o Size) (modifier, error) {
 	meta := opcodeMetaTable[cpu.regs.IR]
 	return eaDst[meta.dstIndex].init(cpu, o)
 }
@@ -185,17 +185,17 @@ func (cpu *cpu) ResolveDstEA(o Size) (modifier, error) {
 func x(ir uint16) uint16 { return uint16(opcodeMetaTable[ir].x) }
 func y(ir uint16) uint16 { return uint16(opcodeMetaTable[ir].y) }
 
-func udx(cpu *cpu) *uint32 { return (*uint32)(unsafe.Pointer(&cpu.regs.D[x(cpu.regs.IR)])) }
-func dx(cpu *cpu) *int32   { return &cpu.regs.D[x(cpu.regs.IR)] }
-func dy(cpu *cpu) *uint32  { return (*uint32)(unsafe.Pointer(&cpu.regs.D[y(cpu.regs.IR)])) }
+func udx(cpu *CPU) *uint32 { return (*uint32)(unsafe.Pointer(&cpu.regs.D[x(cpu.regs.IR)])) }
+func dx(cpu *CPU) *int32   { return &cpu.regs.D[x(cpu.regs.IR)] }
+func dy(cpu *CPU) *uint32  { return (*uint32)(unsafe.Pointer(&cpu.regs.D[y(cpu.regs.IR)])) }
 
-func ax(cpu *cpu) *uint32 { return &cpu.regs.A[x(cpu.regs.IR)] }
-func ay(cpu *cpu) *uint32 { return &cpu.regs.A[y(cpu.regs.IR)] }
+func ax(cpu *CPU) *uint32 { return &cpu.regs.A[x(cpu.regs.IR)] }
+func ay(cpu *CPU) *uint32 { return &cpu.regs.A[y(cpu.regs.IR)] }
 
 // -------------------------------------------------------------------
 // register direct
 
-func (ea *eaRegister) init(cpu *cpu, o Size) (modifier, error) {
+func (ea *eaRegister) init(cpu *CPU, o Size) (modifier, error) {
 	ea.cpu, ea.size = cpu, o
 	return ea, nil
 }
@@ -218,7 +218,7 @@ func (ea *eaRegister) computedAddress() uint32 {
 // -------------------------------------------------------------------
 // Address register indirect
 
-func (ea *eaRegisterIndirect) init(cpu *cpu, o Size) (modifier, error) {
+func (ea *eaRegisterIndirect) init(cpu *CPU, o Size) (modifier, error) {
 	ea.cpu, ea.size, ea.address = cpu, o, *ea.areg(cpu)
 	return ea, nil
 }
@@ -238,7 +238,7 @@ func (ea *eaRegisterIndirect) computedAddress() uint32 {
 // -------------------------------------------------------------------
 // Post increment
 
-func (ea *eaPostIncrement) init(cpu *cpu, o Size) (modifier, error) {
+func (ea *eaPostIncrement) init(cpu *CPU, o Size) (modifier, error) {
 	ea.cpu, ea.size, ea.address = cpu, o, *ea.areg(cpu)
 	incr := uint32(o)
 	if o == Byte && ea.areg(cpu) == &cpu.regs.A[7] {
@@ -259,7 +259,7 @@ func (ea *eaPostIncrement) write(v uint32) error {
 // -------------------------------------------------------------------
 // Pre decrement
 
-func (ea *eaPreDecrement) init(cpu *cpu, o Size) (modifier, error) {
+func (ea *eaPreDecrement) init(cpu *CPU, o Size) (modifier, error) {
 	decr := uint32(o)
 	if o == Byte && ea.areg(cpu) == &cpu.regs.A[7] {
 		decr = 2
@@ -280,7 +280,7 @@ func (ea *eaPreDecrement) write(v uint32) error {
 // -------------------------------------------------------------------
 // Displacement
 
-func (ea *eaDisplacement) init(cpu *cpu, o Size) (modifier, error) {
+func (ea *eaDisplacement) init(cpu *CPU, o Size) (modifier, error) {
 	ea.cpu, ea.size = cpu, o
 	offset, err := cpu.popPc(Word)
 	if err != nil {
@@ -294,7 +294,7 @@ func (ea *eaDisplacement) computedAddress() uint32 {
 	return ea.address
 }
 
-func (ea *eaPCDisplacement) init(cpu *cpu, o Size) (modifier, error) {
+func (ea *eaPCDisplacement) init(cpu *CPU, o Size) (modifier, error) {
 	ea.cpu, ea.size = cpu, o
 	basePC := cpu.regs.PC
 	offset, err := cpu.popPc(Word)
@@ -312,7 +312,7 @@ func (ea *eaPCDisplacement) computedAddress() uint32 {
 // -------------------------------------------------------------------
 // Indirect + index
 
-func (ea *eaIndirectIndex) init(cpu *cpu, o Size) (modifier, error) {
+func (ea *eaIndirectIndex) init(cpu *CPU, o Size) (modifier, error) {
 	ea.cpu, ea.size = cpu, o
 	address, err := ea.index(cpu, *ea.areg(cpu))
 	if err != nil {
@@ -322,7 +322,7 @@ func (ea *eaIndirectIndex) init(cpu *cpu, o Size) (modifier, error) {
 	return ea, nil
 }
 
-func (ea *eaPCIndirectIndex) init(cpu *cpu, o Size) (modifier, error) {
+func (ea *eaPCIndirectIndex) init(cpu *CPU, o Size) (modifier, error) {
 	ea.cpu, ea.size = cpu, o
 	basePC := cpu.regs.PC
 	address, err := ea.index(cpu, basePC)
@@ -336,7 +336,7 @@ func (ea *eaPCIndirectIndex) init(cpu *cpu, o Size) (modifier, error) {
 // -------------------------------------------------------------------
 // absolute word and long
 
-func (ea *eaAbsolute) init(cpu *cpu, o Size) (modifier, error) {
+func (ea *eaAbsolute) init(cpu *CPU, o Size) (modifier, error) {
 	ea.cpu, ea.size = cpu, o
 	address, err := cpu.popPc(ea.eaSize)
 	if err != nil {
@@ -364,7 +364,7 @@ func (ea *eaAbsolute) computedAddress() uint32 {
 // -------------------------------------------------------------------
 // immediate
 
-func (ea *eaImmediate) init(cpu *cpu, o Size) (modifier, error) {
+func (ea *eaImmediate) init(cpu *CPU, o Size) (modifier, error) {
 	readSize := o
 	if o == Byte {
 		readSize = Word
@@ -395,7 +395,7 @@ func (ea *eaImmediate) computedAddress() uint32 {
 // -------------------------------------------------------------------
 // sr
 
-func (ea *eaStatusRegister) init(cpu *cpu, o Size) (modifier, error) {
+func (ea *eaStatusRegister) init(cpu *CPU, o Size) (modifier, error) {
 	ea.sr = &cpu.regs.SR
 	return ea, nil
 }
@@ -460,7 +460,7 @@ func (ea *eaStatusRegister) computedAddress() uint32 {
 // 1  010  mem indir with word outer
 // 1  011  mem indir with long outer
 // 1  100-111  reserved
-func ix68000(c *cpu, a uint32) (uint32, error) {
+func ix68000(c *CPU, a uint32) (uint32, error) {
 	ext, err := c.popPc(Word)
 	if err != nil {
 		return 0, err

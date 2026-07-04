@@ -129,7 +129,7 @@ done:   BRA.S   done            ; Spin
 	}
 }
 
-func newBenchmarkEnvironment(b *testing.B, ramSize uint32) (*cpu, *RAM) {
+func newBenchmarkEnvironment(b *testing.B, ramSize uint32) (*CPU, *RAM) {
 	b.Helper()
 
 	ram := NewRAM(0, ramSize)
@@ -141,13 +141,9 @@ func newBenchmarkEnvironment(b *testing.B, ramSize uint32) (*cpu, *RAM) {
 		b.Fatalf("failed to seed PC vector: %v", err)
 	}
 
-	processor, err := NewCPU(bus)
+	cpu, err := NewCPU(bus)
 	if err != nil {
 		b.Fatalf("failed to create CPU: %v", err)
 	}
-	impl, ok := processor.(*cpu)
-	if !ok {
-		b.Fatalf("CPU implementation has unexpected type %T", processor)
-	}
-	return impl, ram
+	return cpu, ram
 }

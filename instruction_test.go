@@ -4,22 +4,18 @@ import (
 	"testing"
 )
 
-func newEnvironment(tb testing.TB) (*cpu, *RAM) {
+func newEnvironment(tb testing.TB) (*CPU, *RAM) {
 	tb.Helper()
 
 	memory := NewRAM(0, 1024*64)
 	bus := NewBus(memory)
 	memory.Write(Long, 0, 0x1000)
 	memory.Write(Long, 4, 0x2000)
-	processor, err := NewCPU(bus)
+	cpu, err := NewCPU(bus)
 	if err != nil {
 		tb.Fatalf("Failed to create CPU: %v", err)
 	}
-	impl, ok := processor.(*cpu)
-	if !ok {
-		tb.Fatalf("CPU implementation has unexpected type %T", processor)
-	}
-	return impl, memory
+	return cpu, memory
 }
 
 func assemble(tb testing.TB, instruction string) []byte {
@@ -31,31 +27,31 @@ func TestInstructions(t *testing.T) {
 	tests := []struct {
 		name string
 		src  string
-		prec func(cpu *cpu) bool
+		prec func(cpu *CPU) bool
 	}{
 		{"MoveAddressMnemonicWord", "MOVEA.W #1,A0\n",
-			func(c *cpu) bool {
+			func(c *CPU) bool {
 				return int16(c.Registers().A[0]) == 1
 			}},
 		{"MoveAddressAbsLong", "MOVEA.L $100,A0\n",
-			func(c *cpu) bool {
+			func(c *CPU) bool {
 				return int16(c.Registers().A[1]) == 0
 			}},
 		{"MoveAddressAbsWord", "MOVEA.L $100.w,A0\n",
-			func(c *cpu) bool {
+			func(c *CPU) bool {
 				return c.Registers().A[1] == uint32(0)
 			}},
 		{"MoveAddressAbsWord", "MOVEA.L $10(PC),A0\n",
-			func(c *cpu) bool {
+			func(c *CPU) bool {
 				return int16(c.Registers().A[1]) == 0
 			}},
 
 		{"MoveAddressMnemonicLong", "MOVEA.L #1,A1\n",
-			func(c *cpu) bool {
+			func(c *CPU) bool {
 				return int32(c.Registers().A[1]) == 1
 			}},
 		{"MoveAddressMnemonicLongFullWidth", "MOVEA.L #$12345678,A2\n",
-			func(c *cpu) bool {
+			func(c *CPU) bool {
 				return c.Registers().A[2] == 0x12345678
 			}},
 	}
@@ -82,7 +78,7 @@ func TestInstructions(t *testing.T) {
 				t.Fatalf("failed to execute opcode %04x: %v", opcode, err)
 			}
 			if !tt.prec(cpu) {
-				t.Fatalf("unexpected precondition after execuding '%s'\n%s", tt.src, cpu)
+				t.Fatalf("unexpected precondition after executing %q\n%s", tt.src, cpu.regs.String())
 			}
 		})
 	}

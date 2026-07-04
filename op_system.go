@@ -1,32 +1,40 @@
 package m68kemu
 
 func init() {
+	registerInstructions(
+		instructionRegistration{swapInstruction, 0x4840, 0xfff8, 0, constantCycles(4)},
+		instructionRegistration{extInstruction, 0x4880, 0xfff8, 0, constantCycles(4)},
+		instructionRegistration{extInstruction, 0x48c0, 0xfff8, 0, constantCycles(4)},
+	)
+	registerInstructions(instructionRegistration{tasInstruction, 0x4ac0, 0xffc0, eaMaskDataRegister | eaMaskIndirect | eaMaskPostIncrement |
+		eaMaskPreDecrement | eaMaskDisplacement | eaMaskIndex | eaMaskAbsoluteShort | eaMaskAbsoluteLong, clrTstCycles})
 
-	registerInstruction(swapInstruction, 0x4840, 0xfff8, 0, constantCycles(4))
-	registerInstruction(extInstruction, 0x4880, 0xfff8, 0, constantCycles(4))
-	registerInstruction(extInstruction, 0x48c0, 0xfff8, 0, constantCycles(4))
-	registerInstruction(tasInstruction, 0x4ac0, 0xffc0, eaMaskDataRegister|eaMaskIndirect|eaMaskPostIncrement|
-		eaMaskPreDecrement|eaMaskDisplacement|eaMaskIndex|eaMaskAbsoluteShort|eaMaskAbsoluteLong, clrTstCycleCalculator())
+	for _, exg := range []struct {
+		match uint16
+		cycle uint32
+	}{
+		{0xc140, 6},
+		{0xc148, 6},
+		{0xc188, 8},
+	} {
+		registerExgInstruction(exg.match, constantCycles(exg.cycle))
+	}
 
-	registerExgInstruction(0xc140, constantCycles(6))
-	registerExgInstruction(0xc148, constantCycles(6))
-	registerExgInstruction(0xc188, constantCycles(8))
-
-	registerInstruction(illegalInstruction, 0x4afc, 0xffff, 0, constantCycles(4))
-	registerInstruction(nop, 0x4e71, 0xffff, 0, constantCycles(4))
-
-	registerInstruction(trapv, 0x4e76, 0xffff, 0, constantCycles(4))
-	registerInstruction(resetInstruction, 0x4e70, 0xffff, 0, constantCycles(132))
-	registerInstruction(stop, 0x4e72, 0xffff, 0, constantCycles(4))
-	registerInstruction(movec68000, 0x4e7a, 0xffff, 0, constantCycles(4))
-	registerInstruction(movec68000, 0x4e7b, 0xffff, 0, constantCycles(4))
-
-	registerInstruction(oriToCcr, 0x003c, 0xffff, 0, constantCycles(20))
-	registerInstruction(oriToSr, 0x007c, 0xffff, 0, constantCycles(20))
-	registerInstruction(andiToCcr, 0x023c, 0xffff, 0, constantCycles(20))
-	registerInstruction(andiToSr, 0x027c, 0xffff, 0, constantCycles(20))
-	registerInstruction(eoriToCcr, 0x0a3c, 0xffff, 0, constantCycles(20))
-	registerInstruction(eoriToSr, 0x0a7c, 0xffff, 0, constantCycles(20))
+	registerInstructions(
+		instructionRegistration{illegalInstruction, 0x4afc, 0xffff, 0, constantCycles(4)},
+		instructionRegistration{nop, 0x4e71, 0xffff, 0, constantCycles(4)},
+		instructionRegistration{trapv, 0x4e76, 0xffff, 0, constantCycles(4)},
+		instructionRegistration{resetInstruction, 0x4e70, 0xffff, 0, constantCycles(132)},
+		instructionRegistration{stop, 0x4e72, 0xffff, 0, constantCycles(4)},
+		instructionRegistration{movec68000, 0x4e7a, 0xffff, 0, constantCycles(4)},
+		instructionRegistration{movec68000, 0x4e7b, 0xffff, 0, constantCycles(4)},
+		instructionRegistration{oriToCcr, 0x003c, 0xffff, 0, constantCycles(20)},
+		instructionRegistration{oriToSr, 0x007c, 0xffff, 0, constantCycles(20)},
+		instructionRegistration{andiToCcr, 0x023c, 0xffff, 0, constantCycles(20)},
+		instructionRegistration{andiToSr, 0x027c, 0xffff, 0, constantCycles(20)},
+		instructionRegistration{eoriToCcr, 0x0a3c, 0xffff, 0, constantCycles(20)},
+		instructionRegistration{eoriToSr, 0x0a7c, 0xffff, 0, constantCycles(20)},
+	)
 
 	const controlSourceMask = eaMaskDataRegister | eaMaskIndirect | eaMaskPostIncrement |
 		eaMaskPreDecrement | eaMaskDisplacement | eaMaskIndex |
@@ -36,21 +44,22 @@ func init() {
 		eaMaskPreDecrement | eaMaskDisplacement | eaMaskIndex |
 		eaMaskAbsoluteShort | eaMaskAbsoluteLong
 
-	registerInstruction(moveFromSr, 0x40c0, 0xffc0, controlDestinationMask, moveControlCycleCalculator(Word))
-	registerInstruction(moveToCcr, 0x44c0, 0xffc0, controlSourceMask, moveControlCycleCalculator(Byte))
-	registerInstruction(moveToSr, 0x46c0, 0xffc0, controlSourceMask, moveControlCycleCalculator(Word))
-
-	registerInstruction(rte, 0x4e73, 0xffff, 0, constantCycles(20))
-	registerInstruction(rtr, 0x4e77, 0xffff, 0, constantCycles(20))
+	registerInstructions(
+		instructionRegistration{moveFromSr, 0x40c0, 0xffc0, controlDestinationMask, moveControlCycles},
+		instructionRegistration{moveToCcr, 0x44c0, 0xffc0, controlSourceMask, moveControlCycles},
+		instructionRegistration{moveToSr, 0x46c0, 0xffc0, controlSourceMask, moveControlCycles},
+		instructionRegistration{rte, 0x4e73, 0xffff, 0, constantCycles(20)},
+		instructionRegistration{rtr, 0x4e77, 0xffff, 0, constantCycles(20)},
+	)
 }
 
 // MOVEC is not implemented on a plain 68000. The opcode traps immediately as
 // ILLEGAL before consuming the extension word that names the control register.
-func movec68000(cpu *cpu) error {
+func movec68000(cpu *CPU) error {
 	return cpu.exceptionWithCycles(XIllegal, exceptionCyclesIllegal)
 }
 
-func trapv(cpu *cpu) error {
+func trapv(cpu *CPU) error {
 	if cpu.regs.SR&srOverflow == 0 {
 		return nil
 	}
@@ -58,7 +67,7 @@ func trapv(cpu *cpu) error {
 	return cpu.exceptionWithCycles(7, exceptionCyclesTrapV)
 }
 
-func resetInstruction(cpu *cpu) error {
+func resetInstruction(cpu *CPU) error {
 	if ok, err := cpu.requireSupervisor(); err != nil || !ok {
 		return err
 	}
@@ -68,7 +77,7 @@ func resetInstruction(cpu *cpu) error {
 	return nil
 }
 
-func stop(cpu *cpu) error {
+func stop(cpu *CPU) error {
 	if ok, err := cpu.requireSupervisor(); err != nil || !ok {
 		return err
 	}
@@ -82,16 +91,14 @@ func stop(cpu *cpu) error {
 	return nil
 }
 
-func clrTstCycleCalculator() cycleCalculator {
-	return func(opcode uint16) uint32 {
-		size := operandSizeFromOpcode(opcode)
-		mode := (opcode >> 3) & 0x7
-		reg := opcode & 0x7
-		return 4 + eaAccessCycles(mode, reg, size)
-	}
+func clrTstCycles(opcode uint16) uint32 {
+	size := operandSizeFromOpcode(opcode)
+	mode := (opcode >> 3) & 0x7
+	reg := opcode & 0x7
+	return 4 + eaAccessCycles(mode, reg, size)
 }
 
-func logicalCcrOp(cpu *cpu, op func(uint16, uint16) uint16) error {
+func logicalCcrOp(cpu *CPU, op func(uint16, uint16) uint16) error {
 	imm, err := cpu.popPc(Word)
 	if err != nil {
 		return err
@@ -102,7 +109,7 @@ func logicalCcrOp(cpu *cpu, op func(uint16, uint16) uint16) error {
 	return nil
 }
 
-func logicalSrOp(cpu *cpu, op func(uint16, uint16) uint16) error {
+func logicalSrOp(cpu *CPU, op func(uint16, uint16) uint16) error {
 	if ok, err := cpu.requireSupervisor(); err != nil || !ok {
 		return err
 	}
@@ -114,22 +121,24 @@ func logicalSrOp(cpu *cpu, op func(uint16, uint16) uint16) error {
 	return nil
 }
 
-func oriToCcr(cpu *cpu) error  { return logicalCcrOp(cpu, func(a, b uint16) uint16 { return a | b }) }
-func oriToSr(cpu *cpu) error   { return logicalSrOp(cpu, func(a, b uint16) uint16 { return a | b }) }
-func andiToCcr(cpu *cpu) error { return logicalCcrOp(cpu, func(a, b uint16) uint16 { return a & b }) }
-func andiToSr(cpu *cpu) error  { return logicalSrOp(cpu, func(a, b uint16) uint16 { return a & b }) }
-func eoriToCcr(cpu *cpu) error { return logicalCcrOp(cpu, func(a, b uint16) uint16 { return a ^ b }) }
-func eoriToSr(cpu *cpu) error  { return logicalSrOp(cpu, func(a, b uint16) uint16 { return a ^ b }) }
+func oriToCcr(cpu *CPU) error  { return logicalCcrOp(cpu, func(a, b uint16) uint16 { return a | b }) }
+func oriToSr(cpu *CPU) error   { return logicalSrOp(cpu, func(a, b uint16) uint16 { return a | b }) }
+func andiToCcr(cpu *CPU) error { return logicalCcrOp(cpu, func(a, b uint16) uint16 { return a & b }) }
+func andiToSr(cpu *CPU) error  { return logicalSrOp(cpu, func(a, b uint16) uint16 { return a & b }) }
+func eoriToCcr(cpu *CPU) error { return logicalCcrOp(cpu, func(a, b uint16) uint16 { return a ^ b }) }
+func eoriToSr(cpu *CPU) error  { return logicalSrOp(cpu, func(a, b uint16) uint16 { return a ^ b }) }
 
-func moveControlCycleCalculator(size Size) cycleCalculator {
-	return func(opcode uint16) uint32 {
-		mode := (opcode >> 3) & 0x7
-		reg := opcode & 0x7
-		return 12 + eaAccessCycles(mode, reg, size)
+func moveControlCycles(opcode uint16) uint32 {
+	size := Word
+	if opcode&0xffc0 == 0x44c0 {
+		size = Byte
 	}
+	mode := (opcode >> 3) & 0x7
+	reg := opcode & 0x7
+	return 12 + eaAccessCycles(mode, reg, size)
 }
 
-func moveFromSr(cpu *cpu) error {
+func moveFromSr(cpu *CPU) error {
 	dst, err := cpu.ResolveSrcEA2(Word)
 	if err != nil {
 		return err
@@ -137,7 +146,7 @@ func moveFromSr(cpu *cpu) error {
 	return dst.write(uint32(cpu.regs.SR))
 }
 
-func moveToCcr(cpu *cpu) error {
+func moveToCcr(cpu *CPU) error {
 	src, err := cpu.ResolveSrcEA(Byte)
 	if err != nil {
 		return err
@@ -151,7 +160,7 @@ func moveToCcr(cpu *cpu) error {
 	return nil
 }
 
-func moveToSr(cpu *cpu) error {
+func moveToSr(cpu *CPU) error {
 	if ok, err := cpu.requireSupervisor(); err != nil || !ok {
 		return err
 	}
@@ -167,7 +176,7 @@ func moveToSr(cpu *cpu) error {
 	return nil
 }
 
-func rte(cpu *cpu) error {
+func rte(cpu *CPU) error {
 	if ok, err := cpu.requireSupervisor(); err != nil || !ok {
 		return err
 	}
@@ -187,7 +196,7 @@ func rte(cpu *cpu) error {
 	return nil
 }
 
-func rtr(cpu *cpu) error {
+func rtr(cpu *CPU) error {
 	ccr, err := cpu.pop(Word)
 	if err != nil {
 		return err
@@ -204,11 +213,11 @@ func rtr(cpu *cpu) error {
 
 // nop implements the 68000 NOP instruction (opcode 0x4E71).
 // It performs no operation and leaves all condition codes unchanged.
-func nop(cpu *cpu) error {
+func nop(cpu *CPU) error {
 	return nil
 }
 
-func swapInstruction(cpu *cpu) error {
+func swapInstruction(cpu *CPU) error {
 	reg := dy(cpu)
 	value := *reg
 	result := (value << 16) | ((value >> 16) & 0xffff)
@@ -218,7 +227,7 @@ func swapInstruction(cpu *cpu) error {
 	return nil
 }
 
-func extInstruction(cpu *cpu) error {
+func extInstruction(cpu *CPU) error {
 	opcode := cpu.regs.IR
 	sizeBits := (opcode >> 6) & 0x3
 	dst := dy(cpu)
@@ -246,7 +255,7 @@ func extInstruction(cpu *cpu) error {
 	return nil
 }
 
-func exgInstruction(cpu *cpu) error {
+func exgInstruction(cpu *CPU) error {
 	opcode := cpu.regs.IR
 	rx := y(cpu.regs.IR)
 	ry := x(cpu.regs.IR)
@@ -277,7 +286,7 @@ func exgInstruction(cpu *cpu) error {
 	return nil
 }
 
-func tasInstruction(cpu *cpu) error {
+func tasInstruction(cpu *CPU) error {
 	dst, err := cpu.ResolveSrcEA(Byte)
 	if err != nil {
 		return err
@@ -305,16 +314,16 @@ func registerExgInstruction(match uint16, calc cycleCalculator) {
 	}
 }
 
-func illegalInstruction(cpu *cpu) error {
+func illegalInstruction(cpu *CPU) error {
 	return cpu.exceptionWithCycles(XIllegal, exceptionCyclesIllegal)
 }
 
 func init() {
-	registerInstruction(trap, 0x4e40, 0xfff0, 0, constantCycles(34))
+	registerInstructions(instructionRegistration{trap, 0x4e40, 0xfff0, 0, constantCycles(34)})
 }
 
 // trap handles TRAP #n instructions by stacking the exception frame and
 // loading the handler address from the vector table.
-func trap(cpu *cpu) error {
+func trap(cpu *CPU) error {
 	return cpu.trapException(XTrap + uint32(cpu.regs.IR&0x000f))
 }

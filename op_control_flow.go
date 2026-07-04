@@ -1,24 +1,17 @@
 package m68kemu
 
 func init() {
-	// BRA/Bcc with 8- or 16-bit displacement (no 32-bit on 68000)
-	for cond := range uint16(16) {
-		match := uint16(0x6000) | (cond << 8)
-		registerInstruction(branch, match, 0xff00, 0, constantCycles(10))
-	}
+	registerConditions(
+		conditionRegistration{branch, 0x6000, 0xff00, constantCycles(10)},
+		conditionRegistration{dbcc, 0x50c8, 0xfff8, constantCycles(12)},
+	)
 
-	for cond := range uint16(16) {
-		match := uint16(0x50c8) | (cond << 8)
-		registerInstruction(dbcc, match, 0xfff8, 0, constantCycles(12))
-	}
-
-	// Scc
-	registerInstruction(scc, 0x50c0, 0xf0c0, eaMaskDataRegister|eaMaskIndirect|
-		eaMaskPostIncrement|eaMaskPreDecrement|eaMaskDisplacement|eaMaskIndex|
-		eaMaskAbsoluteShort|eaMaskAbsoluteLong, sccCycleCalculator())
+	registerInstructions(instructionRegistration{scc, 0x50c0, 0xf0c0, eaMaskDataRegister | eaMaskIndirect |
+		eaMaskPostIncrement | eaMaskPreDecrement | eaMaskDisplacement | eaMaskIndex |
+		eaMaskAbsoluteShort | eaMaskAbsoluteLong, sccCycles})
 }
 
-func branch(cpu *cpu) error {
+func branch(cpu *CPU) error {
 	cond := (cpu.regs.IR >> 8) & 0xf
 	displacement := int32(int8(cpu.regs.IR))
 	basePC := cpu.regs.PC
@@ -44,7 +37,7 @@ func branch(cpu *cpu) error {
 	return nil
 }
 
-func dbcc(cpu *cpu) error {
+func dbcc(cpu *CPU) error {
 	cond := (cpu.regs.IR >> 8) & 0xf
 	basePC := cpu.regs.PC
 
@@ -68,7 +61,7 @@ func dbcc(cpu *cpu) error {
 	return nil
 }
 
-func conditionTrue(cpu *cpu, cond uint16) bool {
+func conditionTrue(cpu *CPU, cond uint16) bool {
 	switch cond {
 	case 0x0: // True (BRA/BSR)
 		return true
@@ -107,7 +100,7 @@ func conditionTrue(cpu *cpu, cond uint16) bool {
 	return false
 }
 
-func scc(cpu *cpu) error {
+func scc(cpu *CPU) error {
 	cond := (cpu.regs.IR >> 8) & 0xf
 
 	dst, err := cpu.ResolveSrcEA(Byte)
@@ -122,29 +115,29 @@ func scc(cpu *cpu) error {
 	return dst.write(0x00)
 }
 
-func sccCycleCalculator() cycleCalculator {
-	return func(opcode uint16) uint32 {
-		mode := (opcode >> 3) & 0x7
-		reg := opcode & 0x7
-		if mode == 0 {
-			return 6
-		}
-		return 8 + eaAccessCycles(mode, reg, Byte)
+func sccCycles(opcode uint16) uint32 {
+	mode := (opcode >> 3) & 0x7
+	reg := opcode & 0x7
+	if mode == 0 {
+		return 6
 	}
+	return 8 + eaAccessCycles(mode, reg, Byte)
 }
 
 // Jump and link-related instructions.
 func init() {
 	const controlAlterableMask = eaMaskIndirect | eaMaskDisplacement | eaMaskIndex | eaMaskAbsoluteShort | eaMaskAbsoluteLong | eaMaskPCDisplacement | eaMaskPCIndex
 
-	registerInstruction(jmp, 0x4ec0, 0xffc0, controlAlterableMask, jmpCycleCalculator())
-	registerInstruction(linkInstruction, 0x4e50, 0xfff8, 0, constantCycles(16))
-	registerInstruction(unlkInstruction, 0x4e58, 0xfff8, 0, constantCycles(12))
+	registerInstructions(
+		instructionRegistration{jmp, 0x4ec0, 0xffc0, controlAlterableMask, jmpCycles},
+		instructionRegistration{linkInstruction, 0x4e50, 0xfff8, 0, constantCycles(16)},
+		instructionRegistration{unlkInstruction, 0x4e58, 0xfff8, 0, constantCycles(12)},
+		instructionRegistration{chkInstruction, 0x4180, 0xf1c0, chkEAMask, chkCycles},
+	)
 	registerMoveUsp()
-	registerInstruction(chkInstruction, 0x4180, 0xf1c0, chkEAMask, chkCycleCalculator())
 }
 
-func jmp(cpu *cpu) error {
+func jmp(cpu *CPU) error {
 	target, err := cpu.ResolveSrcEA(Long)
 	if err != nil {
 		return err
@@ -154,12 +147,10 @@ func jmp(cpu *cpu) error {
 	return nil
 }
 
-func jmpCycleCalculator() cycleCalculator {
-	return func(opcode uint16) uint32 {
-		mode := (opcode >> 3) & 0x7
-		reg := opcode & 0x7
-		return 4 + eaAccessCycles(mode, reg, Long)
-	}
+func jmpCycles(opcode uint16) uint32 {
+	mode := (opcode >> 3) & 0x7
+	reg := opcode & 0x7
+	return 4 + eaAccessCycles(mode, reg, Long)
 }
 
 func registerMoveUsp() {
@@ -173,7 +164,7 @@ func registerMoveUsp() {
 	}
 }
 
-func moveToUsp(cpu *cpu) error {
+func moveToUsp(cpu *CPU) error {
 	if ok, err := cpu.requireSupervisor(); err != nil || !ok {
 		return err
 	}
@@ -182,7 +173,7 @@ func moveToUsp(cpu *cpu) error {
 	return nil
 }
 
-func moveFromUsp(cpu *cpu) error {
+func moveFromUsp(cpu *CPU) error {
 	if ok, err := cpu.requireSupervisor(); err != nil || !ok {
 		return err
 	}
@@ -191,7 +182,7 @@ func moveFromUsp(cpu *cpu) error {
 	return nil
 }
 
-func linkInstruction(cpu *cpu) error {
+func linkInstruction(cpu *CPU) error {
 	reg := cpu.regs.IR & 0x7
 	displacement, err := cpu.popPc(Word)
 	if err != nil {
@@ -207,7 +198,7 @@ func linkInstruction(cpu *cpu) error {
 	return nil
 }
 
-func unlkInstruction(cpu *cpu) error {
+func unlkInstruction(cpu *CPU) error {
 	reg := cpu.regs.IR & 0x7
 	cpu.regs.A[7] = cpu.regs.A[reg]
 	value, err := cpu.pop(Long)
@@ -229,7 +220,7 @@ const chkEAMask = eaMaskDataRegister |
 	eaMaskPCDisplacement |
 	eaMaskPCIndex
 
-func chkInstruction(cpu *cpu) error {
+func chkInstruction(cpu *CPU) error {
 	src, err := cpu.ResolveSrcEA(Word)
 	if err != nil {
 		return err
@@ -261,12 +252,10 @@ func chkInstruction(cpu *cpu) error {
 	return nil
 }
 
-func chkCycleCalculator() cycleCalculator {
-	return func(opcode uint16) uint32 {
-		mode := (opcode >> 3) & 0x7
-		reg := opcode & 0x7
-		return 10 + eaAccessCycles(mode, reg, Word)
-	}
+func chkCycles(opcode uint16) uint32 {
+	mode := (opcode >> 3) & 0x7
+	reg := opcode & 0x7
+	return 10 + eaAccessCycles(mode, reg, Word)
 }
 
 func chkExceptionCycles(opcode uint16) uint32 {
@@ -279,11 +268,13 @@ func chkExceptionCycles(opcode uint16) uint32 {
 func init() {
 	const controlAlterableMask = eaMaskIndirect | eaMaskDisplacement | eaMaskIndex | eaMaskAbsoluteShort | eaMaskAbsoluteLong | eaMaskPCDisplacement | eaMaskPCIndex
 
-	registerInstruction(jsr, 0x4e80, 0xffc0, controlAlterableMask, jsrCycleCalculator())
-	registerInstruction(rts, 0x4e75, 0xffff, 0, constantCycles(16))
+	registerInstructions(
+		instructionRegistration{jsr, 0x4e80, 0xffc0, controlAlterableMask, jsrCycles},
+		instructionRegistration{rts, 0x4e75, 0xffff, 0, constantCycles(16)},
+	)
 }
 
-func jsr(cpu *cpu) error {
+func jsr(cpu *CPU) error {
 	target, err := cpu.ResolveSrcEA(Long)
 	if err != nil {
 		return err
@@ -298,7 +289,7 @@ func jsr(cpu *cpu) error {
 	return nil
 }
 
-func rts(cpu *cpu) error {
+func rts(cpu *CPU) error {
 	addr, err := cpu.pop(Long)
 	if err != nil {
 		return err
@@ -307,10 +298,8 @@ func rts(cpu *cpu) error {
 	return nil
 }
 
-func jsrCycleCalculator() cycleCalculator {
-	return func(opcode uint16) uint32 {
-		mode := (opcode >> 3) & 0x7
-		reg := opcode & 0x7
-		return 16 + eaAccessCycles(mode, reg, Long)
-	}
+func jsrCycles(opcode uint16) uint32 {
+	mode := (opcode >> 3) & 0x7
+	reg := opcode & 0x7
+	return 16 + eaAccessCycles(mode, reg, Long)
 }

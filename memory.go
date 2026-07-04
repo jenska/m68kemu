@@ -14,13 +14,6 @@ func (ram *RAM) Contains(address uint32) bool {
 	return address >= ram.offset && address < ram.offset+uint32(len(ram.mem))
 }
 
-func (ram *RAM) AddressRange() (uint32, uint32) {
-	if len(ram.mem) == 0 {
-		return ram.offset, ram.offset
-	}
-	return ram.offset, ram.offset + uint32(len(ram.mem)) - 1
-}
-
 func (ram *RAM) rangeCheck(address uint32, s Size) bool {
 	end := address + uint32(s) - 1
 	return address >= ram.offset && end < ram.offset+uint32(len(ram.mem))
@@ -41,10 +34,6 @@ func (ram *RAM) Read(s Size, address uint32) (uint32, error) {
 		return uint32(ram.mem[idx])<<24 | uint32(ram.mem[idx+1])<<16 | uint32(ram.mem[idx+2])<<8 | uint32(ram.mem[idx+3]), nil
 	}
 	return 0, fmt.Errorf("unknown size %d", s)
-}
-
-func (ram *RAM) Peek(s Size, address uint32) (uint32, error) {
-	return ram.Read(s, address)
 }
 
 func (ram *RAM) Write(s Size, address uint32, value uint32) error {
