@@ -112,16 +112,14 @@ func assembleProgram(tb testing.TB, source string) assembledProgram {
 
 func expectBusError(t *testing.T, err error) {
 	t.Helper()
-	var be BusError
-	if err == nil || !errors.As(err, &be) {
+	if _, ok := errors.AsType[BusError](err); !ok {
 		t.Fatalf("expected BusError, got %v", err)
 	}
 }
 
 func expectAddressError(t *testing.T, err error) {
 	t.Helper()
-	var ae AddressError
-	if err == nil || !errors.As(err, &ae) {
+	if _, ok := errors.AsType[AddressError](err); !ok {
 		t.Fatalf("expected BusError, got %v", err)
 	}
 }

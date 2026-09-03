@@ -83,7 +83,3 @@ func (ic *InterruptController) Pending(mask uint16) (uint8, uint32, bool, bool) 
 
 	return 0, 0, false, false
 }
-
-func (ic *InterruptController) HasPending(mask uint16) bool {
-	return ic.maxLevel > uint8((mask&srInterruptMask)>>8)
-}

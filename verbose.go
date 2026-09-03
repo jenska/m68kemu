@@ -3,12 +3,11 @@ package m68kemu
 import (
 	"fmt"
 	"io"
+	"slices"
 	"strings"
 
 	"github.com/jenska/m68kdasm"
 )
-
-const maxDisassemblyBytes = 16
 
 // DisassemblyLine captures one decoded instruction plus the backing bytes.
 type DisassemblyLine struct {
@@ -110,12 +109,7 @@ func DisassembleInstruction(bus AddressBus, address uint32) (DisassemblyLine, er
 	if err != nil {
 		return DisassemblyLine{}, err
 	}
-
-	return DisassemblyLine{
-		Address:  inst.Address,
-		Bytes:    append([]byte(nil), inst.Bytes...),
-		Assembly: inst.Assembly(),
-	}, nil
+	return lineFromInstruction(inst), nil
 }
 
 // DisassembleMemoryRange decodes instructions sequentially until the range is covered.
@@ -150,6 +144,16 @@ func DisassembleMemoryRange(bus AddressBus, start uint32, length uint32) ([]Disa
 	return lines, nil
 }
 
+func lineFromInstruction(inst *m68kdasm.Instruction) DisassemblyLine {
+	return DisassemblyLine{
+		Address:  inst.Address,
+		Bytes:    slices.Clone(inst.Bytes),
+		Assembly: inst.Assembly(),
+	}
+}
+
+// decodeInstruction decodes the instruction at address by reading through the
+// bus (which must support Peek).
 func decodeInstruction(bus AddressBus, address uint32) (*m68kdasm.Instruction, error) {
 	peeker, ok := bus.(interface {
 		Peek(Size, uint32) (uint32, error)
@@ -158,26 +162,33 @@ func decodeInstruction(bus AddressBus, address uint32) (*m68kdasm.Instruction, e
 		return nil, fmt.Errorf("address bus does not support Peek")
 	}
 
-	address &= 0xffffff
-	data := make([]byte, 0, maxDisassemblyBytes)
-	for i := range uint32(maxDisassemblyBytes) {
-		value, err := peeker.Peek(Byte, (address+i)&0xffffff)
-		if err != nil {
-			break
+	read := func(addr uint32, p []byte) (int, error) {
+		for i := range p {
+			value, err := peeker.Peek(Byte, (addr+uint32(i))&0xffffff)
+			if err != nil {
+				return i, err
+			}
+			p[i] = byte(value)
 		}
-		data = append(data, byte(value))
+		return len(p), nil
 	}
+	return m68kdasm.DecodeFunc(read, address&0xffffff)
+}
 
-	if len(data) < 2 {
-		return nil, fmt.Errorf("insufficient data for opcode at address %08x", address)
+// decodeAt prefers decoding the supplied raw bytes and falls back to reading
+// through the bus when they are absent or undecodable.
+func decodeAt(bus AddressBus, address uint32, raw []byte) (*m68kdasm.Instruction, error) {
+	if len(raw) >= 2 {
+		if inst, err := m68kdasm.Decode(slices.Clone(raw), address); err == nil {
+			return inst, nil
+		}
 	}
-
-	return m68kdasm.Decode(data, address)
+	return decodeInstruction(bus, address)
 }
 
 func traceInstructionBytes(bus AddressBus, address uint32, opcode uint16) []byte {
 	if inst, err := decodeInstruction(bus, address); err == nil && len(inst.Bytes) != 0 {
-		return append([]byte(nil), inst.Bytes...)
+		return slices.Clone(inst.Bytes)
 	}
 	return []byte{byte(opcode >> 8), byte(opcode)}
 }
@@ -186,30 +197,20 @@ func traceDisassemblyLine(bus AddressBus, info TraceInfo) (DisassemblyLine, erro
 	if info.Mnemonic != "" {
 		return DisassemblyLine{
 			Address:  info.PC,
-			Bytes:    append([]byte(nil), info.Bytes...),
+			Bytes:    slices.Clone(info.Bytes),
 			Assembly: info.Mnemonic,
 		}, nil
 	}
-	if len(info.Bytes) >= 2 {
-		if inst, err := m68kdasm.Decode(append([]byte(nil), info.Bytes...), info.PC); err == nil {
-			return DisassemblyLine{
-				Address:  inst.Address,
-				Bytes:    append([]byte(nil), inst.Bytes...),
-				Assembly: inst.Assembly(),
-			}, nil
-		}
+	inst, err := decodeAt(bus, info.PC, info.Bytes)
+	if err != nil {
+		return DisassemblyLine{}, err
 	}
-	return DisassembleInstruction(bus, info.PC)
+	return lineFromInstruction(inst), nil
 }
 
 func traceInstructionMnemonic(bus AddressBus, address uint32, bytes []byte) string {
-	if len(bytes) >= 2 {
-		if inst, err := m68kdasm.Decode(append([]byte(nil), bytes...), address); err == nil {
-			return inst.Assembly()
-		}
-	}
-	if line, err := DisassembleInstruction(bus, address); err == nil {
-		return line.Assembly
+	if inst, err := decodeAt(bus, address, bytes); err == nil {
+		return inst.Assembly()
 	}
 	return ""
 }

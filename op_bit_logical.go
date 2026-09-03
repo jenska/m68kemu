@@ -110,10 +110,6 @@ func logicalImmediateCycleCalculator() cycleCalculator {
 	}
 }
 
-func logicalUpdateFlags(cpu *cpu, result uint32, size Size) {
-	updateNZClearVC(cpu, result, size)
-}
-
 func andInstruction(cpu *cpu) error {
 	opmode := (cpu.regs.IR >> 6) & 0x7
 	size := operandSizeFromOpmode(opmode)
@@ -133,7 +129,7 @@ func andInstruction(cpu *cpu) error {
 		if err := dst.write(result); err != nil {
 			return err
 		}
-		logicalUpdateFlags(cpu, result, size)
+		updateNZClearVC(cpu, result, size)
 		return nil
 	}
 
@@ -150,7 +146,7 @@ func andInstruction(cpu *cpu) error {
 	result := (srcVal & (*dst & size.mask())) & size.mask()
 	*dst = (*dst & ^size.mask()) | result
 
-	logicalUpdateFlags(cpu, result, size)
+	updateNZClearVC(cpu, result, size)
 	return nil
 }
 
@@ -173,7 +169,7 @@ func orInstruction(cpu *cpu) error {
 		if err := dst.write(result); err != nil {
 			return err
 		}
-		logicalUpdateFlags(cpu, result, size)
+		updateNZClearVC(cpu, result, size)
 		return nil
 	}
 
@@ -190,7 +186,7 @@ func orInstruction(cpu *cpu) error {
 	result := (srcVal | (*dst & size.mask())) & size.mask()
 	*dst = (*dst & ^size.mask()) | result
 
-	logicalUpdateFlags(cpu, result, size)
+	updateNZClearVC(cpu, result, size)
 	return nil
 }
 
@@ -212,7 +208,7 @@ func eorInstruction(cpu *cpu) error {
 		return err
 	}
 
-	logicalUpdateFlags(cpu, result, size)
+	updateNZClearVC(cpu, result, size)
 	return nil
 }
 
@@ -243,7 +239,7 @@ func logicalImmediate(cpu *cpu, op func(uint32, uint32) uint32) error {
 		return err
 	}
 
-	logicalUpdateFlags(cpu, result, size)
+	updateNZClearVC(cpu, result, size)
 	return nil
 }
 
@@ -276,7 +272,7 @@ func notInstruction(cpu *cpu) error {
 		return err
 	}
 
-	logicalUpdateFlags(cpu, result, size)
+	updateNZClearVC(cpu, result, size)
 	return nil
 }
 

@@ -187,8 +187,8 @@ func TestBusLongWriteReportsSecondCycleBusError(t *testing.T) {
 	err := bus.Write(Long, 0x0002, 0xaabbccdd)
 	expectBusError(t, err)
 
-	var be BusError
-	if !errors.As(err, &be) {
+	be, ok := errors.AsType[BusError](err)
+	if !ok {
 		t.Fatalf("expected BusError, got %v", err)
 	}
 	if uint32(be) != 0x0004 {
