@@ -86,11 +86,8 @@ func TestBusAddDeviceAndMappedHelpers(t *testing.T) {
 	}
 	if _, err := peekable.Peek(Byte, 0x0fff); err == nil {
 		t.Fatalf("Peek below range unexpectedly succeeded")
-	} else {
-		var be BusError
-		if !errors.As(err, &be) {
-			t.Fatalf("Peek below range error = %v, want BusError", err)
-		}
+	} else if _, ok := errors.AsType[BusError](err); !ok {
+		t.Fatalf("Peek below range error = %v, want BusError", err)
 	}
 
 	if err := mapped.Write(Byte, 0x1100, 0x55); err == nil {

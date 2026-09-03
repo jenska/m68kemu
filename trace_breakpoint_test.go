@@ -39,8 +39,8 @@ func TestExecuteBreakpointHaltsStep(t *testing.T) {
 	cpu.AddBreakpoint(Breakpoint{Address: cpu.regs.PC, OnExecute: true, Halt: true})
 
 	err := cpu.Step()
-	var hit BreakpointHit
-	if !errors.As(err, &hit) {
+	hit, ok := errors.AsType[BreakpointHit](err)
+	if !ok {
 		t.Fatalf("expected breakpoint hit, got %v", err)
 	}
 
@@ -59,8 +59,8 @@ func TestWatchpointFiresOnWrite(t *testing.T) {
 	cpu.AddBreakpoint(Breakpoint{Address: target, OnWrite: true, Halt: true})
 
 	err := cpu.write(Byte, target, 0xAA)
-	var hit BreakpointHit
-	if !errors.As(err, &hit) {
+	hit, ok := errors.AsType[BreakpointHit](err)
+	if !ok {
 		t.Fatalf("expected breakpoint hit on write, got %v", err)
 	}
 	if hit.Type != BreakpointWrite {

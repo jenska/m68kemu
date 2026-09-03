@@ -322,10 +322,20 @@ type (
 
 	//  CPU core
 	cpu struct {
-		regs          Registers
-		cycles        uint64
-		bus           AddressBus
-		busFast       *Bus
+		regs    Registers
+		cycles  uint64
+		bus     AddressBus
+		busFast *Bus
+		// fastFetch caches the single-RAM instruction-fetch fast path. It is
+		// valid only while fastFetchOK is true (fast RAM present, no
+		// breakpoints, no active tracing) and is rebuilt by refreshRunModes.
+		fastFetchMem    []byte
+		fastFetchOffset uint32
+		fastFetchOK     bool
+		// debugActive is set whenever any per-instruction debug hook is live
+		// (breakpoints, pre-trace, or instruction/bus tracing) so executeNext
+		// can skip all of that bookkeeping on the common path.
+		debugActive   bool
 		trap          TraceCallback
 		preTrap       PreTraceCallback
 		exceptionTrap ExceptionCallback
@@ -699,6 +709,26 @@ func (cpu *cpu) SetInterruptTracer(cb InterruptCallback) {
 func (cpu *cpu) refreshDebugModes() {
 	cpu.traceInstructions = cpu.trap != nil || len(cpu.history) != 0
 	cpu.traceBus = cpu.busTrap != nil || len(cpu.history) != 0 || cpu.collectStepBus
+	cpu.refreshRunModes()
+}
+
+// refreshRunModes rebuilds the cached execution fast paths (instruction-fetch
+// shortcut and the debug-hook flag). It must be called whenever the bus
+// topology, breakpoints, or tracing state changes; RunCycles/RunUntil/Step also
+// call it on entry to pick up topology changes.
+func (cpu *cpu) refreshRunModes() {
+	cpu.debugActive = cpu.breakpoints != nil || cpu.preTrap != nil ||
+		cpu.traceInstructions || cpu.traceBus
+
+	ram := cpu.fastRAMDevice()
+	cpu.fastFetchOK = ram != nil && cpu.breakpoints == nil &&
+		!cpu.traceInstructions && !cpu.traceBus
+	if cpu.fastFetchOK {
+		cpu.fastFetchMem = ram.mem
+		cpu.fastFetchOffset = ram.offset
+	} else {
+		cpu.fastFetchMem = nil
+	}
 }
 
 func (cpu *cpu) requireSupervisor() (bool, error) {
@@ -728,6 +758,7 @@ func (cpu *cpu) AddBreakpoint(bp Breakpoint) {
 		cpu.breakpoints = make(map[uint32]Breakpoint)
 	}
 	cpu.breakpoints[bp.Address] = bp
+	cpu.refreshRunModes()
 }
 
 func (cpu *cpu) SetHistoryLimit(limit int) {
@@ -764,7 +795,7 @@ func (cpu *cpu) History() []HistoryEntry {
 		start += len(cpu.history)
 	}
 
-	for i := 0; i < cpu.historyCount; i++ {
+	for i := range cpu.historyCount {
 		index := (start + i) % len(cpu.history)
 		result = append(result, cloneHistoryEntry(cpu.history[index]))
 	}
@@ -841,17 +872,24 @@ func (cpu *cpu) opcodeException(vector uint32, instructionPC uint32) error {
 // callers to execute single instructions directly through the API.
 func (cpu *cpu) executeInstruction(opcode uint16) error {
 	instructionPC := cpu.consumeOpcodePC()
-	startedContext := false
-	if !cpu.currentOpcodeValid {
-		cpu.beginInstructionContext(instructionPC)
-		startedContext = true
+	if cpu.currentOpcodeValid {
+		return cpu.dispatchInstruction(opcode, instructionPC)
 	}
-	if startedContext {
-		defer cpu.endInstructionContext()
-	}
+	return cpu.executeInstructionWithContext(opcode, instructionPC)
+}
 
+// executeInstructionWithContext is the slow path for callers (tests, the public
+// API) that invoke an opcode without an active instruction context.
+func (cpu *cpu) executeInstructionWithContext(opcode uint16, instructionPC uint32) error {
+	cpu.beginInstructionContext(instructionPC)
+	defer cpu.endInstructionContext()
+	return cpu.dispatchInstruction(opcode, instructionPC)
+}
+
+// dispatchInstruction runs the opcode handler assuming the instruction context
+// is already set up by the caller.
+func (cpu *cpu) dispatchInstruction(opcode uint16, instructionPC uint32) error {
 	cpu.regs.IR = opcode
-
 	cpu.addCycles(opcodeCycleTable[opcode])
 
 	handler := opcodeTable[opcode]
@@ -1080,10 +1118,13 @@ func (cpu *cpu) interrupt(level uint8, vector uint32, autoVector bool) error {
 }
 
 func (cpu *cpu) checkInterrupts() error {
-	if cpu.interrupts == nil || !cpu.interrupts.HasPending(cpu.regs.SR) {
+	if cpu.interrupts == nil || cpu.interrupts.maxLevel <= uint8((cpu.regs.SR&srInterruptMask)>>8) {
 		return nil
 	}
+	return cpu.serviceInterrupt()
+}
 
+func (cpu *cpu) serviceInterrupt() error {
 	level, vector, autoVector, ok := cpu.interrupts.Pending(cpu.regs.SR)
 	if !ok {
 		return nil
@@ -1111,9 +1152,37 @@ func (cpu *cpu) handleFaultError(err error, currentInstruction bool) error {
 	}
 }
 
-// executeNext runs one whole instruction boundary: fetch, optional pre-trace,
-// execute, post-instruction interrupt check, and final trace dispatch.
+// executeNext runs one whole instruction boundary: fetch, execute, and the
+// post-instruction interrupt check. Debug bookkeeping (breakpoints, tracing) is
+// handled by executeNextDebug, taken only while a debug hook is live.
 func (cpu *cpu) executeNext() error {
+	if cpu.debugActive {
+		return cpu.executeNextDebug()
+	}
+
+	cpu.beginInstructionContext(cpu.regs.PC)
+
+	opcode, err := cpu.fetchOpcode()
+	if err != nil {
+		cpu.endInstructionContext()
+		return cpu.handleFaultError(err, false)
+	}
+	if err := cpu.dispatchInstruction(opcode, cpu.consumeOpcodePC()); err != nil {
+		cpu.endInstructionContext()
+		return err
+	}
+	if err := cpu.checkInterrupts(); err != nil {
+		cpu.endInstructionContext()
+		return err
+	}
+	cpu.endInstructionContext()
+	return nil
+}
+
+// executeNextDebug is executeNext with the full pre/post instruction debug
+// pipeline: execute breakpoints, register/cycle snapshots, pre-trace, and the
+// final trace dispatch.
+func (cpu *cpu) executeNextDebug() error {
 	if cpu.breakpoints != nil {
 		if err := cpu.checkExecuteBreakpoint(cpu.regs.PC); err != nil {
 			return err
@@ -1139,7 +1208,7 @@ func (cpu *cpu) executeNext() error {
 	if cpu.preTrap != nil {
 		cpu.sendPreTrace(pc, opcode, beforeRegs)
 	}
-	if err := cpu.executeInstruction(opcode); err != nil {
+	if err := cpu.dispatchInstruction(opcode, cpu.consumeOpcodePC()); err != nil {
 		cpu.endInstructionContext()
 		return err
 	}
@@ -1156,6 +1225,7 @@ func (cpu *cpu) executeNext() error {
 
 // Step fetches the next opcode at the program counter and executes it.
 func (cpu *cpu) Step() error {
+	cpu.refreshRunModes()
 	if cpu.stepExceptionValid || cpu.stepInterruptValid || len(cpu.traceBytes) != 0 || len(cpu.stepBusAccesses) != 0 {
 		cpu.resetStepDebugState()
 	}
@@ -1176,6 +1246,7 @@ func (cpu *cpu) Step() error {
 // have elapsed. Execution may exceed the budget when the final instruction's
 // cost pushes the cycle count past the requested amount.
 func (cpu *cpu) RunCycles(budget uint64) error {
+	cpu.refreshRunModes()
 	start := cpu.cycles
 	target := start + budget
 
@@ -1558,80 +1629,46 @@ func (cpu *cpu) popPc(s Size) (uint32, error) {
 	}
 }
 
-// readProgramFastWord keeps the single-RAM fast path active while still
-// reporting instruction fetches through the debug bus hook.
+// readProgramFastWord serves an instruction word from the single-RAM fast path.
+// It reports ok=false whenever that path is unavailable (breakpoints, active
+// tracing, or a non-trivial bus topology) so the caller falls back to the full
+// bus, which handles those cases.
 func (cpu *cpu) readProgramFastWord(address uint32) (uint16, bool, error) {
-	if cpu.breakpoints != nil {
+	if !cpu.fastFetchOK {
 		return 0, false, nil
 	}
-
-	ram := cpu.fastRAMDevice()
-	if ram == nil {
-		return 0, false, nil
-	}
-
 	address &= 0xffffff
 	if address&1 != 0 {
 		return 0, true, AddressError(address)
 	}
-	if address < ram.offset {
+	mem := cpu.fastFetchMem
+	idx := address - cpu.fastFetchOffset
+	if address < cpu.fastFetchOffset || idx+1 >= uint32(len(mem)) {
 		return 0, true, BusError(address)
 	}
-
-	idx := address - ram.offset
-	memLen := uint32(len(ram.mem))
-	if idx+1 >= memLen {
-		return 0, true, BusError(address)
-	}
-
-	value := uint16(ram.mem[idx])<<8 | uint16(ram.mem[idx+1])
-	if cpu.traceInstructions || cpu.traceBus {
-		ctx := accessContext{functionCode: cpu.programFunctionCode()}
-		if cpu.shouldTraceBusAccess(ctx) {
-			cpu.traceBusAccess(Word, address, uint32(value), ctx)
-		}
-	}
-	return value, true, nil
+	return uint16(mem[idx])<<8 | uint16(mem[idx+1]), true, nil
 }
 
 func (cpu *cpu) readProgramFastLong(address uint32) (uint32, bool, error) {
-	if cpu.breakpoints != nil {
+	if !cpu.fastFetchOK {
 		return 0, false, nil
 	}
-
-	ram := cpu.fastRAMDevice()
-	if ram == nil {
-		return 0, false, nil
-	}
-
 	address &= 0xffffff
 	if address&1 != 0 {
 		return 0, true, AddressError(address)
 	}
-	if address < ram.offset {
+	mem := cpu.fastFetchMem
+	idx := address - cpu.fastFetchOffset
+	if address < cpu.fastFetchOffset || idx+1 >= uint32(len(mem)) {
 		return 0, true, BusError(address)
 	}
-
-	idx := address - ram.offset
-	memLen := uint32(len(ram.mem))
-	if idx+1 >= memLen {
-		return 0, true, BusError(address)
-	}
-	if idx+3 >= memLen {
+	if idx+3 >= uint32(len(mem)) {
 		return 0, true, BusError((address + uint32(Word)) & 0xffffff)
 	}
-
-	value := uint32(ram.mem[idx])<<24 |
-		uint32(ram.mem[idx+1])<<16 |
-		uint32(ram.mem[idx+2])<<8 |
-		uint32(ram.mem[idx+3])
-	if cpu.traceInstructions || cpu.traceBus {
-		ctx := accessContext{functionCode: cpu.programFunctionCode()}
-		if cpu.shouldTraceBusAccess(ctx) {
-			cpu.traceBusAccess(Long, address, value, ctx)
-		}
-	}
-	return value, true, nil
+	return uint32(mem[idx])<<24 |
+		uint32(mem[idx+1])<<16 |
+		uint32(mem[idx+2])<<8 |
+		uint32(mem[idx+3]), true, nil
 }
 
 func (cpu *cpu) recordProgramFault(address uint32, err error) {
