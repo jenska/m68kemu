@@ -72,3 +72,46 @@ func TestCycleSchedulerFiresEventsAtScheduledTimeWithinLargeAdvance(t *testing.T
 		t.Fatalf("events fired at %v, want [4 5]", fired)
 	}
 }
+
+func TestCycleSchedulerClockRatioScalesAndCarries(t *testing.T) {
+	scheduler := NewCycleScheduler()
+	listener := &countingListener{}
+	scheduler.AddListener(listener)
+
+	// Device runs at 2 MHz against an 8 MHz CPU: 4 CPU cycles per device cycle.
+	scheduler.SetClockRatio(2_000_000, 8_000_000)
+
+	scheduler.Advance(4)
+	if scheduler.Now() != 1 || listener.delta != 1 {
+		t.Fatalf("after 4 CPU cycles: now=%d delta=%d, want 1/1", scheduler.Now(), listener.delta)
+	}
+
+	// 6 more CPU cycles => 1 device cycle now, 2 CPU cycles carried.
+	scheduler.Advance(6)
+	if scheduler.Now() != 2 {
+		t.Fatalf("after +6 CPU cycles: now=%d, want 2", scheduler.Now())
+	}
+
+	// 2 carried + 2 new = 4 => exactly 1 more device cycle.
+	scheduler.Advance(2)
+	if scheduler.Now() != 3 {
+		t.Fatalf("after +2 CPU cycles: now=%d, want 3", scheduler.Now())
+	}
+}
+
+func TestCycleSchedulerClockRatioEventTiming(t *testing.T) {
+	scheduler := NewCycleScheduler()
+	scheduler.SetClockRatio(1_000_000, 2_000_000) // 2 CPU cycles per device cycle
+
+	var firedAt uint64 = ^uint64(0)
+	scheduler.ScheduleAfter(3, func(now uint64) { firedAt = now })
+
+	scheduler.Advance(5) // 2 device cycles, not yet
+	if firedAt != ^uint64(0) {
+		t.Fatalf("event fired early at %d", firedAt)
+	}
+	scheduler.Advance(3) // +1 (carry 1) => device time 3
+	if firedAt != 3 {
+		t.Fatalf("event fired at %d, want 3", firedAt)
+	}
+}

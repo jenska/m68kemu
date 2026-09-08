@@ -288,3 +288,76 @@ func putLong(b []byte, off int, v uint32) {
 	b[off+2] = byte(v >> 8)
 	b[off+3] = byte(v)
 }
+
+// fakeIRQ is a level-sensitive interrupt source for tests.
+type fakeIRQ struct {
+	level, vector uint8
+	acked         []uint8
+}
+
+func (f *fakeIRQ) PendingIRQ() (uint8, uint8) { return f.level, f.vector }
+func (f *fakeIRQ) AckIRQ(level uint8)         { f.acked = append(f.acked, level) }
+
+func TestIRQSourceTakenWhenUnmaskedAndAcked(t *testing.T) {
+	backing := make([]byte, 0x10000)
+	putLong(backing, 0, 0x2000)
+	putLong(backing, 4, 0x1000)
+	putLong(backing, int(autoVectorBase+4)<<2, 0x1500) // level-4 autovector handler
+	putWord(backing, 0x1000, 0x4e71)                   // NOP
+	putWord(backing, 0x1002, 0x4e71)
+	putWord(backing, 0x1500, 0x4e73) // RTE
+
+	c := newAliasedFastCPU(t, backing)
+	src := &fakeIRQ{}
+	c.SetIRQSource(src)
+	if err := c.Reset(); err != nil {
+		t.Fatalf("Reset: %v", err)
+	}
+	c.regs.SR |= 0x0700 // mask all
+
+	if err := c.Step(); err != nil { // NOP, IRQ masked
+		t.Fatalf("Step: %v", err)
+	}
+	src.level = 4 // assert HBL/VBL-style autovector line
+	if err := c.Step(); err != nil {
+		t.Fatalf("Step: %v", err)
+	}
+	if c.regs.PC == 0x1500 {
+		t.Fatalf("IRQ taken while masked")
+	}
+
+	c.regs.SR &^= 0x0700 // unmask
+	if err := c.Step(); err != nil {
+		t.Fatalf("Step: %v", err)
+	}
+	if c.regs.PC != 0x1500 {
+		t.Fatalf("IRQ not taken after unmask: PC=%06x", c.regs.PC)
+	}
+	if len(src.acked) != 1 || src.acked[0] != 4 {
+		t.Fatalf("AckIRQ not called with level 4: %v", src.acked)
+	}
+}
+
+func TestIRQSourceVectoredRequest(t *testing.T) {
+	backing := make([]byte, 0x10000)
+	putLong(backing, 0, 0x2000)
+	putLong(backing, 4, 0x1000)
+	putLong(backing, 0x46<<2, 0x1500)
+	putWord(backing, 0x1000, 0x4e71)
+	putWord(backing, 0x1500, 0x4e73)
+
+	c := newAliasedFastCPU(t, backing)
+	src := &fakeIRQ{level: 6, vector: 0x46}
+	c.SetIRQSource(src)
+	if err := c.Reset(); err != nil {
+		t.Fatalf("Reset: %v", err)
+	}
+	c.regs.SR &^= 0x0700
+
+	if err := c.Step(); err != nil {
+		t.Fatalf("Step: %v", err)
+	}
+	if c.regs.PC != 0x1500 {
+		t.Fatalf("vectored IRQ not taken: PC=%06x", c.regs.PC)
+	}
+}

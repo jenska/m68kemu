@@ -5,6 +5,28 @@ package m68kemu
 // external interrupt controller) less awkward. They are all additive; the
 // pre-existing setters and NewCPU signature keep working.
 
+// IRQSource is a level-sensitive interrupt line the CPU samples at every
+// instruction boundary. It suits a machine whose peripherals hold an interrupt
+// asserted until it is serviced, rather than posting one-shot requests through
+// RequestInterrupt.
+type IRQSource interface {
+	// PendingIRQ reports the highest interrupt level currently asserted (0 for
+	// none) and the vector to take (AutoVector to auto-vector). It is called
+	// once per instruction, so it must be cheap.
+	PendingIRQ() (level, vector uint8)
+	// AckIRQ is called with the level the CPU has just accepted, so the source
+	// can lower that line. A source with edge/pulse semantics uses this to clear
+	// the request it just delivered.
+	AckIRQ(level uint8)
+}
+
+// SetIRQSource installs (or, with nil, removes) the level-sensitive interrupt
+// line. A request queued through RequestInterrupt is still honoured and takes
+// priority equal to its level; the source is consulted first.
+func (cpu *cpu) SetIRQSource(src IRQSource) {
+	cpu.irqSource = src
+}
+
 // Option configures CPU construction. Pass options to NewCPU.
 type Option func(*cpuConfig)
 

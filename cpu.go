@@ -260,7 +260,10 @@ type (
 	}
 
 	CycleScheduler struct {
-		now       uint64
+		now       uint64 // scheduler time, in listener/event ("device") cycles
+		numer     uint64 // device-clock Hz  (0 means the default 1:1 ratio)
+		denom     uint64 // CPU-clock Hz
+		carry     uint64 // sub-cycle remainder of the CPU->device conversion
 		listeners []CycleListener
 		events    []scheduledEvent
 		eventHead int
@@ -303,6 +306,7 @@ type (
 
 		// External wiring.
 		RequestInterrupt(level, vector uint8) error
+		SetIRQSource(IRQSource)
 		SetScheduler(*CycleScheduler)
 		Scheduler() *CycleScheduler
 		SetFastMemory(...FastRegion)
@@ -356,6 +360,7 @@ type (
 		interruptTrap InterruptCallback
 		scheduler     *CycleScheduler
 		interrupts    *interruptController
+		irqSource     IRQSource
 
 		stopped bool
 
@@ -1166,7 +1171,22 @@ func (cpu *cpu) interrupt(level uint8, vector uint32, autoVector bool) error {
 }
 
 func (cpu *cpu) checkInterrupts() error {
-	if cpu.interrupts == nil || cpu.interrupts.maxLevel <= uint8((cpu.regs.SR&srInterruptMask)>>8) {
+	mask := uint8((cpu.regs.SR & srInterruptMask) >> 8)
+
+	if cpu.irqSource != nil {
+		if level, vector := cpu.irqSource.PendingIRQ(); level > mask {
+			cpu.stopped = false
+			autoVector := vector == AutoVector
+			resolved := uint32(vector)
+			if autoVector {
+				resolved = autoVectorBase + uint32(level)
+			}
+			cpu.irqSource.AckIRQ(level)
+			return cpu.interrupt(level, resolved, autoVector)
+		}
+	}
+
+	if cpu.interrupts == nil || cpu.interrupts.maxLevel <= mask {
 		return nil
 	}
 	return cpu.serviceInterrupt()

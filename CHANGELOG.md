@@ -19,6 +19,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/SemVer
   is charged per access, and regions are bypassed automatically while a
   breakpoint or tracer is active
 - `AutoVector` constant for `CPU.RequestInterrupt` / device interrupt requests
+- `CPU.SetIRQSource(IRQSource)` — a level-sensitive interrupt line the core
+  samples every instruction boundary (`PendingIRQ` / `AckIRQ`), for machines
+  whose peripherals hold a line rather than posting one-shot requests
+- `CycleScheduler.SetClockRatio(deviceHz, cpuHz)` — run scheduler time and
+  listener deltas in a device clock that differs from the CPU clock, carrying
+  the sub-cycle remainder (default stays 1:1)
 
 ### Changed
 - `CPU.RequestInterrupt(level, vector uint8)` — the vector is a plain value now;
