@@ -203,3 +203,51 @@ func TestBusLongWriteReportsSecondCycleBusError(t *testing.T) {
 		t.Fatalf("first word after partial long write = %04x, want aabb", got)
 	}
 }
+
+// rangeOnlyDevice implements AddressRangeDevice but not ContainsDevice, so the
+// bus must locate it through the page map / synthesised range check.
+type rangeOnlyDevice struct {
+	start, end uint32
+	value      uint32
+}
+
+func (d *rangeOnlyDevice) AddressRange() (uint32, uint32)    { return d.start, d.end }
+func (d *rangeOnlyDevice) Read(Size, uint32) (uint32, error) { return d.value, nil }
+func (d *rangeOnlyDevice) Write(_ Size, _ uint32, v uint32) error {
+	d.value = v
+	return nil
+}
+func (d *rangeOnlyDevice) Reset() {}
+
+func TestBusLocatesRangeOnlyDevice(t *testing.T) {
+	ram := NewRAM(0x0000, 0x0010)
+	ram.Write(Long, 0, 0x100)
+	ram.Write(Long, 4, 0x200)
+	dev := &rangeOnlyDevice{start: 0xFF8200, end: 0xFF821F}
+	bus := NewBus(ram, dev)
+
+	if err := bus.Write(Byte, 0xFF8210, 0x7e); err != nil {
+		t.Fatalf("write range-only device: %v", err)
+	}
+	if got, err := bus.Read(Byte, 0xFF8210); err != nil || got != 0x7e {
+		t.Fatalf("read range-only device = (%02x, %v), want (7e, <nil>)", got, err)
+	}
+	if _, err := bus.Read(Byte, 0xFF8220); err == nil {
+		t.Fatalf("read just past range-only device unexpectedly succeeded")
+	}
+}
+
+type unlocatableDevice struct{}
+
+func (unlocatableDevice) Read(Size, uint32) (uint32, error) { return 0, nil }
+func (unlocatableDevice) Write(Size, uint32, uint32) error  { return nil }
+func (unlocatableDevice) Reset()                            {}
+
+func TestBusPanicsOnUnlocatableDevice(t *testing.T) {
+	defer func() {
+		if recover() == nil {
+			t.Fatalf("expected NewBus to panic on a device with no Contains or AddressRange")
+		}
+	}()
+	NewBus(unlocatableDevice{})
+}

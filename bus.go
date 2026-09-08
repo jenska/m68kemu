@@ -3,18 +3,40 @@ package m68kemu
 import "fmt"
 
 // Device represents a memory-mapped peripheral on the address bus.
-// Implementations are expected to be safe for repeated Reset calls and
-// must internally validate the address ranges they cover.
+// Implementations must be safe for repeated Reset calls.
+//
+// A device must also be locatable: implement AddressRangeDevice for a single
+// contiguous span, or ContainsDevice for a non-contiguous or state-dependent
+// decode (a device may implement both, in which case Contains decides
+// membership and AddressRange only bounds it).
 type Device interface {
-	Contains(address uint32) bool
 	Read(Size, uint32) (uint32, error)
 	Write(Size, uint32, uint32) error
 	Reset()
 }
 
-// AddressRangeDevice exposes a fixed address range that can be indexed by the bus.
+// AddressRangeDevice exposes a fixed, inclusive address range [start, end].
 type AddressRangeDevice interface {
 	AddressRange() (start uint32, end uint32)
+}
+
+// ContainsDevice decides, per address, whether the device answers for it.
+type ContainsDevice interface {
+	Contains(address uint32) bool
+}
+
+// deviceContains reports whether dev answers for address, using Contains when
+// the device provides it and otherwise its AddressRange.
+func deviceContains(dev Device, address uint32) bool {
+	if c, ok := dev.(ContainsDevice); ok {
+		return c.Contains(address)
+	}
+	if r, ok := dev.(AddressRangeDevice); ok {
+		a := address & 0xffffff
+		start, end := r.AddressRange()
+		return a >= start&0xffffff && a <= end&0xffffff
+	}
+	return false
 }
 
 // WaitStateDevice optionally advertises additional wait states a device
@@ -41,6 +63,15 @@ type Bus struct {
 	hasWaitStateDevices bool
 	hasPageMap          bool
 	pageRanges          [256][]pageRange
+	// scanList holds the devices not covered by the page map, each paired with
+	// its containment test resolved once so the per-access scan does no type
+	// assertions.
+	scanList []scanEntry
+}
+
+type scanEntry struct {
+	device   Device
+	contains func(address uint32) bool
 }
 
 // mappedDevice wraps another device with an explicit 24-bit address range.
@@ -208,6 +239,7 @@ func (b *Bus) refreshTopology() {
 	b.hasWaitStateDevices = false
 	b.hasPageMap = false
 	b.pageRanges = [256][]pageRange{}
+	b.scanList = b.scanList[:0]
 
 	if len(b.devices) == 1 {
 		b.singleDevice = b.devices[0]
@@ -220,28 +252,49 @@ func (b *Bus) refreshTopology() {
 		if _, ok := dev.(WaitStateDevice); ok {
 			b.hasWaitStateDevices = true
 		}
-		if ranged, ok := dev.(AddressRangeDevice); ok {
-			start, end := ranged.AddressRange()
-			start &= 0xffffff
-			end &= 0xffffff
-			if end < start {
-				continue
+
+		contains, ok := dev.(ContainsDevice)
+		ranged, hasRange := dev.(AddressRangeDevice)
+		if !ok && !hasRange {
+			panic(fmt.Sprintf("m68kemu: device %T is not locatable: implement AddressRangeDevice or ContainsDevice", dev))
+		}
+
+		// A pure-range device goes into the page map. Anything with a Contains
+		// method may decode non-contiguously, so it stays on the linear scan
+		// with its check resolved once.
+		if ok {
+			b.scanList = append(b.scanList, scanEntry{device: dev, contains: contains.Contains})
+			continue
+		}
+
+		start, end := ranged.AddressRange()
+		start &= 0xffffff
+		end &= 0xffffff
+		if end < start {
+			b.scanList = append(b.scanList, scanEntry{device: dev, contains: rangeContains(start, end)})
+			continue
+		}
+		b.hasPageMap = true
+		for page := start >> 16; page <= end>>16; page++ {
+			pageStart := page << 16
+			rangeStart := max(start, pageStart)
+			rangeEnd := end
+			pageEnd := pageStart | 0xffff
+			if rangeEnd > pageEnd {
+				rangeEnd = pageEnd
 			}
-			b.hasPageMap = true
-			for page := start >> 16; page <= end>>16; page++ {
-				pageStart := page << 16
-				rangeStart := max(start, pageStart)
-				rangeEnd := end
-				pageEnd := pageStart | 0xffff
-				if rangeEnd > pageEnd {
-					rangeEnd = pageEnd
-				}
-				b.addPageRange(page, rangeStart, rangeEnd, dev)
-			}
+			b.addPageRange(page, rangeStart, rangeEnd, dev)
 		}
 	}
 
 	b.refreshFastRAM()
+}
+
+func rangeContains(start, end uint32) func(uint32) bool {
+	return func(address uint32) bool {
+		a := address & 0xffffff
+		return a >= start && a <= end
+	}
 }
 
 func (b *Bus) refreshFastRAM() {
@@ -260,9 +313,9 @@ func (b *Bus) findDevice(address uint32) Device {
 		}
 	}
 
-	for _, dev := range b.devices {
-		if dev.Contains(address) {
-			return dev
+	for i := range b.scanList {
+		if b.scanList[i].contains(address) {
+			return b.scanList[i].device
 		}
 	}
 
@@ -278,7 +331,7 @@ func (b *Bus) deviceForAddress(address uint32) Device {
 	}
 
 	if dev := b.singleDevice; dev != nil {
-		if dev.Contains(address) {
+		if deviceContains(dev, address) {
 			return dev
 		}
 		return nil

@@ -25,8 +25,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/SemVer
 - `CycleScheduler.SetClockRatio(deviceHz, cpuHz)` — run scheduler time and
   listener deltas in a device clock that differs from the CPU clock, carrying
   the sub-cycle remainder (default stays 1:1)
+- `ContainsDevice` optional interface for non-contiguous decode
 
 ### Changed
+- `Device` no longer requires `Contains`. A device is located by implementing
+  `AddressRangeDevice` (contiguous, and then page-mapped) or `ContainsDevice`
+  (non-contiguous, linear scan); implementing neither now panics at bus
+  construction. The bus resolves each device's containment test once instead of
+  per access.
 - `CPU.RequestInterrupt(level, vector uint8)` — the vector is a plain value now;
   pass `AutoVector` (the zero value) to auto-vector, instead of a `*uint8`
 - `NewCPU` takes `*Bus` directly rather than an `AddressBus` interface, so the
