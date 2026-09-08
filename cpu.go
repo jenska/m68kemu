@@ -300,6 +300,9 @@ type (
 		SetExceptionTracer(ExceptionCallback)
 		SetBusTracer(BusAccessCallback)
 		SetInterruptTracer(InterruptCallback)
+		SetHooks(Hooks)
+		Hooks() Hooks
+		SetFastMemory(...FastRegion)
 		SetScheduler(*CycleScheduler)
 		Scheduler() *CycleScheduler
 		AddBreakpoint(Breakpoint)
@@ -332,6 +335,12 @@ type (
 		fastFetchMem    []byte
 		fastFetchOffset uint32
 		fastFetchOK     bool
+		// fastRegions are caller-installed flat memory spans that bypass the bus
+		// for reads, writes, and fetches inside their range (see integration.go).
+		// fastRegionsReady is true when the set is non-empty and no breakpoint or
+		// tracer is active, so the instruction-fetch fast path may use them.
+		fastRegions      []fastMemRegion
+		fastRegionsReady bool
 		// debugActive is set whenever any per-instruction debug hook is live
 		// (breakpoints, pre-trace, or instruction/bus tracing) so executeNext
 		// can skip all of that bookkeeping on the common path.
@@ -506,6 +515,22 @@ func (cpu *cpu) readContext(size Size, address uint32, ctx accessContext) (uint3
 				return 0, err
 			}
 		}
+		if len(cpu.fastRegions) != 0 {
+			if r := cpu.fastRegionFor(size, address); r != nil {
+				result, err := r.read(size, address)
+				if err != nil {
+					cpu.recordFault(faultAddress(address, err), ctx)
+					return 0, err
+				}
+				if r.wait != 0 {
+					cpu.addCycles(r.waitFor(size))
+				}
+				if cpu.shouldTraceBusAccess(ctx) {
+					cpu.traceBusAccess(size, address, result, ctx)
+				}
+				return result, nil
+			}
+		}
 		if result, ok, err := cpu.fastRAMRead(size, address); ok {
 			if err != nil {
 				cpu.recordFault(faultAddress(address, err), ctx)
@@ -542,6 +567,21 @@ func (cpu *cpu) writeContext(size Size, address uint32, value uint32, ctx access
 		if cpu.breakpoints != nil {
 			if err := cpu.checkAccessBreakpoint(address, BreakpointWrite); err != nil {
 				return err
+			}
+		}
+		if len(cpu.fastRegions) != 0 {
+			if r := cpu.fastRegionFor(size, address); r != nil && !r.readOnly {
+				if err := r.write(size, address, value); err != nil {
+					cpu.recordFault(faultAddress(address, err), ctx)
+					return err
+				}
+				if r.wait != 0 {
+					cpu.addCycles(r.waitFor(size))
+				}
+				if cpu.shouldTraceBusAccess(ctx) {
+					cpu.traceBusAccess(size, address, value, ctx)
+				}
+				return nil
 			}
 		}
 		if ok, err := cpu.fastRAMWrite(size, address, value); ok {
@@ -720,9 +760,14 @@ func (cpu *cpu) refreshRunModes() {
 	cpu.debugActive = cpu.breakpoints != nil || cpu.preTrap != nil ||
 		cpu.traceInstructions || cpu.traceBus
 
+	debugFree := cpu.breakpoints == nil && !cpu.traceInstructions && !cpu.traceBus
+
+	// Caller-installed fast regions may serve instruction fetch only when no
+	// per-instruction debug hook is watching the bus.
+	cpu.fastRegionsReady = len(cpu.fastRegions) != 0 && debugFree
+
 	ram := cpu.fastRAMDevice()
-	cpu.fastFetchOK = ram != nil && cpu.breakpoints == nil &&
-		!cpu.traceInstructions && !cpu.traceBus
+	cpu.fastFetchOK = ram != nil && debugFree
 	if cpu.fastFetchOK {
 		cpu.fastFetchMem = ram.mem
 		cpu.fastFetchOffset = ram.offset
@@ -1494,8 +1539,14 @@ func (cpu *cpu) Reset() error {
 	return nil
 }
 
-func NewCPU(bus AddressBus) (CPU, error) {
+func NewCPU(bus AddressBus, opts ...Option) (CPU, error) {
+	var cfg cpuConfig
+	for _, opt := range opts {
+		opt(&cfg)
+	}
+
 	c := cpu{bus: bus}
+	c.interrupts = NewInterruptController()
 
 	if b, ok := bus.(*Bus); ok {
 		c.busFast = b
@@ -1506,6 +1557,11 @@ func NewCPU(bus AddressBus) (CPU, error) {
 			}
 			c.addCycles(states)
 		})
+	}
+
+	if cfg.deferReset {
+		c.refreshDebugModes()
+		return &c, nil
 	}
 
 	if err := c.Reset(); err != nil {
@@ -1629,15 +1685,28 @@ func (cpu *cpu) popPc(s Size) (uint32, error) {
 	}
 }
 
-// readProgramFastWord serves an instruction word from the single-RAM fast path.
-// It reports ok=false whenever that path is unavailable (breakpoints, active
-// tracing, or a non-trivial bus topology) so the caller falls back to the full
-// bus, which handles those cases.
+// readProgramFastWord serves an instruction word from a fast path: first a
+// caller-installed fast region, then the bus single-RAM shortcut. It reports
+// ok=false whenever neither applies (breakpoints, active tracing, a non-trivial
+// bus topology, or an address outside every fast region) so the caller falls
+// back to the full bus.
 func (cpu *cpu) readProgramFastWord(address uint32) (uint16, bool, error) {
+	address &= 0xffffff
+	if cpu.fastRegionsReady {
+		if r := cpu.fastRegionFor(Word, address); r != nil {
+			if address&1 != 0 {
+				return 0, true, AddressError(address)
+			}
+			idx := address - r.base
+			if r.wait != 0 {
+				cpu.addCycles(r.waitFor(Word))
+			}
+			return uint16(r.mem[idx])<<8 | uint16(r.mem[idx+1]), true, nil
+		}
+	}
 	if !cpu.fastFetchOK {
 		return 0, false, nil
 	}
-	address &= 0xffffff
 	if address&1 != 0 {
 		return 0, true, AddressError(address)
 	}
@@ -1650,10 +1719,25 @@ func (cpu *cpu) readProgramFastWord(address uint32) (uint16, bool, error) {
 }
 
 func (cpu *cpu) readProgramFastLong(address uint32) (uint32, bool, error) {
+	address &= 0xffffff
+	if cpu.fastRegionsReady {
+		if r := cpu.fastRegionFor(Long, address); r != nil {
+			if address&1 != 0 {
+				return 0, true, AddressError(address)
+			}
+			idx := address - r.base
+			if r.wait != 0 {
+				cpu.addCycles(r.waitFor(Long))
+			}
+			return uint32(r.mem[idx])<<24 |
+				uint32(r.mem[idx+1])<<16 |
+				uint32(r.mem[idx+2])<<8 |
+				uint32(r.mem[idx+3]), true, nil
+		}
+	}
 	if !cpu.fastFetchOK {
 		return 0, false, nil
 	}
-	address &= 0xffffff
 	if address&1 != 0 {
 		return 0, true, AddressError(address)
 	}

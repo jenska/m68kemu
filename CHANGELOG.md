@@ -5,6 +5,20 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/SemVer).
 
+## [Unreleased]
+
+### Added
+- `NewCPU` accepts functional options; `WithDeferredReset` skips the implicit
+  reset so callers can finish wiring the bus before the reset vector is read
+- `CPU.SetHooks(Hooks)` / `CPU.Hooks()` install or read every observation
+  callback in one call, replacing five separate setters
+- `CPU.SetFastMemory(...FastRegion)` maps caller-owned flat memory slices that
+  the interpreter reads, writes, and fetches from directly, bypassing the bus
+  for addresses inside a region; accesses outside every region fall through to
+  the bus, writes to a `ReadOnly` region (ROM) also fall through, `WaitStates`
+  is charged per access, and regions are bypassed automatically while a
+  breakpoint or tracer is active
+
 ## [1.3.0] - 2026-06-13
 
 ### Changed
