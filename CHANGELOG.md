@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/SemVer
 
 ## [Unreleased]
 
+## [1.5.0] - 2026-09-08
+
 ### Added
 - `NewCPU` accepts functional options; `WithDeferredReset` skips the implicit
   reset so callers can finish wiring the bus before the reset vector is read

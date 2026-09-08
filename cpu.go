@@ -6,7 +6,7 @@ import (
 )
 
 const (
-	Version           = "1.4.0"
+	Version           = "1.5.0"
 	XBusError         = 2
 	XAddressError     = 3
 	XIllegal          = 4
