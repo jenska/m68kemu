@@ -49,7 +49,7 @@ func TestInterruptRespectsMaskAndTriggersWhenUnmasked(t *testing.T) {
 
 	cpu.setSR(srSupervisor | (3 << 8))
 
-	if err := cpu.RequestInterrupt(2, nil); err != nil {
+	if err := cpu.RequestInterrupt(2, AutoVector); err != nil {
 		t.Fatalf("failed to request interrupt: %v", err)
 	}
 
@@ -119,7 +119,7 @@ func TestInterruptUsesProvidedVectorWhenAvailable(t *testing.T) {
 	cpu.setSR(srSupervisor)
 
 	vectorNumber := uint8(vector)
-	if err := cpu.RequestInterrupt(5, &vectorNumber); err != nil {
+	if err := cpu.RequestInterrupt(5, vectorNumber); err != nil {
 		t.Fatalf("failed to request interrupt: %v", err)
 	}
 
@@ -154,19 +154,19 @@ func TestInterruptUsesProvidedVectorWhenAvailable(t *testing.T) {
 }
 
 func TestInterruptControllerQueuesRequestsPerLevel(t *testing.T) {
-	ic := NewInterruptController()
+	ic := newInterruptController()
 
 	firstVector := uint8(50)
 	secondVector := uint8(60)
 
-	if err := ic.Request(3, &firstVector); err != nil {
+	if err := ic.request(3, firstVector); err != nil {
 		t.Fatalf("failed to request first interrupt: %v", err)
 	}
-	if err := ic.Request(3, &secondVector); err != nil {
+	if err := ic.request(3, secondVector); err != nil {
 		t.Fatalf("failed to request second interrupt: %v", err)
 	}
 
-	level, vector, autoVector, ok := ic.Pending(0)
+	level, vector, autoVector, ok := ic.pending(0)
 	if !ok {
 		t.Fatalf("expected pending interrupt")
 	}
@@ -177,7 +177,7 @@ func TestInterruptControllerQueuesRequestsPerLevel(t *testing.T) {
 		t.Fatalf("explicit interrupt unexpectedly reported as autovector")
 	}
 
-	level, vector, autoVector, ok = ic.Pending(0)
+	level, vector, autoVector, ok = ic.pending(0)
 	if !ok {
 		t.Fatalf("expected second pending interrupt")
 	}
@@ -188,7 +188,7 @@ func TestInterruptControllerQueuesRequestsPerLevel(t *testing.T) {
 		t.Fatalf("explicit interrupt unexpectedly reported as autovector")
 	}
 
-	if _, _, _, ok = ic.Pending(0); ok {
+	if _, _, _, ok = ic.pending(0); ok {
 		t.Fatalf("expected no further interrupts")
 	}
 }
@@ -238,7 +238,7 @@ func TestNestedInterruptRegressionRestoresExactSRPCAndFrames(t *testing.T) {
 
 	cpu.setSR(initialSR)
 
-	if err := cpu.RequestInterrupt(4, nil); err != nil {
+	if err := cpu.RequestInterrupt(4, AutoVector); err != nil {
 		t.Fatalf("request level 4 interrupt: %v", err)
 	}
 
@@ -257,7 +257,7 @@ func TestNestedInterruptRegressionRestoresExactSRPCAndFrames(t *testing.T) {
 	}
 	assertStandardExceptionFrame(t, ram, outerFrameSP, initialSR, mainResumePC, "outer interrupt")
 
-	if err := cpu.RequestInterrupt(6, &mfpVector); err != nil {
+	if err := cpu.RequestInterrupt(6, mfpVector); err != nil {
 		t.Fatalf("request level 6 interrupt: %v", err)
 	}
 

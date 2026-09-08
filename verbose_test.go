@@ -7,20 +7,18 @@ import (
 )
 
 func TestDisassembleInstructionUsesPeek(t *testing.T) {
-	bus := newDebugPeekBus()
-	if err := bus.Write(Word, 0x2000, 0x7005); err != nil {
-		t.Fatalf("seed opcode: %v", err)
-	}
+	mem := newPeekCountingRAM(0x10000)
+	mem.RAM.Write(Word, 0x2000, 0x7005)
 
-	line, err := DisassembleInstruction(bus, 0x2000)
+	line, err := DisassembleInstruction(NewBus(mem), 0x2000)
 	if err != nil {
 		t.Fatalf("disassemble instruction: %v", err)
 	}
 
-	if bus.readCount != 0 {
-		t.Fatalf("DisassembleInstruction used Read: got %d", bus.readCount)
+	if mem.readCount != 0 {
+		t.Fatalf("DisassembleInstruction used Read: got %d", mem.readCount)
 	}
-	if bus.peekCount == 0 {
+	if mem.peekCount == 0 {
 		t.Fatalf("DisassembleInstruction did not use Peek")
 	}
 	if line.Assembly != "MOVEQ #5, D0" {

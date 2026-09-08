@@ -138,7 +138,7 @@ func TestSchedulerNilAndCompactionPaths(t *testing.T) {
 	}
 
 	scheduler := &CycleScheduler{
-		events: []ScheduledEvent{{At: 1}, {At: 2}, {At: 3}, {At: 4}},
+		events: []scheduledEvent{{At: 1}, {At: 2}, {At: 3}, {At: 4}},
 	}
 	scheduler.eventHead = 1
 	scheduler.compactEvents()

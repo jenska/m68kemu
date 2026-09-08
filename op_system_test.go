@@ -329,7 +329,7 @@ func TestTrapvResetAndStop(t *testing.T) {
 		t.Fatalf("CPU should be stopped")
 	}
 
-	if err := cpu.RequestInterrupt(2, nil); err != nil {
+	if err := cpu.RequestInterrupt(2, AutoVector); err != nil {
 		t.Fatalf("failed to request interrupt: %v", err)
 	}
 	if err := cpu.Step(); err != nil {
@@ -366,7 +366,7 @@ func TestStopInterruptRunsHandlerInstruction(t *testing.T) {
 		t.Fatalf("CPU should be stopped")
 	}
 
-	if err := cpu.RequestInterrupt(2, nil); err != nil {
+	if err := cpu.RequestInterrupt(2, AutoVector); err != nil {
 		t.Fatalf("failed to request interrupt: %v", err)
 	}
 	if err := cpu.Step(); err != nil {

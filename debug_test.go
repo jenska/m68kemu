@@ -230,9 +230,9 @@ func TestPreTracerSeesInstructionBeforeExecution(t *testing.T) {
 	program := helper.LoadAssembly("MOVEQ #5,D0\n")
 
 	var got PreTraceInfo
-	helper.cpu.SetPreTracer(func(info PreTraceInfo) {
+	helper.cpu.SetHooks(Hooks{PreTrace: func(info PreTraceInfo) {
 		got = info
-	})
+	}})
 
 	helper.RunInstructions(1)
 
@@ -477,12 +477,12 @@ func TestInterruptTracerReportsAcceptance(t *testing.T) {
 	}
 
 	var got InterruptInfo
-	cpu.SetInterruptTracer(func(info InterruptInfo) {
+	cpu.SetHooks(Hooks{Interrupt: func(info InterruptInfo) {
 		got = info
-	})
+	}})
 	cpu.setSR(srSupervisor)
 
-	if err := cpu.RequestInterrupt(2, nil); err != nil {
+	if err := cpu.RequestInterrupt(2, AutoVector); err != nil {
 		t.Fatalf("failed to request interrupt: %v", err)
 	}
 	if err := cpu.Step(); err != nil {

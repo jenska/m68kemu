@@ -64,7 +64,7 @@ func resetInstruction(cpu *cpu) error {
 	}
 
 	cpu.bus.Reset()
-	cpu.interrupts.Reset()
+	cpu.interrupts.reset()
 	return nil
 }
 

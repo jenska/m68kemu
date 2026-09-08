@@ -93,7 +93,7 @@ func TestBusWaitHook(t *testing.T) {
 	bus := NewBus(ram)
 	bus.SetWaitStates(3)
 	var waited uint32
-	bus.SetWaitHook(func(states uint32) { waited += states })
+	bus.waitHook = func(states uint32) { waited += states }
 
 	if err := bus.Write(Byte, 0x0000, 0xAA); err != nil {
 		t.Fatalf("write failed: %v", err)

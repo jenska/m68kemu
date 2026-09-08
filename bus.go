@@ -29,15 +29,12 @@ type PeekDevice interface {
 	Peek(Size, uint32) (uint32, error)
 }
 
-// WaitHook can be used to simulate wait states or count cycles for bus access.
-type WaitHook func(states uint32)
-
 // Bus multiplexes memory access between attached devices and performs common
 // checks such as alignment and bus error handling.
 type Bus struct {
 	devices             []Device
 	waitStates          uint32
-	waitHook            WaitHook
+	waitHook            func(states uint32)
 	singleDevice        Device
 	singleRAM           *RAM
 	fastRAM             *RAM
@@ -46,15 +43,15 @@ type Bus struct {
 	pageRanges          [256][]pageRange
 }
 
-// MappedDevice wraps another device with an explicit 24-bit address range.
-type MappedDevice struct {
+// mappedDevice wraps another device with an explicit 24-bit address range.
+type mappedDevice struct {
 	start  uint32
 	end    uint32
 	device Device
 }
 
 type mappedWaitStateDevice struct {
-	*MappedDevice
+	*mappedDevice
 	waitStateDevice WaitStateDevice
 }
 
@@ -77,18 +74,11 @@ func (b *Bus) AddDevice(device Device) {
 	b.refreshTopology()
 }
 
-// SetWaitStates defines how many states the bus should report for each
-// transaction when a WaitHook is configured.
+// SetWaitStates sets the base wait-state count charged to the CPU for every bus
+// transaction. A device may add to it by implementing WaitStateDevice.
 func (b *Bus) SetWaitStates(states uint32) {
 	b.waitStates = states
 	b.refreshFastRAM()
-}
-
-// SetWaitHook installs a callback that receives the configured wait states for
-// every transaction. Callers can use this to count cycles or block for a
-// desired duration.
-func (b *Bus) SetWaitHook(hook WaitHook) {
-	b.waitHook = hook
 }
 
 // Reset propagates a reset to all attached devices.
@@ -305,30 +295,30 @@ func (b *Bus) validateAlignment(address uint32, s Size) error {
 }
 
 func MapDevice(start, end uint32, device Device) Device {
-	mapped := &MappedDevice{start: start & 0xffffff, end: end & 0xffffff, device: device}
+	mapped := &mappedDevice{start: start & 0xffffff, end: end & 0xffffff, device: device}
 	if ws, ok := device.(WaitStateDevice); ok {
-		return &mappedWaitStateDevice{MappedDevice: mapped, waitStateDevice: ws}
+		return &mappedWaitStateDevice{mappedDevice: mapped, waitStateDevice: ws}
 	}
 	return mapped
 }
 
-func (d *MappedDevice) AddressRange() (uint32, uint32) {
+func (d *mappedDevice) AddressRange() (uint32, uint32) {
 	return d.start, d.end
 }
 
-func (d *MappedDevice) Contains(address uint32) bool {
+func (d *mappedDevice) Contains(address uint32) bool {
 	address &= 0xffffff
 	return address >= d.start && address <= d.end
 }
 
-func (d *MappedDevice) Read(size Size, address uint32) (uint32, error) {
+func (d *mappedDevice) Read(size Size, address uint32) (uint32, error) {
 	if !d.containsAccess(size, address) {
 		return 0, BusError(address & 0xffffff)
 	}
 	return d.device.Read(size, address)
 }
 
-func (d *MappedDevice) Peek(size Size, address uint32) (uint32, error) {
+func (d *mappedDevice) Peek(size Size, address uint32) (uint32, error) {
 	if !d.containsAccess(size, address) {
 		return 0, BusError(address & 0xffffff)
 	}
@@ -339,14 +329,14 @@ func (d *MappedDevice) Peek(size Size, address uint32) (uint32, error) {
 	return peekable.Peek(size, address)
 }
 
-func (d *MappedDevice) Write(size Size, address uint32, value uint32) error {
+func (d *mappedDevice) Write(size Size, address uint32, value uint32) error {
 	if !d.containsAccess(size, address) {
 		return BusError(address & 0xffffff)
 	}
 	return d.device.Write(size, address, value)
 }
 
-func (d *MappedDevice) Reset() {
+func (d *mappedDevice) Reset() {
 	d.device.Reset()
 }
 
@@ -354,7 +344,7 @@ func (d *mappedWaitStateDevice) WaitStates(size Size, address uint32) uint32 {
 	return d.waitStateDevice.WaitStates(size, address)
 }
 
-func (d *MappedDevice) containsAccess(size Size, address uint32) bool {
+func (d *mappedDevice) containsAccess(size Size, address uint32) bool {
 	address &= 0xffffff
 	if !d.Contains(address) {
 		return false

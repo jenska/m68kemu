@@ -32,7 +32,7 @@ func (s *CycleScheduler) Schedule(at uint64, fn func(now uint64)) {
 		return
 	}
 
-	event := ScheduledEvent{At: at, Fn: fn}
+	event := scheduledEvent{At: at, Fn: fn}
 	index := len(s.events)
 	s.events = append(s.events, event)
 	for index > s.eventHead && s.events[index-1].At > at {

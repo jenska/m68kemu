@@ -52,7 +52,7 @@ func TestWithDeferredResetDoesNotTouchBus(t *testing.T) {
 	}
 
 	// Interrupt controller is usable before the first Reset.
-	if err := processor.RequestInterrupt(3, nil); err != nil {
+	if err := processor.RequestInterrupt(3, AutoVector); err != nil {
 		t.Fatalf("RequestInterrupt before Reset: %v", err)
 	}
 

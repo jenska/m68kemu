@@ -262,7 +262,7 @@ type (
 	CycleScheduler struct {
 		now       uint64
 		listeners []CycleListener
-		events    []ScheduledEvent
+		events    []scheduledEvent
 		eventHead int
 	}
 
@@ -270,7 +270,7 @@ type (
 		AdvanceCycles(delta uint64, now uint64)
 	}
 
-	ScheduledEvent struct {
+	scheduledEvent struct {
 		At uint64
 		Fn func(now uint64)
 	}
@@ -286,31 +286,36 @@ type (
 		IR  uint16 // instruction register
 	}
 
-	// CPU exposes the minimal interface for interacting with the emulator core.
+	// CPU is the interface returned by NewCPU for driving the emulator core.
 	CPU interface {
-		Registers() Registers
-		DebugState() DebugState
+		// Execution.
+		Reset() error
 		Step() error
 		RunCycles(budget uint64) error
 		RunInstructions(count uint64) error
 		RunUntil(options RunUntilOptions) (RunResult, error)
-		Reset() error
-		SetTracer(TraceCallback)
-		SetPreTracer(PreTraceCallback)
-		SetExceptionTracer(ExceptionCallback)
-		SetBusTracer(BusAccessCallback)
-		SetInterruptTracer(InterruptCallback)
-		SetHooks(Hooks)
-		Hooks() Hooks
-		SetFastMemory(...FastRegion)
+		Cycles() uint64
+
+		// State inspection.
+		Registers() Registers
+		DebugState() DebugState
+		CurrentExceptionFrame() (ExceptionStackFrame, bool, error)
+
+		// External wiring.
+		RequestInterrupt(level, vector uint8) error
 		SetScheduler(*CycleScheduler)
 		Scheduler() *CycleScheduler
+		SetFastMemory(...FastRegion)
+
+		// Observation and debugging.
+		SetHooks(Hooks)
+		Hooks() Hooks
+		SetTracer(TraceCallback)
+		SetBusTracer(BusAccessCallback)
+		SetExceptionTracer(ExceptionCallback)
 		AddBreakpoint(Breakpoint)
-		RequestInterrupt(level uint8, vector *uint8) error
-		Cycles() uint64
 		SetHistoryLimit(limit int)
 		History() []HistoryEntry
-		CurrentExceptionFrame() (ExceptionStackFrame, bool, error)
 	}
 
 	faultInfo struct {
@@ -325,10 +330,9 @@ type (
 
 	//  CPU core
 	cpu struct {
-		regs    Registers
-		cycles  uint64
-		bus     AddressBus
-		busFast *Bus
+		regs   Registers
+		cycles uint64
+		bus    *Bus
 		// fastFetch caches the single-RAM instruction-fetch fast path. It is
 		// valid only while fastFetchOK is true (fast RAM present, no
 		// breakpoints, no active tracing) and is rebuilt by refreshRunModes.
@@ -351,7 +355,7 @@ type (
 		busTrap       BusAccessCallback
 		interruptTrap InterruptCallback
 		scheduler     *CycleScheduler
-		interrupts    *InterruptController
+		interrupts    *interruptController
 
 		stopped bool
 
@@ -607,10 +611,10 @@ func (cpu *cpu) writeContext(size Size, address uint32, value uint32, ctx access
 }
 
 func (cpu *cpu) fastRAMDevice() *RAM {
-	if cpu.busFast == nil {
+	if cpu.bus == nil {
 		return nil
 	}
-	return cpu.busFast.fastRAM
+	return cpu.bus.fastRAM
 }
 
 func (cpu *cpu) fastRAMRead(size Size, address uint32) (uint32, bool, error) {
@@ -724,26 +728,22 @@ func (cpu *cpu) DebugState() DebugState {
 	}
 }
 
+// SetTracer, SetBusTracer, and SetExceptionTracer set one observation callback
+// each, leaving the others untouched. To install several at once (or to include
+// the pre-trace or interrupt callback) use SetHooks.
 func (cpu *cpu) SetTracer(cb TraceCallback) {
 	cpu.trap = cb
 	cpu.refreshDebugModes()
 }
 
-func (cpu *cpu) SetPreTracer(cb PreTraceCallback) {
-	cpu.preTrap = cb
-}
-
 func (cpu *cpu) SetExceptionTracer(cb ExceptionCallback) {
 	cpu.exceptionTrap = cb
+	cpu.refreshDebugModes()
 }
 
 func (cpu *cpu) SetBusTracer(cb BusAccessCallback) {
 	cpu.busTrap = cb
 	cpu.refreshDebugModes()
-}
-
-func (cpu *cpu) SetInterruptTracer(cb InterruptCallback) {
-	cpu.interruptTrap = cb
 }
 
 func (cpu *cpu) refreshDebugModes() {
@@ -794,8 +794,11 @@ func (cpu *cpu) Scheduler() *CycleScheduler {
 	return cpu.scheduler
 }
 
-func (cpu *cpu) RequestInterrupt(level uint8, vector *uint8) error {
-	return cpu.interrupts.Request(level, vector)
+// RequestInterrupt queues an interrupt at the given level (1-7). Pass
+// AutoVector for vector to auto-vector it (vector 24+level); any other value is
+// taken as the device-supplied vector number.
+func (cpu *cpu) RequestInterrupt(level, vector uint8) error {
+	return cpu.interrupts.request(level, vector)
 }
 
 func (cpu *cpu) AddBreakpoint(bp Breakpoint) {
@@ -1170,7 +1173,7 @@ func (cpu *cpu) checkInterrupts() error {
 }
 
 func (cpu *cpu) serviceInterrupt() error {
-	level, vector, autoVector, ok := cpu.interrupts.Pending(cpu.regs.SR)
+	level, vector, autoVector, ok := cpu.interrupts.pending(cpu.regs.SR)
 	if !ok {
 		return nil
 	}
@@ -1497,9 +1500,9 @@ func (cpu *cpu) fetchOpcode() (uint16, error) {
 func (cpu *cpu) Reset() error {
 	cpu.regs = Registers{SR: 0x2700}
 	if cpu.interrupts == nil {
-		cpu.interrupts = NewInterruptController()
+		cpu.interrupts = newInterruptController()
 	} else {
-		cpu.interrupts.Reset()
+		cpu.interrupts.reset()
 	}
 	cpu.stopped = false
 	ssp, err := cpu.bus.Read(Long, 0)
@@ -1539,31 +1542,21 @@ func (cpu *cpu) Reset() error {
 	return nil
 }
 
-func NewCPU(bus AddressBus, opts ...Option) (CPU, error) {
+// NewCPU builds a CPU bound to bus. By default it performs a reset (reading the
+// vector from the bus); pass WithDeferredReset to skip that.
+func NewCPU(bus *Bus, opts ...Option) (CPU, error) {
 	var cfg cpuConfig
 	for _, opt := range opts {
 		opt(&cfg)
 	}
 
-	c := cpu{bus: bus}
-	c.interrupts = NewInterruptController()
-
-	if b, ok := bus.(*Bus); ok {
-		c.busFast = b
-		previous := b.waitHook
-		b.SetWaitHook(func(states uint32) {
-			if previous != nil {
-				previous(states)
-			}
-			c.addCycles(states)
-		})
-	}
+	c := cpu{bus: bus, interrupts: newInterruptController()}
+	bus.waitHook = func(states uint32) { c.addCycles(states) }
 
 	if cfg.deferReset {
 		c.refreshDebugModes()
 		return &c, nil
 	}
-
 	if err := c.Reset(); err != nil {
 		return nil, err
 	}

@@ -11,13 +11,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/SemVer
 - `NewCPU` accepts functional options; `WithDeferredReset` skips the implicit
   reset so callers can finish wiring the bus before the reset vector is read
 - `CPU.SetHooks(Hooks)` / `CPU.Hooks()` install or read every observation
-  callback in one call, replacing five separate setters
+  callback in one call
 - `CPU.SetFastMemory(...FastRegion)` maps caller-owned flat memory slices that
   the interpreter reads, writes, and fetches from directly, bypassing the bus
   for addresses inside a region; accesses outside every region fall through to
   the bus, writes to a `ReadOnly` region (ROM) also fall through, `WaitStates`
   is charged per access, and regions are bypassed automatically while a
   breakpoint or tracer is active
+- `AutoVector` constant for `CPU.RequestInterrupt` / device interrupt requests
+
+### Changed
+- `CPU.RequestInterrupt(level, vector uint8)` — the vector is a plain value now;
+  pass `AutoVector` (the zero value) to auto-vector, instead of a `*uint8`
+- `NewCPU` takes `*Bus` directly rather than an `AddressBus` interface, so the
+  wait-state and fast-RAM paths can no longer be silently bypassed by a custom
+  bus type
+- `CPU.SetPreTracer` and `CPU.SetInterruptTracer` are removed; set those two
+  callbacks through `SetHooks`. `SetTracer`, `SetBusTracer`, and
+  `SetExceptionTracer` remain as single-callback convenience setters
+
+### Removed
+- Unexported internals that were never part of the intended surface:
+  `InterruptController`, `MappedDevice`, `ScheduledEvent`, `WaitHook`,
+  `Bus.SetWaitHook` (`Bus.SetWaitStates` is unchanged)
 
 ## [1.3.0] - 2026-06-13
 
