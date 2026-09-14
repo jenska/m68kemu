@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/SemVer
 
 ## [Unreleased]
 
+### Changed
+- Bumped `github.com/jenska/m68kdasm` to v1.3.0 and `github.com/jenska/m68kasm`
+  to v1.5.0
+- Added regression tests covering `BRA`/`BSR.W` and `DBcc` disassembly branch
+  targets, guarding against a m68kdasm bug (fixed in v1.3.0) where these were
+  computed relative to the wrong base address
+
 ## [1.5.0] - 2026-09-08
 
 ### Added

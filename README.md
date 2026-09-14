@@ -39,7 +39,7 @@ The repository also includes a small example command in `cmd/qsortdemo`, which a
 
 ### Requirements
 
-This module targets Go 1.26.
+This module targets Go 1.27.
 
 ### Installation
 

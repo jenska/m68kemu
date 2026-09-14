@@ -2,6 +2,7 @@ package m68kemu
 
 import (
 	"bytes"
+	"fmt"
 	"strings"
 	"testing"
 )
@@ -26,6 +27,58 @@ func TestDisassembleInstructionUsesPeek(t *testing.T) {
 	}
 	if len(line.Bytes) != 2 || line.Bytes[0] != 0x70 || line.Bytes[1] != 0x05 {
 		t.Fatalf("unexpected instruction bytes: % x", line.Bytes)
+	}
+}
+
+// TestDisassembleBranchTargetsAreCorrect guards against a regression of a bug
+// fixed in m68kdasm v1.3.0, where BRA/BSR.W/.L and DBcc branch targets were
+// computed relative to the wrong base address and rendered off by 2 (word
+// form) or 4 (long form) bytes.
+func TestDisassembleBranchTargetsAreCorrect(t *testing.T) {
+	helper := newStepTestHelper(t)
+	program := helper.LoadAssembly(`
+START:
+	BRA.W TARGET
+	NOP
+TARGET:
+	BSR.W SUB
+	NOP
+SUB:
+	RTS
+`)
+
+	lines, err := DisassembleMemoryRange(helper.cpu.bus, program.base, uint32(len(program.Bytes)))
+	if err != nil {
+		t.Fatalf("disassemble range: %v", err)
+	}
+
+	targetPC := program.PCForLine(t, 6) // TARGET
+	subPC := program.PCForLine(t, 9)    // SUB
+
+	if want := fmt.Sprintf("BRA.W $%X", targetPC); lines[0].Assembly != want {
+		t.Fatalf("unexpected BRA.W disassembly: got %q, want %q", lines[0].Assembly, want)
+	}
+	if want := fmt.Sprintf("BSR.W $%X", subPC); lines[2].Assembly != want {
+		t.Fatalf("unexpected BSR.W disassembly: got %q, want %q", lines[2].Assembly, want)
+	}
+}
+
+func TestDisassembleDBccBranchTargetIsCorrect(t *testing.T) {
+	helper := newStepTestHelper(t)
+	program := helper.LoadAssembly(`
+LOOP:
+	NOP
+	DBRA D0,LOOP
+`)
+
+	lines, err := DisassembleMemoryRange(helper.cpu.bus, program.base, uint32(len(program.Bytes)))
+	if err != nil {
+		t.Fatalf("disassemble range: %v", err)
+	}
+
+	loopPC := program.PCForLine(t, 3) // LOOP
+	if want := fmt.Sprintf("DBF D0, $%X", loopPC); lines[1].Assembly != want {
+		t.Fatalf("unexpected DBF disassembly: got %q, want %q", lines[1].Assembly, want)
 	}
 }
 
