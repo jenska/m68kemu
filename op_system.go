@@ -37,7 +37,7 @@ func init() {
 		eaMaskAbsoluteShort | eaMaskAbsoluteLong
 
 	registerInstruction(moveFromSr, 0x40c0, 0xffc0, controlDestinationMask, moveControlCycleCalculator(Word))
-	registerInstruction(moveToCcr, 0x44c0, 0xffc0, controlSourceMask, moveControlCycleCalculator(Byte))
+	registerInstruction(moveToCcr, 0x44c0, 0xffc0, controlSourceMask, moveControlCycleCalculator(Word))
 	registerInstruction(moveToSr, 0x46c0, 0xffc0, controlSourceMask, moveControlCycleCalculator(Word))
 
 	registerInstruction(rte, 0x4e73, 0xffff, 0, constantCycles(20))
@@ -137,8 +137,10 @@ func moveFromSr(cpu *cpu) error {
 	return dst.write(uint32(cpu.regs.SR))
 }
 
+// moveToCcr is a word operation: it reads a full word and keeps the low byte,
+// so a memory source such as (A7)+ supplies the CCR from the word's low half.
 func moveToCcr(cpu *cpu) error {
-	src, err := cpu.ResolveSrcEA(Byte)
+	src, err := cpu.ResolveSrcEA(Word)
 	if err != nil {
 		return err
 	}

@@ -555,6 +555,27 @@ func TestMoveToSrAndCcr(t *testing.T) {
 	}
 }
 
+func TestMoveToCcrFromMemoryReadsLowByteOfWord(t *testing.T) {
+	cpu, ram := newEnvironment(t)
+
+	cpu.regs.SR = srSupervisor | 0x0700
+	stackBase := cpu.regs.A[7]
+	ram.Write(Word, stackBase, 0x2714) // SR as saved by MOVE SR,-(A7): Z set
+
+	addr := cpu.regs.PC
+	ram.Write(Word, addr, 0x44df) // MOVE (A7)+,CCR
+
+	if err := cpu.Step(); err != nil {
+		t.Fatalf("MOVE (A7)+,CCR failed: %v", err)
+	}
+	if expected := uint16(srSupervisor | 0x0714); cpu.regs.SR != expected {
+		t.Fatalf("MOVE (A7)+,CCR should take the word's low byte, got %04x want %04x", cpu.regs.SR, expected)
+	}
+	if cpu.regs.A[7] != stackBase+uint32(Word) {
+		t.Fatalf("MOVE (A7)+,CCR should pop a word, SP=%04x want %04x", cpu.regs.A[7], stackBase+uint32(Word))
+	}
+}
+
 func TestSrInstructionsSwitchToUspWhenSupervisorBitClears(t *testing.T) {
 	tests := []struct {
 		name       string
