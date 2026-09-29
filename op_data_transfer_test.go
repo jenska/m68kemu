@@ -383,6 +383,32 @@ func TestMovemWordLoadsSignExtendRegisters(t *testing.T) {
 	}
 }
 
+func TestMovemPCRelativeUsesDisplacementWordAsBase(t *testing.T) {
+	cpu, ram := newEnvironment(t)
+	pc := cpu.regs.PC
+
+	// MOVEM.W (d16,PC),D0 : opcode, register mask, displacement.
+	for i, w := range []uint32{0x4cba, 0x0001, 0x0010} {
+		if err := ram.Write(Word, pc+uint32(2*i), w); err != nil {
+			t.Fatalf("write program: %v", err)
+		}
+	}
+	// The base is the displacement word at pc+4, so the operand is at pc+0x14.
+	if err := ram.Write(Word, pc+0x14, 0x1234); err != nil {
+		t.Fatalf("seed operand: %v", err)
+	}
+	if err := ram.Write(Word, pc+0x16, 0x5678); err != nil {
+		t.Fatalf("seed trailing word: %v", err)
+	}
+
+	if err := cpu.Step(); err != nil {
+		t.Fatalf("step failed: %v", err)
+	}
+	if cpu.regs.D[0] != 0x1234 {
+		t.Fatalf("MOVEM (d16,PC) read from the wrong base, got D0=%08x want 00001234", uint32(cpu.regs.D[0]))
+	}
+}
+
 func TestMovemLongStoresSequentialWordsForControlMode(t *testing.T) {
 	cpu, ram := newEnvironment(t)
 	cpu.regs.A[0] = 0x3000

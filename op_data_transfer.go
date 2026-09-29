@@ -285,11 +285,14 @@ func movemReadAddress(cpu *cpu, mode, reg uint16) (uint32, error) {
 			}
 			addr = ext
 		case 2: // (d16,PC)
+			// The base is the displacement word's own address, not the PC
+			// after it; MOVEM's register mask precedes it.
+			pc := cpu.regs.PC
 			ext, err := cpu.popPc(Word)
 			if err != nil {
 				return 0, err
 			}
-			addr = uint32(int32(cpu.regs.PC) + int32(int16(ext)))
+			addr = uint32(int32(pc) + int32(int16(ext)))
 		case 3: // (d8,PC,Xn)
 			pc := cpu.regs.PC
 			extAddr, err := ix68000(cpu, pc)
