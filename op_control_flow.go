@@ -4,12 +4,14 @@ func init() {
 	// BRA/Bcc with 8- or 16-bit displacement (no 32-bit on 68000)
 	for cond := range uint16(16) {
 		match := uint16(0x6000) | (cond << 8)
-		registerInstruction(branch, match, 0xff00, 0, constantCycles(10))
+		// Table 8-9: 8 cycles for a short branch not taken; branch adds the rest.
+		registerInstruction(branch, match, 0xff00, 0, constantCycles(8))
 	}
 
 	for cond := range uint16(16) {
 		match := uint16(0x50c8) | (cond << 8)
-		registerInstruction(dbcc, match, 0xfff8, 0, constantCycles(12))
+		// Table 8-9: 10 cycles when the loop branches; dbcc adds the rest.
+		registerInstruction(dbcc, match, 0xfff8, 0, constantCycles(10))
 	}
 
 	// Scc
@@ -23,7 +25,8 @@ func branch(cpu *cpu) error {
 	displacement := int32(int8(cpu.regs.IR))
 	basePC := cpu.regs.PC
 
-	if displacement == 0 {
+	wordDisplacement := displacement == 0
+	if wordDisplacement {
 		ext, err := cpu.popPc(Word)
 		if err != nil {
 			return err
@@ -32,6 +35,15 @@ func branch(cpu *cpu) error {
 	}
 
 	taken := cond == 0x0 || cond == 0x1 || conditionTrue(cpu, cond)
+
+	switch {
+	case cond == 0x1: // BSR: 18
+		cpu.addCycles(10)
+	case taken: // BRA/Bcc taken: 10
+		cpu.addCycles(2)
+	case wordDisplacement: // Bcc.W not taken: 12
+		cpu.addCycles(4)
+	}
 
 	if taken {
 		if cond == 0x1 { // BSR pushes return address
@@ -54,6 +66,7 @@ func dbcc(cpu *cpu) error {
 	}
 
 	if conditionTrue(cpu, cond) {
+		cpu.addCycles(2) // condition true: 12
 		return nil
 	}
 
@@ -63,6 +76,8 @@ func dbcc(cpu *cpu) error {
 
 	if counter != 0xffff {
 		cpu.regs.PC = uint32(int32(basePC) + int32(int16(displacement)))
+	} else {
+		cpu.addCycles(4) // counter expired: 14
 	}
 
 	return nil
@@ -116,6 +131,9 @@ func scc(cpu *cpu) error {
 	}
 
 	if cond == 0 || conditionTrue(cpu, cond) {
+		if (cpu.regs.IR>>3)&0x7 == 0 {
+			cpu.addCycles(2) // Scc Dn, condition true: 6
+		}
 		return dst.write(0xff)
 	}
 
@@ -127,7 +145,7 @@ func sccCycleCalculator() cycleCalculator {
 		mode := (opcode >> 3) & 0x7
 		reg := opcode & 0x7
 		if mode == 0 {
-			return 6
+			return 4 // condition false; scc adds 2 when it is true
 		}
 		return 8 + eaAccessCycles(mode, reg, Byte)
 	}
@@ -154,11 +172,10 @@ func jmp(cpu *cpu) error {
 	return nil
 }
 
+// jmpCycleCalculator times JMP (table 8-10).
 func jmpCycleCalculator() cycleCalculator {
 	return func(opcode uint16) uint32 {
-		mode := (opcode >> 3) & 0x7
-		reg := opcode & 0x7
-		return 4 + eaAccessCycles(mode, reg, Long)
+		return jmpCycles(eaFields(opcode))
 	}
 }
 
@@ -307,10 +324,9 @@ func rts(cpu *cpu) error {
 	return nil
 }
 
+// jsrCycleCalculator times JSR (table 8-10): JMP plus the return address push.
 func jsrCycleCalculator() cycleCalculator {
 	return func(opcode uint16) uint32 {
-		mode := (opcode >> 3) & 0x7
-		reg := opcode & 0x7
-		return 16 + eaAccessCycles(mode, reg, Long)
+		return jmpCycles(eaFields(opcode)) + 8
 	}
 }

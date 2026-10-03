@@ -64,10 +64,12 @@ func init() {
 		eaMaskPreDecrement | eaMaskDisplacement | eaMaskIndex |
 		eaMaskAbsoluteShort | eaMaskAbsoluteLong | eaMaskPCDisplacement | eaMaskPCIndex |
 		eaMaskImmediate
-	registerInstruction(divu, 0x80c0, 0xf1c0, divMulMask, constantCycles(140))
-	registerInstruction(divs, 0x81c0, 0xf1c0, divMulMask, constantCycles(158))
-	registerInstruction(mulu, 0xc0c0, 0xf1c0, divMulMask, constantCycles(70))
-	registerInstruction(muls, 0xc1c0, 0xf1c0, divMulMask, constantCycles(70))
+	// The table holds the source EA time; the handlers add the operand-dependent
+	// execution time.
+	registerInstruction(divu, 0x80c0, 0xf1c0, divMulMask, wordSourceCycleCalculator())
+	registerInstruction(divs, 0x81c0, 0xf1c0, divMulMask, wordSourceCycleCalculator())
+	registerInstruction(mulu, 0xc0c0, 0xf1c0, divMulMask, wordSourceCycleCalculator())
+	registerInstruction(muls, 0xc1c0, 0xf1c0, divMulMask, wordSourceCycleCalculator())
 
 	alterableNoAddr := eaMaskDataRegister | eaMaskIndirect | eaMaskPostIncrement |
 		eaMaskPreDecrement | eaMaskDisplacement | eaMaskIndex |
@@ -80,7 +82,7 @@ func init() {
 
 	for size := range uint16(3) {
 		match := uint16(0x4400) | (size << 6)
-		registerInstruction(negInstruction, match, 0xffc0, alterableNoAddr, clrTstCycleCalculator())
+		registerInstruction(negInstruction, match, 0xffc0, alterableNoAddr, singleOperandCycleCalculator())
 	}
 }
 
@@ -322,39 +324,56 @@ func divExceptionCycles(opcode uint16) uint32 {
 	return exceptionCyclesDivByZero + eaAccessCycles(mode, reg, Word)
 }
 
+// addCycleCalculator times ADD/SUB <ea>,Dn and Dn,<ea> (table 8-4).
 func addCycleCalculator(opmode uint16, toEA bool) cycleCalculator {
 	return func(opcode uint16) uint32 {
-		mode := (opcode >> 3) & 0x7
-		reg := opcode & 0x7
+		mode, reg := eaFields(opcode)
+		size := operandSizeFromOpmode(opmode)
 		if toEA {
-			return 8 + eaAccessCycles(mode, reg, operandSizeFromOpmode(opmode))
+			return readModifyWriteCycles(mode, reg, size, 4, 8)
 		}
-		return 4 + eaAccessCycles(mode, reg, operandSizeFromOpmode(opmode))
+		return dataToRegisterCycles(mode, reg, size)
 	}
 }
 
+// cmpCycleCalculator times CMP <ea>,Dn (table 8-4): no write-back, so a long
+// compare costs only 2 more than a word one.
+func cmpCycleCalculator(opmode uint16) cycleCalculator {
+	return func(opcode uint16) uint32 {
+		mode, reg := eaFields(opcode)
+		size := operandSizeFromOpmode(opmode)
+		if size == Long {
+			return 6 + eaAccessCycles(mode, reg, size)
+		}
+		return 4 + eaAccessCycles(mode, reg, size)
+	}
+}
+
+// wordSourceCycleCalculator charges only the time of a word source operand,
+// for instructions whose execution time the handler adds.
+func wordSourceCycleCalculator() cycleCalculator {
+	return func(opcode uint16) uint32 {
+		mode, reg := eaFields(opcode)
+		return eaAccessCycles(mode, reg, Word)
+	}
+}
+
+// addqSubqCycleCalculator times ADDQ/SUBQ (table 8-5).
 func addqSubqCycleCalculator() cycleCalculator {
 	return func(opcode uint16) uint32 {
-		mode := (opcode >> 3) & 0x7
-		reg := opcode & 0x7
-		size := Size((opcode >> 6) & 0x3)
-
-		if mode == 0 {
-			return 4 + eaAccessCycles(mode, reg, size)
-		}
+		mode, reg := eaFields(opcode)
 		if mode == 1 {
-			return 8 + eaAccessCycles(mode, reg, size)
+			return 8 // An, word or long
 		}
-		return 8 + eaAccessCycles(mode, reg, size)
+		return readModifyWriteCycles(mode, reg, operandSizeFromOpcode(opcode), 4, 8)
 	}
 }
 
+// arithmeticImmediateCycleCalculator times ADDI/SUBI (table 8-5).
 func arithmeticImmediateCycleCalculator() cycleCalculator {
 	return func(opcode uint16) uint32 {
-		size := operandSizeFromOpcode(opcode)
-		mode := (opcode >> 3) & 0x7
-		reg := opcode & 0x7
-		return 8 + eaAccessCycles(mode, reg, size)
+		mode, reg := eaFields(opcode)
+		return immediateCycles(mode, reg, operandSizeFromOpcode(opcode))
 	}
 }
 
@@ -372,6 +391,7 @@ func divu(cpu *cpu) error {
 	}
 
 	dividend := uint32(*dx(cpu))
+	cpu.addCycles(divuCycles(dividend, uint16(divisor)))
 	quotient := dividend / divisor
 	if quotient > 0xffff {
 		replaceStatusFlags(cpu, statusMaskNZVC, srOverflow)
@@ -407,6 +427,7 @@ func divs(cpu *cpu) error {
 	}
 
 	dividend := *dx(cpu)
+	cpu.addCycles(divsCycles(dividend, int16(divisor)))
 	quotient := dividend / divisor
 	if quotient > 0x7fff || quotient < -0x8000 {
 		replaceStatusFlags(cpu, statusMaskNZVC, srOverflow)
@@ -437,6 +458,7 @@ func mulu(cpu *cpu) error {
 		return err
 	}
 
+	cpu.addCycles(muluCycles(uint16(op)))
 	result := uint32(uint16(op)) * uint32(uint16(*dx(cpu)))
 	*dx(cpu) = int32(result)
 
@@ -461,6 +483,7 @@ func muls(cpu *cpu) error {
 		return err
 	}
 
+	cpu.addCycles(mulsCycles(uint16(opRaw)))
 	result := int32(int16(opRaw)) * int32(int16(*dx(cpu)))
 	*dx(cpu) = result
 
@@ -522,11 +545,14 @@ func suba(cpu *cpu) error {
 	return nil
 }
 
+// addaSubaCycleCalculator times ADDA/SUBA (table 8-4).
 func addaSubaCycleCalculator() cycleCalculator {
 	return func(opcode uint16) uint32 {
-		mode := (opcode >> 3) & 0x7
-		reg := opcode & 0x7
-		size := operandSizeFromOpcode(opcode)
+		mode, reg := eaFields(opcode)
+		size := cmpaOperandSize(opcode) // ADDA/SUBA encode the size like CMPA
+		if size == Long && !isRegisterOrImmediate(mode, reg) {
+			return 6 + eaAccessCycles(mode, reg, size)
+		}
 		return 8 + eaAccessCycles(mode, reg, size)
 	}
 }
@@ -560,7 +586,7 @@ func init() {
 
 	for opmode := uint16(0); opmode <= 2; opmode++ {
 		match := uint16(0xb000) | (opmode << 6)
-		registerInstruction(cmpInstruction, match, 0xf1c0, cmpEAMask, addCycleCalculator(opmode, false))
+		registerInstruction(cmpInstruction, match, 0xf1c0, cmpEAMask, cmpCycleCalculator(opmode))
 	}
 	for _, opmode := range []uint16{3, 7} {
 		match := uint16(0xb000) | (opmode << 6)
@@ -673,12 +699,21 @@ func cmpm(cpu *cpu) error {
 	return nil
 }
 
+// cmpiCycleCalculator times CMPI (table 8-5).
 func cmpiCycleCalculator() cycleCalculator {
 	return func(opcode uint16) uint32 {
+		mode, reg := eaFields(opcode)
 		size := operandSizeFromOpcode(opcode)
-		mode := (opcode >> 3) & 0x7
-		reg := opcode & 0x7
-		return 8 + eaAccessCycles(mode, reg, size)
+		switch {
+		case mode == 0 && size == Long:
+			return 14
+		case mode == 0:
+			return 8
+		case size == Long:
+			return 12 + eaAccessCycles(mode, reg, size)
+		default:
+			return 8 + eaAccessCycles(mode, reg, size)
+		}
 	}
 }
 
@@ -702,12 +737,11 @@ func cmpaOperandSize(opcode uint16) Size {
 	return Word
 }
 
+// cmpaCycleCalculator times CMPA (table 8-4).
 func cmpaCycleCalculator() cycleCalculator {
 	return func(opcode uint16) uint32 {
-		mode := (opcode >> 3) & 0x7
-		reg := opcode & 0x7
-		size := cmpaOperandSize(opcode)
-		return 8 + eaAccessCycles(mode, reg, size)
+		mode, reg := eaFields(opcode)
+		return 6 + eaAccessCycles(mode, reg, cmpaOperandSize(opcode))
 	}
 }
 
@@ -721,7 +755,7 @@ func init() {
 		match := uint16(0x4000) | (size << 6)
 		registerInstruction(negx, match, 0xffc0, eaMaskDataRegister|eaMaskIndirect|
 			eaMaskPostIncrement|eaMaskPreDecrement|eaMaskDisplacement|
-			eaMaskIndex|eaMaskAbsoluteShort|eaMaskAbsoluteLong, clrTstCycleCalculator())
+			eaMaskIndex|eaMaskAbsoluteShort|eaMaskAbsoluteLong, singleOperandCycleCalculator())
 	}
 }
 
@@ -905,11 +939,19 @@ func boolToUint32(v bool) uint32 {
 	return 0
 }
 
+// addxSubxCycleCalculator times ADDX/SUBX (table 8-11).
 func addxSubxCycleCalculator(opcode uint16) uint32 {
-	if (opcode>>3)&0x1 == 0 {
+	long := operandSizeFromOpcode(opcode) == Long
+	switch {
+	case (opcode>>3)&0x1 == 0 && long:
+		return 8
+	case (opcode>>3)&0x1 == 0:
 		return 4
+	case long:
+		return 30
+	default:
+		return 18
 	}
-	return 18
 }
 
 func init() {
@@ -1124,11 +1166,13 @@ func sbcdCycleCalculator(opcode uint16) uint32 {
 	return 18
 }
 
+// nbcdCycleCalculator times NBCD (table 8-6).
 func nbcdCycleCalculator(opcode uint16) uint32 {
-	if (opcode>>3)&0x1 == 0 {
+	mode, reg := eaFields(opcode)
+	if mode == 0 {
 		return 6
 	}
-	return 8
+	return 8 + eaAccessCycles(mode, reg, Byte)
 }
 
 func init() {
@@ -1138,10 +1182,10 @@ func init() {
 
 	for size := range uint16(3) {
 		match := uint16(0x4200) | (size << 6)
-		registerInstruction(clr, match, 0xffc0, alterableNoAddr, clrTstCycleCalculator())
+		registerInstruction(clr, match, 0xffc0, alterableNoAddr, singleOperandCycleCalculator())
 
 		match = uint16(0x4a00) | (size << 6)
-		registerInstruction(tst, match, 0xffc0, alterableNoAddr|eaMaskPCDisplacement|eaMaskPCIndex|eaMaskImmediate, clrTstCycleCalculator())
+		registerInstruction(tst, match, 0xffc0, alterableNoAddr|eaMaskPCDisplacement|eaMaskPCIndex|eaMaskImmediate, tstCycleCalculator())
 	}
 }
 

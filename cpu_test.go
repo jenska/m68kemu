@@ -183,8 +183,8 @@ func TestCycleCounterMemoryMove(t *testing.T) {
 		t.Fatalf("move failed: %v", err)
 	}
 
-	if cpu.Cycles() != 8 {
-		t.Fatalf("unexpected cycles for MOVE.L D0,(A0): got %d want 8", cpu.Cycles())
+	if cpu.Cycles() != 12 {
+		t.Fatalf("unexpected cycles for MOVE.L D0,(A0): got %d want 12", cpu.Cycles())
 	}
 }
 
@@ -378,10 +378,10 @@ func TestEACycleTable(t *testing.T) {
 	}{
 		{"Dn", 0, 0, Byte, 0},
 		{"An", 1, 0, Word, 0},
-		{"(An)", 2, 3, Long, 4},
+		{"(An)", 2, 3, Long, 8},
 		{"-(An)", 4, 7, Word, 6},
 		{"AbsoluteLong", 7, 1, Word, 12},
-		{"PCIndexed", 7, 3, Long, 10},
+		{"PCIndexed", 7, 3, Long, 14},
 		{"ImmediateWord", 7, 4, Word, 4},
 		{"ImmediateLong", 7, 4, Long, 8},
 	}

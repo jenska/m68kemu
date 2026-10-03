@@ -7,6 +7,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/SemVer
 
 ## [Unreleased]
 
+### Added
+
+- `WithCycleRounding(n)` rounds every instruction's cycles (including the
+  exception or interrupt processing it triggers) up to a multiple of `n`, for
+  machines such as the Atari ST whose bus only grants the CPU 4-cycle slots
+
+### Fixed
+
+- Instruction timing now matches the M68000 User's Manual (section 8), checked
+  by a reference test of about 200 instruction forms. Previously long operands
+  in memory, read-modify-write instructions, `LEA`/`PEA`/`JMP`/`JSR`,
+  `MOVEM`, `CMP`/`CMPA`/`EOR`, `ADDX.L`, the bit instructions, register shifts
+  of longs and `MOVE SR,Dn` were off by 2-12 cycles, and memory shifts to the
+  right were timed as register shifts
+- Run-time dependent timing: `Bcc` taken/not taken and byte/word
+  displacement, `DBcc` condition true/loop/expired, `Scc` true/false,
+  `BCHG`/`BCLR`/`BSET` on bits 16-31 of a data register, `MOVEM` per
+  addressing mode, and `MULU`/`MULS`/`DIVU`/`DIVS` by operand value (the
+  divisions follow Jorge Cwik's exact algorithm) instead of their maxima
+
 ### Changed
 
 - Bumped `github.com/jenska/m68kdasm` to v1.3.0 and `github.com/jenska/m68kasm`

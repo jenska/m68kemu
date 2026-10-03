@@ -56,7 +56,7 @@ func init() {
 		eaMaskDisplacement | eaMaskIndex | eaMaskAbsoluteShort | eaMaskAbsoluteLong
 	for size := range uint16(3) {
 		match := uint16(0x4600) | (size << 6)
-		registerInstruction(notInstruction, match, 0xffc0, notMask, clrTstCycleCalculator())
+		registerInstruction(notInstruction, match, 0xffc0, notMask, singleOperandCycleCalculator())
 	}
 }
 
@@ -89,24 +89,24 @@ func registerLogicalInstruction(ins instruction, match, mask uint16, eaMask uint
 	}
 }
 
+// logicalCycleCalculator times AND/OR <ea>,Dn and AND/OR/EOR Dn,<ea>
+// (table 8-4).
 func logicalCycleCalculator(size uint16, toEA bool) cycleCalculator {
 	return func(opcode uint16) uint32 {
-		mode := (opcode >> 3) & 0x7
-		reg := opcode & 0x7
-		base := uint32(4)
+		mode, reg := eaFields(opcode)
+		operandSize := operandSizeFromOpmode(size)
 		if toEA {
-			base = 8
+			return readModifyWriteCycles(mode, reg, operandSize, 4, 8)
 		}
-		return base + eaAccessCycles(mode, reg, operandSizeFromOpmode(size))
+		return dataToRegisterCycles(mode, reg, operandSize)
 	}
 }
 
+// logicalImmediateCycleCalculator times ANDI/ORI/EORI (table 8-5).
 func logicalImmediateCycleCalculator() cycleCalculator {
 	return func(opcode uint16) uint32 {
-		size := operandSizeFromOpcode(opcode)
-		mode := (opcode >> 3) & 0x7
-		reg := opcode & 0x7
-		return 8 + eaAccessCycles(mode, reg, size)
+		mode, reg := eaFields(opcode)
+		return immediateCycles(mode, reg, operandSizeFromOpcode(opcode))
 	}
 }
 
@@ -297,40 +297,36 @@ func init() {
 	}
 }
 
+// bitCycleCalculator times BTST/BCHG/BCLR/BSET (table 8-8). For a data
+// register destination the table holds the time for bit numbers 0-15;
+// bitOperation adds 2 for bits 16-31 (except BTST).
 func bitCycleCalculator(immediate bool, op uint16) cycleCalculator {
 	return func(opcode uint16) uint32 {
-		mode := (opcode >> 3) & 0x7
-		reg := opcode & 0x7
-
-		// Data register destination
+		mode, reg := eaFields(opcode)
 		if mode == 0 {
+			var cycles uint32
 			switch op {
 			case 0: // BTST
-				if immediate {
-					return 8
-				}
-				return 4
-			default: // BCHG, BCLR, BSET
-				if immediate {
-					return 12
-				}
-				return 8
+				cycles = 6
+			case 2: // BCLR
+				cycles = 8
+			default: // BCHG, BSET
+				cycles = 6
 			}
+			if immediate {
+				cycles += 4
+			}
+			return cycles
 		}
 
-		ea := eaAccessCycles(mode, reg, Byte)
-		switch op {
-		case 0: // BTST
-			if immediate {
-				return 12 + ea
-			}
-			return 8 + ea
-		default: // BCHG, BCLR, BSET
-			if immediate {
-				return 16 + ea
-			}
-			return 12 + ea
+		cycles := uint32(4) // BTST
+		if op != 0 {
+			cycles = 8 // BCHG, BCLR, BSET write the byte back
 		}
+		if immediate {
+			cycles += 4
+		}
+		return cycles + eaAccessCycles(mode, reg, Byte)
 	}
 }
 
@@ -378,6 +374,9 @@ func bitOperation(cpu *cpu, bitNumber uint32, mode uint16, dst modifier) error {
 	cpu.regs.SR &^= srZero
 
 	if mode == 0 { // data register destination (long size)
+		if opType != 0 && bitNumber&31 >= 16 {
+			cpu.addCycles(2) // modifying the upper word takes 2 cycles more
+		}
 		dst := dy(cpu)
 		mask := uint32(1) << (bitNumber & 31)
 		previousSet := (*dst & mask) != 0
@@ -715,18 +714,22 @@ func shiftMemoryCycles(ir uint16) uint32 {
 	return 8 + eaAccessCycles(mode, reg, Word)
 }
 
+// shiftRegisterCycleCalculator times a register shift or rotate (table 8-7):
+// 6 (byte/word) or 8 (long) plus 2 per bit shifted. A count taken from a
+// register is added by shiftRotate.
 func shiftRegisterCycleCalculator(opcode uint16) uint32 {
-	operation := int((opcode >> 3) & 0x7)
-	registerCount := operation >= 4
-	if registerCount {
-		return 6
+	cycles := uint32(6)
+	if (opcode>>6)&0x3 == 2 {
+		cycles = 8
 	}
-
-	countField := int((opcode >> 9) & 0x7)
-	if countField == 0 {
-		countField = 8
+	if (opcode>>5)&0x1 == 1 { // count in a data register
+		return cycles
 	}
-	return 6 + uint32(countField*2)
+	count := uint32((opcode >> 9) & 0x7)
+	if count == 0 {
+		count = 8
+	}
+	return cycles + 2*count
 }
 
 func shiftMemoryCycleCalculator(opcode uint16) uint32 {
@@ -734,7 +737,7 @@ func shiftMemoryCycleCalculator(opcode uint16) uint32 {
 }
 
 func shiftRotateCycleCalculator(opcode uint16) uint32 {
-	if (opcode>>6)&0x7 == 0x7 {
+	if (opcode>>6)&0x3 == 0x3 { // size field 11 selects the memory form
 		return shiftMemoryCycleCalculator(opcode)
 	}
 	return shiftRegisterCycleCalculator(opcode)

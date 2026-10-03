@@ -165,7 +165,7 @@ func moveCycles(ir uint16, size Size) uint32 {
 	dstMode := (ir >> 6) & 0x7
 	dstReg := (ir >> 9) & 0x7
 
-	return 4 + eaAccessCycles(srcMode, srcReg, size) + eaAccessCycles(dstMode, dstReg, size)
+	return 4 + eaAccessCycles(srcMode, srcReg, size) + moveDestinationCycles(dstMode, dstReg, size)
 }
 
 func moveAddressCycles(ir uint16, size Size) uint32 {
@@ -330,8 +330,7 @@ func movemToRegisters(cpu *cpu) error {
 	}
 
 	regs := movemRegisterOrder(uint16(mask), false)
-	// 12 cycles base + 4 cycles per register transferred
-	cpu.addCycles(12 + 4*uint32(len(regs)))
+	cpu.addCycles(movemBaseCycles(mode, reg, true) + movemRegisterCycles(size, len(regs)))
 
 	sizeBytes := uint32(size)
 
@@ -395,8 +394,7 @@ func movemToMemory(cpu *cpu) error {
 
 	reverse := mode == 4
 	regs := movemRegisterOrder(uint16(mask), reverse)
-	// 8 cycles base + 4 cycles per register transferred
-	cpu.addCycles(8 + 4*uint32(len(regs)))
+	cpu.addCycles(movemBaseCycles(mode, reg, false) + movemRegisterCycles(size, len(regs)))
 
 	sizeBytes := uint32(size)
 
@@ -523,7 +521,7 @@ func movepCycleCalculator(opcode uint16) uint32 {
 func init() {
 	const leaPeaAddressMask = eaMaskIndirect | eaMaskPostIncrement | eaMaskPreDecrement | eaMaskDisplacement | eaMaskIndex | eaMaskAbsoluteShort | eaMaskAbsoluteLong | eaMaskPCDisplacement | eaMaskPCIndex
 
-	registerInstruction(lea, 0x41c0, 0xf1c0, leaPeaAddressMask, leaPeaCycleCalculator(4))
+	registerInstruction(lea, 0x41c0, 0xf1c0, leaPeaAddressMask, leaPeaCycleCalculator(0))
 	registerInstruction(pea, 0x4840, 0xffc0, leaPeaAddressMask, leaPeaCycleCalculator(8))
 }
 
@@ -558,14 +556,11 @@ func pea(cpu *cpu) error {
 	return cpu.push(Long, src.computedAddress())
 }
 
-func leaPeaCycles(ir uint16, base uint32) uint32 {
-	mode := (ir >> 3) & 0x7
-	reg := ir & 0x7
-	return base + eaAccessCycles(mode, reg, Long)
-}
-
-func leaPeaCycleCalculator(base uint32) cycleCalculator {
+// leaPeaCycleCalculator returns LEA's time per mode plus extra (8 for PEA's
+// push), table 8-10.
+func leaPeaCycleCalculator(extra uint32) cycleCalculator {
 	return func(opcode uint16) uint32 {
-		return leaPeaCycles(opcode, base)
+		mode, reg := eaFields(opcode)
+		return leaCycles(mode, reg) + extra
 	}
 }

@@ -71,6 +71,9 @@ type (
 )
 
 var (
+	// eaCycleTable is the effective address calculation time for a byte or
+	// word operand (M68000 User's Manual table 8-1). A long operand takes 4
+	// cycles more for every mode that accesses memory or an immediate.
 	eaCycleTable = [8][8]uint32{
 		{0, 0, 0, 0, 0, 0, 0, 0},         // Dn
 		{0, 0, 0, 0, 0, 0, 0, 0},         // An
@@ -79,7 +82,7 @@ var (
 		{6, 6, 6, 6, 6, 6, 6, 6},         // -(An)
 		{8, 8, 8, 8, 8, 8, 8, 8},         // (d16,An)
 		{10, 10, 10, 10, 10, 10, 10, 10}, // (d8,An,Xn)
-		{8, 12, 8, 10, 0, 0, 0, 0},       // (xxx).W, (xxx).L, (d16,PC), (d8,PC,Xn), #<data>
+		{8, 12, 8, 10, 4, 0, 0, 0},       // (xxx).W, (xxx).L, (d16,PC), (d8,PC,Xn), #<data>
 	}
 
 	eaSrc = []ea{
@@ -485,16 +488,9 @@ func ix68000(c *cpu, a uint32) (uint32, error) {
 }
 
 func eaAccessCycles(mode, reg uint16, size Size) uint32 {
-	if mode == 7 && reg == 4 { // #<data>
-		switch size {
-		case Byte, Word:
-			return 4
-		case Long:
-			return 8
-		default:
-			return 0
-		}
+	cycles := eaCycleTable[mode][reg]
+	if size == Long && cycles != 0 {
+		cycles += 4
 	}
-
-	return eaCycleTable[mode][reg]
+	return cycles
 }

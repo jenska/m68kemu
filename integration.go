@@ -31,7 +31,8 @@ func (cpu *cpu) SetIRQSource(src IRQSource) {
 type Option func(*cpuConfig)
 
 type cpuConfig struct {
-	deferReset bool
+	deferReset    bool
+	cycleRounding uint32
 }
 
 // WithDeferredReset skips the implicit Reset performed by NewCPU. The caller
@@ -41,6 +42,15 @@ type cpuConfig struct {
 // CPU is created.
 func WithDeferredReset() Option {
 	return func(c *cpuConfig) { c.deferReset = true }
+}
+
+// WithCycleRounding rounds the cycles of every instruction, together with any
+// exception or interrupt processing it triggers, up to a multiple of n. An
+// Atari ST needs n = 4: its GLUE and MMU let the CPU onto the bus only on
+// 4-cycle boundaries, so an instruction listed at 10 cycles occupies 12.
+// n of 0 or 1 disables rounding.
+func WithCycleRounding(n uint32) Option {
+	return func(c *cpuConfig) { c.cycleRounding = n }
 }
 
 // Hooks bundles every observation callback the core supports. A nil field means

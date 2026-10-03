@@ -6,7 +6,7 @@ func init() {
 	registerInstruction(extInstruction, 0x4880, 0xfff8, 0, constantCycles(4))
 	registerInstruction(extInstruction, 0x48c0, 0xfff8, 0, constantCycles(4))
 	registerInstruction(tasInstruction, 0x4ac0, 0xffc0, eaMaskDataRegister|eaMaskIndirect|eaMaskPostIncrement|
-		eaMaskPreDecrement|eaMaskDisplacement|eaMaskIndex|eaMaskAbsoluteShort|eaMaskAbsoluteLong, clrTstCycleCalculator())
+		eaMaskPreDecrement|eaMaskDisplacement|eaMaskIndex|eaMaskAbsoluteShort|eaMaskAbsoluteLong, tasCycleCalculator())
 
 	registerExgInstruction(0xc140, constantCycles(6))
 	registerExgInstruction(0xc148, constantCycles(6))
@@ -36,7 +36,7 @@ func init() {
 		eaMaskPreDecrement | eaMaskDisplacement | eaMaskIndex |
 		eaMaskAbsoluteShort | eaMaskAbsoluteLong
 
-	registerInstruction(moveFromSr, 0x40c0, 0xffc0, controlDestinationMask, moveControlCycleCalculator(Word))
+	registerInstruction(moveFromSr, 0x40c0, 0xffc0, controlDestinationMask, moveFromSrCycleCalculator())
 	registerInstruction(moveToCcr, 0x44c0, 0xffc0, controlSourceMask, moveControlCycleCalculator(Word))
 	registerInstruction(moveToSr, 0x46c0, 0xffc0, controlSourceMask, moveControlCycleCalculator(Word))
 
@@ -82,12 +82,31 @@ func stop(cpu *cpu) error {
 	return nil
 }
 
-func clrTstCycleCalculator() cycleCalculator {
+// singleOperandCycleCalculator times CLR/NEG/NEGX/NOT (table 8-6).
+func singleOperandCycleCalculator() cycleCalculator {
 	return func(opcode uint16) uint32 {
-		size := operandSizeFromOpcode(opcode)
-		mode := (opcode >> 3) & 0x7
-		reg := opcode & 0x7
-		return 4 + eaAccessCycles(mode, reg, size)
+		mode, reg := eaFields(opcode)
+		return readModifyWriteCycles(mode, reg, operandSizeFromOpcode(opcode), 4, 6)
+	}
+}
+
+// tstCycleCalculator times TST (table 8-6).
+func tstCycleCalculator() cycleCalculator {
+	return func(opcode uint16) uint32 {
+		mode, reg := eaFields(opcode)
+		return 4 + eaAccessCycles(mode, reg, operandSizeFromOpcode(opcode))
+	}
+}
+
+// tasCycleCalculator times TAS (table 8-12): the memory form runs an
+// indivisible read-modify-write bus cycle.
+func tasCycleCalculator() cycleCalculator {
+	return func(opcode uint16) uint32 {
+		mode, reg := eaFields(opcode)
+		if mode == 0 {
+			return 4
+		}
+		return 14 + eaAccessCycles(mode, reg, Byte)
 	}
 }
 
@@ -121,6 +140,15 @@ func andiToSr(cpu *cpu) error  { return logicalSrOp(cpu, func(a, b uint16) uint1
 func eoriToCcr(cpu *cpu) error { return logicalCcrOp(cpu, func(a, b uint16) uint16 { return a ^ b }) }
 func eoriToSr(cpu *cpu) error  { return logicalSrOp(cpu, func(a, b uint16) uint16 { return a ^ b }) }
 
+// moveFromSrCycleCalculator times MOVE SR,<ea> (table 8-12).
+func moveFromSrCycleCalculator() cycleCalculator {
+	return func(opcode uint16) uint32 {
+		mode, reg := eaFields(opcode)
+		return readModifyWriteCycles(mode, reg, Word, 6, 6)
+	}
+}
+
+// moveControlCycleCalculator times MOVE <ea>,SR and MOVE <ea>,CCR (table 8-12).
 func moveControlCycleCalculator(size Size) cycleCalculator {
 	return func(opcode uint16) uint32 {
 		mode := (opcode >> 3) & 0x7

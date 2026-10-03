@@ -337,6 +337,10 @@ type (
 		regs   Registers
 		cycles uint64
 		bus    *Bus
+		// cycleRounding is the multiple each instruction's cycles are rounded
+		// up to (see WithCycleRounding); 0 or 1 disables it.
+		cycleRounding          uint32
+		instructionStartCycles uint64
 		// fastFetch caches the single-RAM instruction-fetch fast path. It is
 		// valid only while fastFetchOK is true (fast RAM present, no
 		// breakpoints, no active tracing) and is rebuilt by refreshRunModes.
@@ -881,10 +885,25 @@ func (cpu *cpu) rememberOpcodePC(pc uint32) {
 func (cpu *cpu) beginInstructionContext(pc uint32) {
 	cpu.currentOpcodePC = pc & 0xffffff
 	cpu.currentOpcodeValid = true
+	cpu.instructionStartCycles = cpu.cycles
 }
 
 func (cpu *cpu) endInstructionContext() {
+	cpu.roundInstructionCycles()
 	cpu.currentOpcodeValid = false
+}
+
+// roundInstructionCycles pads the current instruction's cycles up to the next
+// multiple of cycleRounding. It is idempotent, so the debug path can round
+// before reporting the instruction's cycle delta.
+func (cpu *cpu) roundInstructionCycles() {
+	n := uint64(cpu.cycleRounding)
+	if n <= 1 || !cpu.currentOpcodeValid {
+		return
+	}
+	if rem := (cpu.cycles - cpu.instructionStartCycles) % n; rem != 0 {
+		cpu.addCycles(uint32(n - rem))
+	}
 }
 
 func (cpu *cpu) currentOpcodeAddress(fallback uint32) uint32 {
@@ -1285,6 +1304,7 @@ func (cpu *cpu) executeNextDebug() error {
 		return err
 	}
 	if cpu.traceInstructions {
+		cpu.roundInstructionCycles()
 		cpu.sendTrace(pc, beforeRegs, uint32(cpu.cycles-beforeCycles))
 	}
 	cpu.endInstructionContext()
@@ -1570,7 +1590,7 @@ func NewCPU(bus *Bus, opts ...Option) (CPU, error) {
 		opt(&cfg)
 	}
 
-	c := cpu{bus: bus, interrupts: newInterruptController()}
+	c := cpu{bus: bus, interrupts: newInterruptController(), cycleRounding: cfg.cycleRounding}
 	bus.waitHook = func(states uint32) { c.addCycles(states) }
 
 	if cfg.deferReset {
