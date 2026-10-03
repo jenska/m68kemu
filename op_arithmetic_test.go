@@ -1038,3 +1038,40 @@ func TestAddSubAddressRegisterSource(t *testing.T) {
 		})
 	}
 }
+
+// TestNBCDMemoryOperands covers the memory forms besides -(An). The opcodes
+// are encoded by hand because m68kasm only accepts Dn and -(An) for NBCD.
+func TestNBCDMemoryOperands(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		code   []byte
+		addr   uint32
+		postA0 uint32
+	}{
+		{"NBCD (A0)", []byte{0x48, 0x10}, 0x3000, 0x3000},
+		{"NBCD (A0)+", []byte{0x48, 0x18}, 0x3000, 0x3001},
+		{"NBCD 4(A0)", []byte{0x48, 0x28, 0x00, 0x04}, 0x3004, 0x3000},
+		{"NBCD $3010.W", []byte{0x48, 0x38, 0x30, 0x10}, 0x3010, 0x3000},
+		{"NBCD $3010.L", []byte{0x48, 0x39, 0x00, 0x00, 0x30, 0x10}, 0x3010, 0x3000},
+	} {
+		cpu, ram := newEnvironment(t)
+		cpu.regs.A[0] = 0x3000
+		_ = ram.Write(Byte, tc.addr, 0x25)
+		for i, b := range tc.code {
+			_ = ram.Write(Byte, cpu.regs.PC+uint32(i), uint32(b))
+		}
+		if err := cpu.Step(); err != nil {
+			t.Fatalf("%s: %v", tc.name, err)
+		}
+		got, _ := ram.Read(Byte, tc.addr)
+		if got != 0x75 {
+			t.Errorf("%s: result %02x, want 75 (0 - 25 in BCD)", tc.name, got)
+		}
+		if cpu.regs.SR&srCarry == 0 {
+			t.Errorf("%s: carry clear, want set for a non-zero operand", tc.name)
+		}
+		if cpu.regs.A[0] != tc.postA0 {
+			t.Errorf("%s: A0 = %04x, want %04x", tc.name, cpu.regs.A[0], tc.postA0)
+		}
+	}
+}

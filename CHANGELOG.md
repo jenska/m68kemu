@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/SemVer
 
 ## [Unreleased]
 
+## [1.6.0] - 2026-10-03
+
 ### Added
 
 - `WithCycleRounding(n)` rounds every instruction's cycles (including the
@@ -26,6 +28,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/SemVer
   `BCHG`/`BCLR`/`BSET` on bits 16-31 of a data register, `MOVEM` per
   addressing mode, and `MULU`/`MULS`/`DIVU`/`DIVS` by operand value (the
   divisions follow Jorge Cwik's exact algorithm) instead of their maxima
+- Exceptions that replace an instruction's time with their own (divide by
+  zero, CHK, TRAPV, privilege violation, illegal and line A/F opcodes, bus and
+  address errors) now advance an attached `CycleScheduler` as well; before,
+  only the CPU cycle counter moved, so scheduled devices fell behind. `RESET`
+  charges its reset pulse only after the privilege check, so a `RESET` in user
+  mode costs 34 cycles instead of 132
+- `NBCD` accepts every data-alterable addressing mode, not only `Dn` and
+  `-(An)`; the other modes raised an illegal-instruction exception
 
 ### Changed
 

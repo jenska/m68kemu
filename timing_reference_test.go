@@ -9,6 +9,7 @@ import (
 // execution times).
 type timingCase struct {
 	asm   string
+	code  []byte // hand-encoded instruction, for forms m68kasm rejects
 	want  uint64
 	setup func(*cpu, *RAM)
 }
@@ -141,6 +142,9 @@ var timingReference = []timingCase{
 	{asm: "ST D1", want: 6},
 	{asm: "SEQ (A0)", want: 12},
 	{asm: "NBCD D1", want: 6},
+	{asm: "NBCD -(A0)", want: 14},
+	{code: []byte{0x48, 0x10}, asm: "NBCD (A0)", want: 12},
+	{code: []byte{0x48, 0x39, 0x00, 0x00, 0x32, 0x00}, asm: "NBCD $3200.L", want: 20},
 
 	// Shift/rotate (table 8-7)
 	{asm: "LSL.W #1,D1", want: 8},
@@ -264,7 +268,10 @@ func runTimingCase(t *testing.T, tc timingCase) uint64 {
 	if tc.setup != nil {
 		tc.setup(cpu, ram)
 	}
-	code := assemble(t, tc.asm)
+	code := tc.code
+	if code == nil {
+		code = assemble(t, tc.asm)
+	}
 	for i, b := range code {
 		_ = ram.Write(Byte, cpu.regs.PC+uint32(i), uint32(b))
 	}
@@ -314,7 +321,7 @@ func TestCycleRoundingPadsEachInstruction(t *testing.T) {
 	for i, b := range code {
 		_ = ram.Write(Byte, 0x2000+uint32(i), uint32(b))
 	}
-	processor.(*cpu).regs.D[1] = 1 // EXG moves it into D0: DBRA branches once, then expires
+	processor.(*cpu).regs.D[1] = 1                // EXG moves it into D0: DBRA branches once, then expires
 	for i, want := range []uint64{4, 8, 12, 16} { // NOP 4, EXG 6, DBRA taken 10, DBRA expired 14
 		start := processor.Cycles()
 		if err := processor.Step(); err != nil {

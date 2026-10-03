@@ -1802,13 +1802,16 @@ func (cpu *cpu) addCycles(c uint32) {
 	}
 }
 
+// overrideInstructionCycles replaces the current instruction's table time
+// with total, the time of the exception it raises instead. The difference
+// goes through addCycles so an attached scheduler stays in step. Every
+// instruction that can raise such an exception is tabled at or below that
+// exception's time (RESET charges its long reset pulse only once the
+// privilege check passed), so the difference never needs to be taken back.
 func (cpu *cpu) overrideInstructionCycles(total uint32) {
-	current := opcodeCycleTable[cpu.regs.IR]
-	if total >= current {
-		cpu.cycles += uint64(total - current)
-		return
+	if current := opcodeCycleTable[cpu.regs.IR]; total > current {
+		cpu.addCycles(total - current)
 	}
-	cpu.cycles -= uint64(current - total)
 }
 
 // Cycles returns the total number of cycles executed since the last reset.

@@ -16,7 +16,9 @@ func init() {
 	registerInstruction(nop, 0x4e71, 0xffff, 0, constantCycles(4))
 
 	registerInstruction(trapv, 0x4e76, 0xffff, 0, constantCycles(4))
-	registerInstruction(resetInstruction, 0x4e70, 0xffff, 0, constantCycles(132))
+	// RESET takes 132 cycles; resetInstruction adds the 128 of the reset pulse
+	// once the privilege check passed, so a privilege violation costs 34.
+	registerInstruction(resetInstruction, 0x4e70, 0xffff, 0, constantCycles(4))
 	registerInstruction(stop, 0x4e72, 0xffff, 0, constantCycles(4))
 	registerInstruction(movec68000, 0x4e7a, 0xffff, 0, constantCycles(4))
 	registerInstruction(movec68000, 0x4e7b, 0xffff, 0, constantCycles(4))
@@ -63,6 +65,7 @@ func resetInstruction(cpu *cpu) error {
 		return err
 	}
 
+	cpu.addCycles(128)
 	cpu.bus.Reset()
 	cpu.interrupts.reset()
 	return nil

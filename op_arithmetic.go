@@ -959,8 +959,9 @@ func init() {
 	registerInstruction(abcd, 0xc108, 0xf1f8, 0, abcdCycleCalculator)
 	registerInstruction(sbcd, 0x8100, 0xf1f8, 0, sbcdCycleCalculator)
 	registerInstruction(sbcd, 0x8108, 0xf1f8, 0, sbcdCycleCalculator)
-	registerInstruction(nbcd, 0x4800, 0xfff8, 0, nbcdCycleCalculator)
-	registerInstruction(nbcd, 0x4820, 0xfff8, 0, nbcdCycleCalculator)
+	registerInstruction(nbcd, 0x4800, 0xffc0, eaMaskDataRegister|eaMaskIndirect|eaMaskPostIncrement|
+		eaMaskPreDecrement|eaMaskDisplacement|eaMaskIndex|eaMaskAbsoluteShort|eaMaskAbsoluteLong,
+		nbcdCycleCalculator)
 }
 
 func abcd(cpu *cpu) error {
@@ -998,14 +999,18 @@ func sbcd(cpu *cpu) error {
 }
 
 func nbcd(cpu *cpu) error {
-	operand, err := bcdDestination(cpu)
+	dst, err := cpu.ResolveSrcEA(Byte)
+	if err != nil {
+		return err
+	}
+	value, err := dst.read()
 	if err != nil {
 		return err
 	}
 
 	prevZero := cpu.regs.SR&srZero != 0
-	result, borrow := bcdSub(operand.value, 0, cpu.regs.SR&srExtend != 0)
-	if err := operand.write(result); err != nil {
+	result, borrow := bcdSub(byte(value), 0, cpu.regs.SR&srExtend != 0)
+	if err := dst.write(uint32(result)); err != nil {
 		return err
 	}
 
@@ -1077,11 +1082,6 @@ type bcdOperand struct {
 	write func(byte) error
 }
 
-type bcdSourceDest struct {
-	value byte
-	write func(byte) error
-}
-
 func bcdOperands(cpu *cpu) (bcdOperand, bcdOperand, error) {
 	if (cpu.regs.IR>>3)&0x1 == 0 {
 		srcReg := dy(cpu)
@@ -1116,39 +1116,6 @@ func bcdOperands(cpu *cpu) (bcdOperand, bcdOperand, error) {
 		write: func(v byte) error {
 			return cpu.write(Byte, destAddr, uint32(v))
 		},
-	}, nil
-}
-
-func bcdDestination(cpu *cpu) (bcdSourceDest, error) {
-	mode := (cpu.regs.IR >> 3) & 0x7
-	reg := y(cpu.regs.IR)
-
-	if mode == 0 {
-		dstReg := dy(cpu)
-		return bcdSourceDest{
-			value: byte(*dstReg & 0xff),
-			write: func(v byte) error {
-				*dstReg = (*dstReg & 0xffffff00) | uint32(v)
-				return nil
-			},
-		}, nil
-	}
-
-	if mode != 4 {
-		return bcdSourceDest{}, cpu.exception(XIllegal)
-	}
-
-	addr := cpu.regs.A[reg] - addressRegisterStep(reg, Byte)
-	cpu.regs.A[reg] = addr
-
-	value, err := cpu.read(Byte, addr)
-	if err != nil {
-		return bcdSourceDest{}, err
-	}
-
-	return bcdSourceDest{
-		value: byte(value),
-		write: func(v byte) error { return cpu.write(Byte, addr, uint32(v)) },
 	}, nil
 }
 
