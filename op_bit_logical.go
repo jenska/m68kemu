@@ -434,7 +434,15 @@ func bitOperation(cpu *cpu, bitNumber uint32, mode uint16, dst modifier) error {
 }
 
 func init() {
-	registerInstruction(shiftRotate, 0xe000, 0xf000, 0, shiftRotateCycleCalculator)
+	// Register forms: size field 00-10, every count/register combination.
+	for size := range uint16(3) {
+		registerInstruction(shiftRotate, 0xe000|(size<<6), 0xf0c0, 0, shiftRotateCycleCalculator)
+	}
+	// Memory forms: size field 11, bit 11 clear (the 68020 bit-field
+	// instructions use the rest), and a memory alterable operand.
+	const memoryAlterable = eaMaskIndirect | eaMaskPostIncrement | eaMaskPreDecrement |
+		eaMaskDisplacement | eaMaskIndex | eaMaskAbsoluteShort | eaMaskAbsoluteLong
+	registerInstruction(shiftRotate, 0xe0c0, 0xf8c0, memoryAlterable, shiftRotateCycleCalculator)
 }
 
 func shiftRotate(cpu *cpu) error {

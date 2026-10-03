@@ -50,8 +50,10 @@ func registerMove(ins instruction, base uint16, calc cycleCalculator) {
 			continue
 		}
 		for dstReg := range uint16(8) {
-			// Destination must be alterable: exclude PC relative and immediate forms.
-			if dstMode == 7 && (dstReg == 2 || dstReg == 3 || dstReg == 4) {
+			// Destination must be data alterable: mode 7 only has the two
+			// absolute forms; registers 2-7 are PC-relative, immediate or
+			// unassigned.
+			if dstMode == 7 && dstReg > 1 {
 				continue
 			}
 			match := base | (dstReg << 9) | (dstMode << 6)
