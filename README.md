@@ -31,6 +31,8 @@ Still missing for a complete Atari ST:
 
 * Prefetch-sensitive behavior and any remaining compatibility gaps found by larger TOS / software workloads.
 
+Support for the MC68010 to MC68060, including PMMU and FPU, is planned. See [doc/roadmap.md](doc/roadmap.md).
+
 ## Getting Started
 
 This package is designed to be used as a library in your own projects.
