@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/SemVer
 
 ## [Unreleased]
 
+## [1.6.2] - 2026-10-04
+
 ### Changed
 
 - Refreshed README and benchmark documentation with Go 1.27.1 results
