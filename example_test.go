@@ -1,4 +1,4 @@
-package main
+package m68kemu_test
 
 import (
 	"fmt"
@@ -8,12 +8,14 @@ import (
 	m68kemu "github.com/jenska/m68kemu"
 )
 
-const (
-	stackPointer = 0x8000
-	startAddress = 0x2000
-)
+// Example_quicksort assembles testdata/qsort.s, runs it until it reaches its
+// halt loop and prints the sorted array.
+func Example_quicksort() {
+	const (
+		stackPointer = 0x8000
+		startAddress = 0x2000
+	)
 
-func main() {
 	program, err := asm.AssembleFile("testdata/qsort.s")
 	if err != nil {
 		log.Fatalf("failed to assemble qsort.s: %v", err)
@@ -66,4 +68,18 @@ func main() {
 		fmt.Printf("a[%d] = %d\n", i, int32(value))
 	}
 	fmt.Printf("Completed in %d instructions (%d cycles)\n", steps+1, cpu.Cycles())
+
+	// Output:
+	// Sorted array at 0x208e:
+	// a[0] = 0
+	// a[1] = 12
+	// a[2] = 13
+	// a[3] = 16
+	// a[4] = 21
+	// a[5] = 38
+	// a[6] = 43
+	// a[7] = 51
+	// a[8] = 73
+	// a[9] = 91
+	// Completed in 571 instructions (6438 cycles)
 }
