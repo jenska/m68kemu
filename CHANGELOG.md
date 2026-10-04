@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/SemVer
 
 ## [Unreleased]
 
+### Changed
+
+- Refreshed README and benchmark documentation with Go 1.27.1 results, and
+  documented the bus lookup regression `BenchmarkBusReadMappedRanges` shows
+  since devices with a `Contains` method stopped using the page map
+
 ## [1.6.1] - 2026-10-04
 
 ### Fixed

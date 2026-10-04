@@ -2,22 +2,40 @@
 
 ## Current Results
 
-Benchmarks were run on June 13, 2026 on an Apple M1 (`darwin/arm64`) with Go 1.26.3:
+Benchmarks were run on October 4, 2026 on an Apple M1 (`darwin/arm64`) with Go 1.27.1:
 
 ```sh
 go test -run '^$' -bench 'Benchmark(BubbleSort|PrimeSieve|RunEightMillionCycles|RecursiveFibonacci|CycleSchedulerAdvanceBurst|BusReadMappedRanges)$' -benchmem -count=5 .
 ```
 
-Representative medians from the runs:
+Representative medians from the runs, compared with the previous report (June 13, 2026, Go 1.26.3, same machine):
 
-| Benchmark | Result | Allocations |
-| --- | --- | --- |
-| `BenchmarkBubbleSort` | `2537946 ns/op` | `0 B/op, 0 allocs/op` |
-| `BenchmarkPrimeSieve` | `5035525 ns/op` | `4 B/op, 1 allocs/op` |
-| `BenchmarkRunEightMillionCycles` | `25526229 ns/op` | `0 B/op, 0 allocs/op` |
-| `BenchmarkRecursiveFibonacci` | `26577540 ns/op` | `0 B/op, 0 allocs/op` |
-| `BenchmarkCycleSchedulerAdvanceBurst` | `3291 ns/op` | `0 B/op, 0 allocs/op` |
-| `BenchmarkBusReadMappedRanges` | `15.53 ns/op` | `0 B/op, 0 allocs/op` |
+| Benchmark | Result | Allocations | June 2026 | Change |
+| --- | --- | --- | --- | --- |
+| `BenchmarkBubbleSort` | `2614994 ns/op` | `0 B/op, 0 allocs/op` | `2537946 ns/op` | +3% |
+| `BenchmarkPrimeSieve` | `5001071 ns/op` | `4 B/op, 1 allocs/op` | `5035525 ns/op` | -1% |
+| `BenchmarkRunEightMillionCycles` | `19508466 ns/op` | `0 B/op, 0 allocs/op` | `25526229 ns/op` | -24% |
+| `BenchmarkRecursiveFibonacci` | `18013311 ns/op` | `0 B/op, 0 allocs/op` | `26577540 ns/op` | -32% |
+| `BenchmarkCycleSchedulerAdvanceBurst` | `2948 ns/op` | `0 B/op, 0 allocs/op` | `3291 ns/op` | -10% |
+| `BenchmarkBusReadMappedRanges` | `164.4 ns/op` | `0 B/op, 0 allocs/op` | `15.53 ns/op` | +959% |
+
+### Bus Lookup Regression
+
+`BenchmarkBusReadMappedRanges` is about 10x slower than in June. Bisecting points to
+commit `731b476` ("Make Device.Contains optional"): its parent still measures about
+`15.5 ns/op`.
+
+Since that change, `refreshTopology` page-maps only devices that implement
+`AddressRangeDevice` *without* `ContainsDevice`. A device that implements both goes on
+the linear scan list instead. The benchmark's `stubMappedDevice` implements both, so
+it now measures a 64-entry linear scan rather than the page map.
+
+This affects real setups too, not only the benchmark: `RAM` and the internal
+`mappedDevice` both implement `Contains` and `AddressRange`, so on a bus with more than
+one device none of the built-in devices use the page map. The `Device` documentation
+says that for such devices "Contains decides membership and AddressRange only bounds
+it"; using the range to page-map the device and then confirming with `Contains` would
+restore the fast path without changing that contract.
 
 ## What Improved
 
@@ -45,47 +63,57 @@ These changes were made while also improving correctness:
 Representative profiles were collected with:
 
 ```sh
-go test -run '^$' -bench BenchmarkRecursiveFibonacci -cpuprofile /tmp/m68kemu_recursive_2026-06-13.cpu.out .
-go test -run '^$' -bench BenchmarkBubbleSort -cpuprofile /tmp/m68kemu_bubble_2026-06-13.cpu.out .
-go tool pprof -top /tmp/m68kemu_recursive_2026-06-13.cpu.out
-go tool pprof -top /tmp/m68kemu_bubble_2026-06-13.cpu.out
+go test -run '^$' -bench BenchmarkRecursiveFibonacci -cpuprofile /tmp/m68kemu_recursive_2026-10-04.cpu.out .
+go test -run '^$' -bench BenchmarkBubbleSort -cpuprofile /tmp/m68kemu_bubble_2026-10-04.cpu.out .
+go tool pprof -top /tmp/m68kemu_recursive_2026-10-04.cpu.out
+go tool pprof -top /tmp/m68kemu_bubble_2026-10-04.cpu.out
 ```
 
 ### Recursive Fibonacci
 
-Top remaining costs are still concentrated in the interpreter core:
+The top flat costs are now:
 
-* `ResolveSrcEA`
-* `(*cpu).fetchOpcode`
+* `movel` (about 35% cumulative, including its EA work)
 * `readProgramFastWord`
-* `executeInstruction`
-* `executeNext`
-* `movel`
+* `(*cpu).checkInterrupts`
+* `add`
+* `fastRAMRead`
+* `(*cpu).fetchOpcode`
+* `ResolveSrcEA`
 
-This means the project has already harvested the easy debug-path wins, and future speed work is likely to come from deeper fetch / decode specialization rather than small local cleanup.
+Fetch and dispatch overhead has dropped enough that the instruction handlers themselves
+(`movel`, `add`) now show up near the top. Operand access through `fastRAMRead` and EA
+resolution is the next layer down.
 
 ### Bubble Sort
 
 The hot path is now dominated by:
 
-* `(*cpu).executeNext`
-* `readProgramFastWord`
-* `(*cpu).executeInstruction`
 * `(*cpu).RunCycles`
+* `(*cpu).checkInterrupts`
+* `readProgramFastWord`
+* `(*cpu).executeNext`
 * `branch`
 * `(*cpu).fetchOpcode`
+* `(*cpu).dispatchInstruction`
 
-Notably, the remaining time is concentrated in instruction fetch / dispatch and simple memory lookup rather than broad bus indirection, heap allocation, or always-on debug plumbing.
+Bubble sort did not get the speedup Fibonacci did. It runs tight loops of short
+instructions, so per-instruction overhead dominates, and `checkInterrupts` now
+accounts for about 11% of its samples. Checking for pending interrupts only when the
+interrupt state changes, rather than on every instruction, is the most direct
+remaining win for this kind of loop.
 
 ## Current Optimization Priorities
 
 If performance becomes the main focus again, the highest-value next steps are:
 
-1. Trim hot-loop instruction fetch overhead in `fetchOpcode`, `readProgramFastWord`, and related bookkeeping.
-2. Push opcode predecode further so more handlers can avoid repeated mode / register extraction.
-3. Reduce EA setup overhead on common register, displacement, and simple memory forms.
-4. Keep debug hooks behind cached mode flags so new observability features do not drift back into the hot path.
-5. Move from generic bus timing to machine-specific ST memory / MMIO timing tables as the chipset comes online.
+1. Restore page-mapped lookup for devices that implement both `AddressRange` and `Contains` (see "Bus Lookup Regression").
+2. Avoid the per-instruction `checkInterrupts` call when no interrupt state has changed.
+3. Trim hot-loop instruction fetch overhead in `fetchOpcode`, `readProgramFastWord`, and related bookkeeping.
+4. Push opcode predecode further so more handlers can avoid repeated mode / register extraction.
+5. Reduce EA setup overhead on common register, displacement, and simple memory forms.
+6. Keep debug hooks behind cached mode flags so new observability features do not drift back into the hot path.
+7. Move from generic bus timing to machine-specific ST memory / MMIO timing tables as the chipset comes online.
 
 ## Notes
 

@@ -5,13 +5,13 @@
 Profiled with:
 
 ```sh
-go test -run '^$' -bench BenchmarkRecursiveFibonacci -cpuprofile /tmp/m68kemu_recursive_2026-06-13.cpu.out .
-go tool pprof -top /tmp/m68kemu_recursive_2026-06-13.cpu.out
+go test -run '^$' -bench BenchmarkRecursiveFibonacci -cpuprofile /tmp/m68kemu_recursive_2026-10-04.cpu.out .
+go tool pprof -top /tmp/m68kemu_recursive_2026-10-04.cpu.out
 ```
 
-Observed representative result on June 13, 2026 on Apple M1 (`darwin/arm64`, Go 1.26.3):
+Observed representative result on October 4, 2026 on Apple M1 (`darwin/arm64`, Go 1.27.1):
 
-* `BenchmarkRecursiveFibonacci`: about `26.6 ms/op`
+* `BenchmarkRecursiveFibonacci`: about `18.0 ms/op` (down from `26.6 ms/op` in June 2026)
 * `0 B/op, 0 allocs/op`
 
 ## Profile Highlights
@@ -25,12 +25,13 @@ The recursive Fibonacci workload is still useful because it stresses:
 
 Recent profiling showed these as the main remaining costs:
 
-* `(*cpu).executeNext`
-* `(*cpu).RunCycles`
-* `readProgramFastWord`
-* `executeInstruction`
 * `movel`
-* `ResolveSrcEA` / `ResolveDstEA`
+* `readProgramFastWord`
+* `(*cpu).checkInterrupts`
+* `add`
+* `fastRAMRead`
+* `(*cpu).fetchOpcode`
+* `ResolveSrcEA`
 
 ## What Changed Since Earlier Profiles
 

@@ -230,14 +230,14 @@ Recent profiling work focused on the interpreter hot path:
 * predecoded opcode metadata for common decode fields
 * Go 1.26 benchmark loops using `testing.B.Loop`
 
-Representative results on June 13, 2026 on Apple M1 (`darwin/arm64`, Go 1.26.3) were:
+Representative results on October 4, 2026 on Apple M1 (`darwin/arm64`, Go 1.27.1) were:
 
-* `BenchmarkBubbleSort`: ~2.54 ms/op
-* `BenchmarkPrimeSieve`: ~4.98 ms/op
-* `BenchmarkRunEightMillionCycles`: ~25.6 ms/op
-* `BenchmarkRecursiveFibonacci`: ~26.5 ms/op
-* `BenchmarkCycleSchedulerAdvanceBurst`: ~3.29 us/op
-* `BenchmarkBusReadMappedRanges`: ~15.5 ns/op
+* `BenchmarkBubbleSort`: ~2.61 ms/op
+* `BenchmarkPrimeSieve`: ~5.00 ms/op
+* `BenchmarkRunEightMillionCycles`: ~19.5 ms/op
+* `BenchmarkRecursiveFibonacci`: ~18.0 ms/op
+* `BenchmarkCycleSchedulerAdvanceBurst`: ~2.95 us/op
+* `BenchmarkBusReadMappedRanges`: ~164 ns/op (a regression from ~15.5 ns/op; see the report)
 
 See [doc/benchmark_report.md](doc/benchmark_report.md) for more detail.
 
