@@ -235,7 +235,7 @@ func unlkInstruction(cpu *cpu) error {
 	return nil
 }
 
-const chkEAMask = eaMaskDataRegister |
+const chkEAMask = eaMaskDataRegister | eaMaskImmediate |
 	eaMaskIndirect |
 	eaMaskPostIncrement |
 	eaMaskPreDecrement |

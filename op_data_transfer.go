@@ -437,11 +437,13 @@ func init() {
 
 func movep(cpu *cpu) error {
 	opcode := cpu.regs.IR
+	// Opmode (bits 8-6): 100/101 word/long memory to register, 110/111
+	// word/long register to memory.
 	size := Word
-	if opcode&0x0080 != 0 {
+	if opcode&0x0040 != 0 {
 		size = Long
 	}
-	toRegister := opcode&0x0040 != 0
+	toRegister := opcode&0x0080 == 0
 
 	disp, err := cpu.popPc(Word)
 	if err != nil {
@@ -514,7 +516,7 @@ func movep(cpu *cpu) error {
 }
 
 func movepCycleCalculator(opcode uint16) uint32 {
-	if opcode&0x0080 != 0 {
+	if opcode&0x0040 != 0 { // long
 		return 24
 	}
 	return 16

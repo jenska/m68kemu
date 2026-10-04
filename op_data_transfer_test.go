@@ -9,21 +9,7 @@ func TestLEA(t *testing.T) {
 		setup func(cpu *cpu, ram *RAM)
 		check func(t *testing.T, cpu *cpu, ram *RAM)
 	}{
-		{
-			name: "PostIncrementAddressing",
-			code: "LEA (A1)+,A0\n",
-			setup: func(cpu *cpu, _ *RAM) {
-				cpu.regs.A[1] = 0x3000
-			},
-			check: func(t *testing.T, cpu *cpu, _ *RAM) {
-				if cpu.regs.A[0] != 0x3000 {
-					t.Fatalf("expected A0 to capture original A1, got %04x", cpu.regs.A[0])
-				}
-				if cpu.regs.A[1] != 0x3004 {
-					t.Fatalf("expected A1 to post-increment by 4, got %04x", cpu.regs.A[1])
-				}
-			},
-		},
+
 		{
 			name: "PCRelativeDisplacement",
 			code: "PEA 4(PC)\n LEA (A7),A1\n", // second instruction used to read back pushed address
@@ -502,5 +488,39 @@ func TestMovemLongLoadsSequentialWordsForControlMode(t *testing.T) {
 	}
 	if cpu.regs.A[6] != 0x3050 {
 		t.Fatalf("A6 should remain unchanged for control-mode MOVEM load, got %08x", cpu.regs.A[6])
+	}
+}
+
+// TestMovepOpmodes pins MOVEP's opmode to the Motorola encoding with
+// hand-encoded opcodes: 0x0188 is MOVEP.W D0,(d16,A0) and 0x0148 is
+// MOVEP.L (d16,A0),D0.
+func TestMovepOpmodes(t *testing.T) {
+	cpu, ram := newEnvironment(t)
+	cpu.regs.A[0] = 0x3000
+	cpu.regs.D[0] = 0x1234
+	for i, b := range []byte{0x01, 0x88, 0x00, 0x00} {
+		_ = ram.Write(Byte, cpu.regs.PC+uint32(i), uint32(b))
+	}
+	if err := cpu.Step(); err != nil {
+		t.Fatalf("MOVEP.W D0,(0,A0): %v", err)
+	}
+	hi, _ := ram.Read(Byte, 0x3000)
+	lo, _ := ram.Read(Byte, 0x3002)
+	if hi != 0x12 || lo != 0x34 {
+		t.Fatalf("MOVEP.W store wrote %02x/%02x, want 12/34", hi, lo)
+	}
+
+	pc := cpu.regs.PC
+	for i, b := range []byte{0x01, 0x48, 0x00, 0x00} {
+		_ = ram.Write(Byte, pc+uint32(i), uint32(b))
+	}
+	for i, b := range []byte{0xAA, 0, 0xBB, 0, 0xCC, 0, 0xDD} {
+		_ = ram.Write(Byte, 0x3000+uint32(i), uint32(b))
+	}
+	if err := cpu.Step(); err != nil {
+		t.Fatalf("MOVEP.L (0,A0),D0: %v", err)
+	}
+	if got := uint32(cpu.regs.D[0]); got != 0xAABBCCDD {
+		t.Fatalf("MOVEP.L load = %08x, want aabbccdd", got)
 	}
 }

@@ -284,10 +284,12 @@ func init() {
 		eaMaskAbsoluteShort | eaMaskAbsoluteLong |
 		eaMaskPCDisplacement | eaMaskPCIndex
 
-	// Dynamic bit number (from Dx) uses opcodes with bit 11 clear and op type in bits 8-6.
+	// Dynamic bit number (from Dx) uses opcodes with bit 11 clear and op type
+	// in bits 8-6. BTST Dn,#<data> tests an immediate; pruneInvalidOpcodes
+	// drops the immediate and PC-relative slots of BCHG/BCLR/BSET.
 	for op := range uint16(4) {
 		match := uint16(0x0100) | ((op + 4) << 6)
-		registerInstruction(bitDynamic, match, 0xf1c0, bitOperandMask, bitCycleCalculator(false, op))
+		registerInstruction(bitDynamic, match, 0xf1c0, bitOperandMask|eaMaskImmediate, bitCycleCalculator(false, op))
 	}
 
 	// Static bit number (immediate) uses opcodes with bit 11 set and op type in bits 8-6.

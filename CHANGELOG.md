@@ -7,6 +7,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/SemVer
 
 ## [Unreleased]
 
+## [1.6.1] - 2026-10-04
+
+### Fixed
+
+- `MOVEP` swapped its size and direction bits: opmode bit 7 selects register
+  to memory and bit 6 a long transfer. A word load ran as a long store and
+  so on; the tests passed only because m68kasm before v1.6.0 had the
+  mirror-image encoding bug
+- Opcode words the MC68000 does not have now raise the illegal-instruction
+  exception instead of executing: `MOVE.B`/`CMP.B` from an address register,
+  `ADDQ.B`/`SUBQ.B` to one, `LEA`/`PEA` with non-control operands, `TST`
+  with PC-relative or immediate operands, `BCHG`/`BCLR`/`BSET` with a
+  PC-relative operand and others. A table of the Motorola operation code map
+  decides, and a test checks all 65536 opcode words against it
+- `MOVE` with a nonexistent destination mode and memory shifts with an
+  immediate or nonexistent operand crashed the CPU (index out of range)
+- `CHK #<data>,Dn` and `BTST Dn,#<data>` are accepted, as on the 68000
+
+### Changed
+
+- Bumped the `github.com/jenska/m68kasm` test dependency to v1.6.1
+
 ## [1.6.0] - 2026-10-03
 
 ### Added

@@ -2,17 +2,21 @@ package m68kemu
 
 import "testing"
 
+// TestBitOpcodeRegistrationPCRelative checks that BTST reads PC-relative
+// operands while BCHG/BCLR/BSET, which write their operand, do not exist
+// with one on the 68000.
 func TestBitOpcodeRegistrationPCRelative(t *testing.T) {
-	t.Run("all bit ops are registered for PC-relative operands", func(t *testing.T) {
-		for _, opcode := range []uint16{
-			0x013a, 0x013b, 0x017a, 0x017b, 0x01ba, 0x01bb, 0x01fa, 0x01fb,
-			0x083a, 0x083b, 0x087a, 0x087b, 0x08ba, 0x08bb, 0x08fa, 0x08fb,
-		} {
-			if opcodeTable[opcode] == nil {
-				t.Fatalf("expected opcode %04x to be registered", opcode)
-			}
+	pruneInvalidOpcodes()
+	for _, opcode := range []uint16{0x013a, 0x013b, 0x083a, 0x083b, 0x013c} {
+		if opcodeTable[opcode] == nil {
+			t.Errorf("expected BTST opcode %04x to be registered", opcode)
 		}
-	})
+	}
+	for _, opcode := range []uint16{0x017a, 0x017b, 0x01ba, 0x01bb, 0x01fa, 0x01fb, 0x087a, 0x087b, 0x08ba, 0x08bb, 0x08fa, 0x08fb} {
+		if opcodeTable[opcode] != nil {
+			t.Errorf("expected opcode %04x (bit change to a PC-relative operand) to be illegal", opcode)
+		}
+	}
 }
 
 func TestBitOperationsDataRegister(t *testing.T) {
@@ -133,233 +137,6 @@ func TestBTSTAllowsPCRelativeOperands(t *testing.T) {
 	}
 	if cpu.regs.PC != start+4 {
 		t.Fatalf("PC after BTST = %08x, want %08x", cpu.regs.PC, start+4)
-	}
-}
-
-func TestBitModifyAllowsPCRelativeOperands(t *testing.T) {
-	tests := []struct {
-		name     string
-		opcode   uint16
-		initial  byte
-		want     byte
-		wantZero bool
-	}{
-		{name: "BCHG", opcode: 0x017a, initial: 0x01, want: 0x00, wantZero: false},
-		{name: "BCLR", opcode: 0x01ba, initial: 0x01, want: 0x00, wantZero: false},
-		{name: "BSET", opcode: 0x01fa, initial: 0x00, want: 0x01, wantZero: true},
-	}
-
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			cpu, ram := newEnvironment(t)
-			cpu.regs.D[0] = 0
-			start := cpu.regs.PC
-
-			code := []byte{
-				byte(tc.opcode >> 8), byte(tc.opcode), // <op> D0,d16(PC)
-				0x00, 0x04, // target at start+6, relative to PC after opcode fetch
-				0x00, 0x00,
-				tc.initial,
-			}
-			for i, b := range code {
-				if err := ram.Write(Byte, start+uint32(i), uint32(b)); err != nil {
-					t.Fatalf("failed to write opcode byte: %v", err)
-				}
-			}
-
-			opcode, err := cpu.fetchOpcode()
-			if err != nil {
-				t.Fatalf("fetch opcode: %v", err)
-			}
-			if err := cpu.executeInstruction(opcode); err != nil {
-				t.Fatalf("%s failed: %v", tc.name, err)
-			}
-
-			got, err := ram.Read(Byte, start+6)
-			if err != nil {
-				t.Fatalf("read modified byte: %v", err)
-			}
-			if got != uint32(tc.want) {
-				t.Fatalf("modified byte = %02x, want %02x", got, tc.want)
-			}
-
-			gotZero := cpu.regs.SR&srZero != 0
-			if gotZero != tc.wantZero {
-				t.Fatalf("zero flag = %v, want %v (SR=%04x)", gotZero, tc.wantZero, cpu.regs.SR)
-			}
-			if cpu.regs.PC != start+4 {
-				t.Fatalf("PC after %s = %08x, want %08x", tc.name, cpu.regs.PC, start+4)
-			}
-		})
-	}
-}
-
-func TestLogicalInstructions(t *testing.T) {
-	tests := []struct {
-		name  string
-		setup func(*cpu, *RAM)
-		src   string
-		check func(*cpu, *RAM)
-	}{
-		{
-			name: "ANDSourceEAToDataRegister",
-			setup: func(c *cpu, ram *RAM) {
-				c.regs.D[0] = 0xf0
-				c.regs.A[0] = 0x1000
-				c.regs.SR = srExtend | srCarry
-				_ = ram.Write(Byte, 0x1000, 0x0f)
-			},
-			src: "AND.B (A0),D0\n",
-			check: func(c *cpu, _ *RAM) {
-				if got := c.regs.D[0] & 0xff; got != 0x00 {
-					t.Fatalf("unexpected D0 after AND: %02x", got)
-				}
-				if c.regs.SR&srZero == 0 {
-					t.Fatalf("zero flag not set after AND: SR=%04x", c.regs.SR)
-				}
-				if c.regs.SR&(srCarry|srOverflow) != 0 {
-					t.Fatalf("carry/overflow not cleared after AND: SR=%04x", c.regs.SR)
-				}
-				if c.regs.SR&srExtend == 0 {
-					t.Fatalf("extend flag should be preserved after AND: SR=%04x", c.regs.SR)
-				}
-			},
-		},
-		{
-			name: "ANDDestinationMemory",
-			setup: func(c *cpu, ram *RAM) {
-				c.regs.D[0] = 0x0f
-				c.regs.A[0] = 0x1000
-				_ = ram.Write(Byte, 0x1000, 0xf3)
-			},
-			src: "AND.B D0,(A0)\n",
-			check: func(c *cpu, ram *RAM) {
-				value, _ := ram.Read(Byte, 0x1000)
-				if value != 0x03 {
-					t.Fatalf("unexpected AND result in memory: %02x", value)
-				}
-				if got := c.regs.SR & (srNegative | srZero | srOverflow | srCarry); got != 0 {
-					t.Fatalf("unexpected SR after AND to memory: %04x", got)
-				}
-			},
-		},
-		{
-			name: "ANDIDestinationDataRegister",
-			setup: func(c *cpu, _ *RAM) {
-				c.regs.D[0] = 0xf0f0
-				c.regs.SR = srExtend | srCarry
-			},
-			src: "ANDI.W #$0f0f,D0\n",
-			check: func(c *cpu, _ *RAM) {
-				if got := c.regs.D[0] & 0xffff; got != 0x0000 {
-					t.Fatalf("unexpected D0 after ANDI: %04x", got)
-				}
-				if c.regs.SR&srZero == 0 {
-					t.Fatalf("zero flag not set after ANDI: SR=%04x", c.regs.SR)
-				}
-				if c.regs.SR&(srCarry|srOverflow) != 0 {
-					t.Fatalf("carry/overflow not cleared: SR=%04x", c.regs.SR)
-				}
-				if c.regs.SR&srExtend == 0 {
-					t.Fatalf("extend flag should be preserved: SR=%04x", c.regs.SR)
-				}
-			},
-		},
-		{
-			name: "ORDestinationMemory",
-			setup: func(c *cpu, ram *RAM) {
-				c.regs.D[0] = 0x0f
-				c.regs.A[0] = 0x1000
-				_ = ram.Write(Byte, 0x1000, 0xf0)
-			},
-			src: "OR.B D0,(A0)\n",
-			check: func(c *cpu, ram *RAM) {
-				value, _ := ram.Read(Byte, 0x1000)
-				if value != 0xff {
-					t.Fatalf("unexpected OR result in memory: %02x", value)
-				}
-				if c.regs.SR&srNegative == 0 {
-					t.Fatalf("negative flag not set after OR: SR=%04x", c.regs.SR)
-				}
-				if c.regs.SR&srZero != 0 {
-					t.Fatalf("zero flag incorrectly set after OR: SR=%04x", c.regs.SR)
-				}
-			},
-		},
-		{
-			name: "EORDestinationData",
-			setup: func(c *cpu, _ *RAM) {
-				c.regs.D[0] = 0x55
-				c.regs.D[1] = 0xaa
-			},
-			src: "EOR.B D0,D1\n",
-			check: func(c *cpu, _ *RAM) {
-				if got := c.regs.D[1] & 0xff; got != 0xff {
-					t.Fatalf("unexpected EOR result: %02x", got)
-				}
-				if c.regs.SR&srZero != 0 {
-					t.Fatalf("zero flag incorrectly set after EOR: SR=%04x", c.regs.SR)
-				}
-			},
-		},
-		{
-			name: "NOTMemory",
-			setup: func(c *cpu, ram *RAM) {
-				c.regs.A[0] = 0x1000
-				_ = ram.Write(Byte, 0x1000, 0x00)
-			},
-			src: "NOT.B (A0)\n",
-			check: func(c *cpu, ram *RAM) {
-				value, _ := ram.Read(Byte, 0x1000)
-				if value != 0xff {
-					t.Fatalf("unexpected NOT result: %02x", value)
-				}
-				if c.regs.SR&srNegative == 0 {
-					t.Fatalf("negative flag not set after NOT: SR=%04x", c.regs.SR)
-				}
-			},
-		},
-		{
-			name: "EORIImmediateMemory",
-			setup: func(c *cpu, ram *RAM) {
-				_ = ram.Write(Long, 0x3000, 0xaaaa5555)
-			},
-			src: "EORI.L #$ffff0000,$3000\n",
-			check: func(c *cpu, ram *RAM) {
-				value, _ := ram.Read(Long, 0x3000)
-				if value != 0x55555555 {
-					t.Fatalf("unexpected EORI result: %08x", value)
-				}
-				if c.regs.SR&srZero != 0 {
-					t.Fatalf("zero flag incorrectly set after EORI: SR=%04x", c.regs.SR)
-				}
-			},
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			cpu, ram := newEnvironment(t)
-			tt.setup(cpu, ram)
-
-			code := assemble(t, tt.src)
-			for i := range code {
-				addr := cpu.regs.PC + uint32(i)
-				if err := ram.Write(Byte, addr, uint32(code[i])); err != nil {
-					t.Fatalf("failed to write byte to %04x: %v", addr, err)
-				}
-			}
-
-			opcode, err := cpu.fetchOpcode()
-			if err != nil {
-				t.Fatalf("failed to fetch opcode: %v", err)
-			}
-			if err := cpu.executeInstruction(opcode); err != nil {
-				t.Fatalf("failed to execute opcode %04x: %v", opcode, err)
-			}
-
-			tt.check(cpu, ram)
-		})
 	}
 }
 

@@ -1590,6 +1590,7 @@ func NewCPU(bus *Bus, opts ...Option) (CPU, error) {
 		opt(&cfg)
 	}
 
+	pruneInvalidOpcodes()
 	c := cpu{bus: bus, interrupts: newInterruptController(), cycleRounding: cfg.cycleRounding}
 	bus.waitHook = func(states uint32) { c.addCycles(states) }
 
