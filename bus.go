@@ -63,10 +63,12 @@ type Bus struct {
 	hasWaitStateDevices bool
 	hasPageMap          bool
 	pageRanges          [256][]pageRange
-	// scanList holds the devices not covered by the page map, each paired with
-	// its containment test resolved once so the per-access scan does no type
-	// assertions.
-	scanList []scanEntry
+	// scanList holds every device in lookup order, each paired with its
+	// containment test resolved once so the per-access scan does no type
+	// assertions. The first rangedCount entries are the page-mapped devices;
+	// the rest have no usable AddressRange.
+	scanList    []scanEntry
+	rangedCount int
 }
 
 type scanEntry struct {
@@ -90,6 +92,9 @@ type pageRange struct {
 	start  uint32
 	end    uint32
 	device Device
+	// contains is the device's own Contains check, or nil when the range
+	// alone decides membership.
+	contains func(address uint32) bool
 }
 
 // NewBus constructs a bus optionally seeded with devices.
@@ -240,6 +245,8 @@ func (b *Bus) refreshTopology() {
 	b.hasPageMap = false
 	b.pageRanges = [256][]pageRange{}
 	b.scanList = b.scanList[:0]
+	b.rangedCount = 0
+	var unranged []scanEntry
 
 	if len(b.devices) == 1 {
 		b.singleDevice = b.devices[0]
@@ -253,27 +260,33 @@ func (b *Bus) refreshTopology() {
 			b.hasWaitStateDevices = true
 		}
 
-		contains, ok := dev.(ContainsDevice)
+		var contains func(uint32) bool
+		if c, ok := dev.(ContainsDevice); ok {
+			contains = c.Contains
+		}
 		ranged, hasRange := dev.(AddressRangeDevice)
-		if !ok && !hasRange {
+		if contains == nil && !hasRange {
 			panic(fmt.Sprintf("m68kemu: device %T is not locatable: implement AddressRangeDevice or ContainsDevice", dev))
 		}
 
-		// A pure-range device goes into the page map. Anything with a Contains
-		// method may decode non-contiguously, so it stays on the linear scan
-		// with its check resolved once.
-		if ok {
-			b.scanList = append(b.scanList, scanEntry{device: dev, contains: contains.Contains})
+		var start, end uint32
+		if hasRange {
+			start, end = ranged.AddressRange()
+			start &= 0xffffff
+			end &= 0xffffff
+		}
+		if !hasRange || end < start {
+			if contains == nil {
+				contains = rangeContains(start, end)
+			}
+			unranged = append(unranged, scanEntry{device: dev, contains: contains})
 			continue
 		}
 
-		start, end := ranged.AddressRange()
-		start &= 0xffffff
-		end &= 0xffffff
-		if end < start {
-			b.scanList = append(b.scanList, scanEntry{device: dev, contains: rangeContains(start, end)})
-			continue
-		}
+		// Any device with a usable range goes into the page map, earlier
+		// devices taking priority. A Contains method may still decode the
+		// range sparsely, so the page entry keeps it as a filter.
+		b.scanList = append(b.scanList, scanEntry{device: dev, contains: boundedContains(start, end, contains)})
 		b.hasPageMap = true
 		for page := start >> 16; page <= end>>16; page++ {
 			pageStart := page << 16
@@ -283,11 +296,26 @@ func (b *Bus) refreshTopology() {
 			if rangeEnd > pageEnd {
 				rangeEnd = pageEnd
 			}
-			b.addPageRange(page, rangeStart, rangeEnd, dev)
+			b.addPageRange(page, rangeStart, rangeEnd, dev, contains)
 		}
 	}
 
+	b.rangedCount = len(b.scanList)
+	b.scanList = append(b.scanList, unranged...)
+
 	b.refreshFastRAM()
+}
+
+// boundedContains returns a check for a device whose AddressRange bounds its
+// optional Contains decode.
+func boundedContains(start, end uint32, contains func(uint32) bool) func(uint32) bool {
+	if contains == nil {
+		return rangeContains(start, end)
+	}
+	return func(address uint32) bool {
+		a := address & 0xffffff
+		return a >= start && a <= end && contains(address)
+	}
 }
 
 func rangeContains(start, end uint32) func(uint32) bool {
@@ -306,16 +334,22 @@ func (b *Bus) refreshFastRAM() {
 }
 
 func (b *Bus) findDevice(address uint32) Device {
+	scan := b.scanList[b.rangedCount:]
 	if b.hasPageMap {
 		page := (address & 0xffffff) >> 16
-		if dev := b.findPageMappedDevice(page, address); dev != nil {
-			return dev
+		if r := b.findPageRange(page, address); r != nil {
+			if r.contains == nil || r.contains(address) {
+				return r.device
+			}
+			// The address falls in a hole of a sparsely decoded device, so a
+			// later overlapping device may still answer for it.
+			scan = b.scanList
 		}
 	}
 
-	for i := range b.scanList {
-		if b.scanList[i].contains(address) {
-			return b.scanList[i].device
+	for i := range scan {
+		if scan[i].contains(address) {
+			return scan[i].device
 		}
 	}
 
@@ -419,7 +453,7 @@ func peekDevice(dev Device, size Size, address uint32) (uint32, error) {
 	return peekable.Peek(size, address)
 }
 
-func (b *Bus) addPageRange(page, start, end uint32, dev Device) {
+func (b *Bus) addPageRange(page, start, end uint32, dev Device, contains func(uint32) bool) {
 	if start > end {
 		return
 	}
@@ -436,9 +470,10 @@ func (b *Bus) addPageRange(page, start, end uint32, dev Device) {
 		}
 		if cursor < current.start {
 			uncovered = append(uncovered, pageRange{
-				start:  cursor,
-				end:    minUint32(end, current.start-1),
-				device: dev,
+				start:    cursor,
+				end:      minUint32(end, current.start-1),
+				device:   dev,
+				contains: contains,
 			})
 		}
 		if current.end >= end {
@@ -448,7 +483,7 @@ func (b *Bus) addPageRange(page, start, end uint32, dev Device) {
 		cursor = current.end + 1
 	}
 	if cursor <= end {
-		uncovered = append(uncovered, pageRange{start: cursor, end: end, device: dev})
+		uncovered = append(uncovered, pageRange{start: cursor, end: end, device: dev, contains: contains})
 	}
 	if len(uncovered) == 0 {
 		return
@@ -470,12 +505,12 @@ func (b *Bus) addPageRange(page, start, end uint32, dev Device) {
 	b.pageRanges[page] = merged
 }
 
-func (b *Bus) findPageMappedDevice(page, address uint32) Device {
+func (b *Bus) findPageRange(page, address uint32) *pageRange {
 	ranges := b.pageRanges[page]
 	lo, hi := 0, len(ranges)
 	for lo < hi {
 		mid := lo + (hi-lo)/2
-		current := ranges[mid]
+		current := &ranges[mid]
 		if address < current.start {
 			hi = mid
 			continue
@@ -484,7 +519,7 @@ func (b *Bus) findPageMappedDevice(page, address uint32) Device {
 			lo = mid + 1
 			continue
 		}
-		return current.device
+		return current
 	}
 	return nil
 }

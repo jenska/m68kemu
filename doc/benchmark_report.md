@@ -12,30 +12,31 @@ Representative medians from the runs, compared with the previous report (June 13
 
 | Benchmark | Result | Allocations | June 2026 | Change |
 | --- | --- | --- | --- | --- |
-| `BenchmarkBubbleSort` | `2614994 ns/op` | `0 B/op, 0 allocs/op` | `2537946 ns/op` | +3% |
-| `BenchmarkPrimeSieve` | `5001071 ns/op` | `4 B/op, 1 allocs/op` | `5035525 ns/op` | -1% |
-| `BenchmarkRunEightMillionCycles` | `19508466 ns/op` | `0 B/op, 0 allocs/op` | `25526229 ns/op` | -24% |
-| `BenchmarkRecursiveFibonacci` | `18013311 ns/op` | `0 B/op, 0 allocs/op` | `26577540 ns/op` | -32% |
-| `BenchmarkCycleSchedulerAdvanceBurst` | `2948 ns/op` | `0 B/op, 0 allocs/op` | `3291 ns/op` | -10% |
-| `BenchmarkBusReadMappedRanges` | `164.4 ns/op` | `0 B/op, 0 allocs/op` | `15.53 ns/op` | +959% |
+| `BenchmarkBubbleSort` | `2668031 ns/op` | `0 B/op, 0 allocs/op` | `2537946 ns/op` | +5% |
+| `BenchmarkPrimeSieve` | `5125765 ns/op` | `4 B/op, 1 allocs/op` | `5035525 ns/op` | +2% |
+| `BenchmarkRunEightMillionCycles` | `20025338 ns/op` | `0 B/op, 0 allocs/op` | `25526229 ns/op` | -22% |
+| `BenchmarkRecursiveFibonacci` | `18294825 ns/op` | `0 B/op, 0 allocs/op` | `26577540 ns/op` | -31% |
+| `BenchmarkCycleSchedulerAdvanceBurst` | `2967 ns/op` | `0 B/op, 0 allocs/op` | `3291 ns/op` | -10% |
+| `BenchmarkBusReadMappedRanges` | `15.90 ns/op` | `0 B/op, 0 allocs/op` | `15.53 ns/op` | +2% |
 
-### Bus Lookup Regression
+### Bus Lookup Regression (Fixed)
 
-`BenchmarkBusReadMappedRanges` is about 10x slower than in June. Bisecting points to
-commit `731b476` ("Make Device.Contains optional"): its parent still measures about
-`15.5 ns/op`.
+Commit `731b476` ("Make Device.Contains optional") page-mapped only devices that
+implement `AddressRangeDevice` *without* `ContainsDevice`; anything with a `Contains`
+method went on a linear scan. Since `RAM` and the internal `mappedDevice` implement
+both, no built-in device used the page map on a multi-device bus, and
+`BenchmarkBusReadMappedRanges` (64 devices) slowed from about `15.5 ns/op` to
+`164 ns/op`.
 
-Since that change, `refreshTopology` page-maps only devices that implement
-`AddressRangeDevice` *without* `ContainsDevice`. A device that implements both goes on
-the linear scan list instead. The benchmark's `stubMappedDevice` implements both, so
-it now measures a 64-entry linear scan rather than the page map.
+Every device with a valid `AddressRange` is now page-mapped again, in bus order. A
+device that also implements `Contains` keeps that check on its page entry; when it
+rejects an address (a hole in a sparse decode), the lookup falls back to an ordered
+scan so a later overlapping device can still answer.
 
-This affects real setups too, not only the benchmark: `RAM` and the internal
-`mappedDevice` both implement `Contains` and `AddressRange`, so on a bus with more than
-one device none of the built-in devices use the page map. The `Device` documentation
-says that for such devices "Contains decides membership and AddressRange only bounds
-it"; using the range to page-map the device and then confirming with `Contains` would
-restore the fast path without changing that contract.
+The CPU benchmarks above run on a single-RAM bus, which goes through the `fastRAM`
+path and never calls the bus lookup (a CPU profile shows no bus functions). They still
+measured 2-4% slower than the commit before the fix in interleaved A/B runs, which
+points to a code-layout effect rather than extra work.
 
 ## What Improved
 
@@ -107,13 +108,12 @@ remaining win for this kind of loop.
 
 If performance becomes the main focus again, the highest-value next steps are:
 
-1. Restore page-mapped lookup for devices that implement both `AddressRange` and `Contains` (see "Bus Lookup Regression").
-2. Avoid the per-instruction `checkInterrupts` call when no interrupt state has changed.
-3. Trim hot-loop instruction fetch overhead in `fetchOpcode`, `readProgramFastWord`, and related bookkeeping.
-4. Push opcode predecode further so more handlers can avoid repeated mode / register extraction.
-5. Reduce EA setup overhead on common register, displacement, and simple memory forms.
-6. Keep debug hooks behind cached mode flags so new observability features do not drift back into the hot path.
-7. Move from generic bus timing to machine-specific ST memory / MMIO timing tables as the chipset comes online.
+1. Avoid the per-instruction `checkInterrupts` call when no interrupt state has changed.
+2. Trim hot-loop instruction fetch overhead in `fetchOpcode`, `readProgramFastWord`, and related bookkeeping.
+3. Push opcode predecode further so more handlers can avoid repeated mode / register extraction.
+4. Reduce EA setup overhead on common register, displacement, and simple memory forms.
+5. Keep debug hooks behind cached mode flags so new observability features do not drift back into the hot path.
+6. Move from generic bus timing to machine-specific ST memory / MMIO timing tables as the chipset comes online.
 
 ## Notes
 

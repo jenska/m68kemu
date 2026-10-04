@@ -232,12 +232,12 @@ Recent profiling work focused on the interpreter hot path:
 
 Representative results on October 4, 2026 on Apple M1 (`darwin/arm64`, Go 1.27.1) were:
 
-* `BenchmarkBubbleSort`: ~2.61 ms/op
-* `BenchmarkPrimeSieve`: ~5.00 ms/op
-* `BenchmarkRunEightMillionCycles`: ~19.5 ms/op
-* `BenchmarkRecursiveFibonacci`: ~18.0 ms/op
-* `BenchmarkCycleSchedulerAdvanceBurst`: ~2.95 us/op
-* `BenchmarkBusReadMappedRanges`: ~164 ns/op (a regression from ~15.5 ns/op; see the report)
+* `BenchmarkBubbleSort`: ~2.67 ms/op
+* `BenchmarkPrimeSieve`: ~5.13 ms/op
+* `BenchmarkRunEightMillionCycles`: ~20.0 ms/op
+* `BenchmarkRecursiveFibonacci`: ~18.3 ms/op
+* `BenchmarkCycleSchedulerAdvanceBurst`: ~2.97 us/op
+* `BenchmarkBusReadMappedRanges`: ~15.9 ns/op
 
 See [doc/benchmark_report.md](doc/benchmark_report.md) for more detail.
 

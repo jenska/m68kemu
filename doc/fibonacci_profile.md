@@ -11,7 +11,7 @@ go tool pprof -top /tmp/m68kemu_recursive_2026-10-04.cpu.out
 
 Observed representative result on October 4, 2026 on Apple M1 (`darwin/arm64`, Go 1.27.1):
 
-* `BenchmarkRecursiveFibonacci`: about `18.0 ms/op` (down from `26.6 ms/op` in June 2026)
+* `BenchmarkRecursiveFibonacci`: about `18.3 ms/op` (down from `26.6 ms/op` in June 2026)
 * `0 B/op, 0 allocs/op`
 
 ## Profile Highlights

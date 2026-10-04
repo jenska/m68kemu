@@ -9,9 +9,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/SemVer
 
 ### Changed
 
-- Refreshed README and benchmark documentation with Go 1.27.1 results, and
-  documented the bus lookup regression `BenchmarkBusReadMappedRanges` shows
-  since devices with a `Contains` method stopped using the page map
+- Refreshed README and benchmark documentation with Go 1.27.1 results
+
+### Fixed
+
+- Bus lookup on a multi-device bus is fast again: devices that implement both
+  `AddressRange` and `Contains` (including `RAM` and `MapDevice` wrappers) had
+  fallen back to a linear scan since `Contains` became optional, making a
+  64-device lookup about 10x slower. They are page-mapped again, with
+  `Contains` still filtering sparse decodes
 
 ## [1.6.1] - 2026-10-04
 

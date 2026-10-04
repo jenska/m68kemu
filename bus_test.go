@@ -237,6 +237,43 @@ func TestBusLocatesRangeOnlyDevice(t *testing.T) {
 	}
 }
 
+// evenOnlyDevice spans a range but decodes only even addresses, like a
+// byte-wide peripheral on one half of the data bus.
+type evenOnlyDevice struct {
+	*stubMappedDevice
+}
+
+func (d *evenOnlyDevice) Contains(address uint32) bool {
+	return address&1 == 0 && d.stubMappedDevice.Contains(address)
+}
+
+func TestBusFallsThroughHolesInSparseDevice(t *testing.T) {
+	sparse := &evenOnlyDevice{newStubMappedDevice(0xFF8800, 0xFF88FF)}
+	backing := newStubMappedDevice(0xFF8000, 0xFFFFFF)
+	sparse.data[0xFF8810] = 0x11
+	backing.data[0xFF8811] = 0x22
+
+	bus := NewBus(sparse, backing)
+
+	if got, err := bus.Read(Byte, 0xFF8810); err != nil || got != 0x11 {
+		t.Fatalf("read decoded address = (%02x, %v), want (11, <nil>)", got, err)
+	}
+	if got, err := bus.Read(Byte, 0xFF8811); err != nil || got != 0x22 {
+		t.Fatalf("read hole in sparse device = (%02x, %v), want (22, <nil>)", got, err)
+	}
+}
+
+func TestBusSparseDeviceHoleWithoutFallbackIsUnmapped(t *testing.T) {
+	sparse := &evenOnlyDevice{newStubMappedDevice(0xFF8800, 0xFF88FF)}
+	ram := NewRAM(0x0000, 0x0010)
+
+	bus := NewBus(ram, sparse)
+
+	if _, err := bus.Read(Byte, 0xFF8811); err == nil {
+		t.Fatalf("read hole in sparse device unexpectedly succeeded")
+	}
+}
+
 type unlocatableDevice struct{}
 
 func (unlocatableDevice) Read(Size, uint32) (uint32, error) { return 0, nil }
