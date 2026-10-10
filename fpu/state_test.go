@@ -379,3 +379,38 @@ func TestSaveRestore(t *testing.T) {
 		}
 	}
 }
+
+func TestExceptionPriority(t *testing.T) {
+	for _, tt := range []struct {
+		exc    uint8
+		vector int
+	}{
+		{BSUN | SNAN, VectorBSUN}, {SNAN | OPERR, VectorSNAN}, {OPERR | OVFL, VectorOPERR},
+		{OVFL | UNFL, VectorOVFL}, {UNFL | DZ, VectorUNFL}, {DZ | INEX2, VectorDZ},
+		{INEX2, VectorINEX}, {INEX1, VectorINEX},
+	} {
+		f := New(MC68881)
+		f.FPCR = 0xff00
+		f.report(tt.exc)
+		if v, _ := f.PendingException(); v != tt.vector {
+			t.Fatalf("exceptions %08b: vector %d, want %d", tt.exc, v, tt.vector)
+		}
+	}
+}
+
+func TestScaleSpecialCases(t *testing.T) {
+	f := New(MC68881)
+	loadDouble(t, f, 0, 3)
+	dyadic(t, f, 0x26, 0, math.Inf(1))
+	if !f.FP[0].IsNaN() || exceptionByte(f) != OPERR {
+		t.Fatalf("FSCALE by +Inf = %v with exceptions %08b, want NaN and OPERR", f.FP[0], exceptionByte(f))
+	}
+	loadDouble(t, f, 0, 3)
+	dyadic(t, f, 0x26, 0, math.NaN())
+	if !f.FP[0].IsNaN() {
+		t.Fatalf("FSCALE by NaN = %v, want NaN", f.FP[0])
+	}
+	if f.Model() != MC68881 {
+		t.Fatalf("Model() = %v", f.Model())
+	}
+}

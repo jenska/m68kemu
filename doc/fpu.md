@@ -7,6 +7,10 @@ and the memory-mapped coprocessor interface of 68000 machines (4b). F-line
 instructions on the 68020 (4c) follow after phase 3 of the
 [roadmap](roadmap.md).
 
+**Status: 4a and 4b are done.** The tests run 68000 programs that drive the
+memory-mapped FPU with the command words and polling loops of the SFP004
+library.
+
 ## 4a. FPU Core
 
 ### Programming Model

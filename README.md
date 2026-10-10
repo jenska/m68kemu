@@ -31,7 +31,7 @@ Still missing for a complete Atari ST:
 
 * Prefetch-sensitive behavior and any remaining compatibility gaps found by larger TOS / software workloads.
 
-The MC68010 is supported (see [CPU Models](#cpu-models)). Support for the MC68020 to MC68040, including PMMU and FPU, is planned. See [doc/roadmap.md](doc/roadmap.md).
+The MC68010 is supported (see [CPU Models](#cpu-models)), and so is a memory-mapped MC68881/MC68882 FPU (see [FPU](#fpu-mc68881mc68882)). Support for the MC68020 to MC68040, including PMMU and F-line FPU instructions, is planned. See [doc/roadmap.md](doc/roadmap.md).
 
 ## Getting Started
 
@@ -123,6 +123,29 @@ details.
 The constants `M68020` to `M68060` exist for the models on the
 [roadmap](doc/roadmap.md). Until a model is implemented, `NewCPU` returns
 an error that matches `m68kemu.ErrModelUnsupported` with `errors.Is`.
+
+### FPU (MC68881/MC68882)
+
+Package `github.com/jenska/m68kemu/fpu` emulates the MC68881 and MC68882 on
+top of [github.com/jenska/float](https://github.com/jenska/float). On a 68000
+machine the FPU is a memory-mapped peripheral; `fpu.NewCIR` puts its
+coprocessor interface registers on the bus, for example at `$FFFA40` as in
+the Atari Mega ST (SFP004) and Mega STE:
+
+```go
+ram := m68kemu.NewRAM(0, 4*1024*1024)
+fpu68881 := fpu.New(fpu.MC68881)
+bus := m68kemu.NewBus(ram, fpu.NewCIR(fpu68881, 0xfffa40))
+cpu, err := m68kemu.NewCPU(bus)
+```
+
+Software then drives it like the real chip: it writes command words to the
+command CIR, polls the response CIR and moves operands through the operand
+CIR. The FPU supports every 68881 general instruction, all operand formats
+including packed decimal, FMOVECR, the condition predicates, exceptions and
+FSAVE/FRESTORE frames. F-line instructions (`FADD` and friends executed by
+the CPU) need the MC68020 and come with it. [doc/fpu.md](doc/fpu.md) has the
+details and the simplifications.
 
 ### Cycle Scheduler
 

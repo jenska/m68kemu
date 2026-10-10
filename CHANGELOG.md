@@ -22,6 +22,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/SemVer
   `ExceptionStackFrame` fields `VectorOffset`, `DataOutput`, `DataInput`
   and `InstructionInput`; `ReadExceptionStackFrame` decodes the new formats
 - `BusAccessInfo.FunctionCode`
+- Package `fpu`: an MC68881/MC68882 FPU built on `github.com/jenska/float`,
+  with all general instructions, operand formats including packed decimal,
+  FMOVECR, condition predicates, exceptions and FSAVE/FRESTORE frames, and
+  `fpu.CIR`, its memory-mapped coprocessor interface for 68000 machines
+  (Atari Mega ST/STE at `$FFFA40`). See `doc/fpu.md`
 
 ### Changed
 
