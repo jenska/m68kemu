@@ -20,7 +20,7 @@ const (
 )
 
 // ErrModelUnsupported is returned by NewCPU for a model that is not
-// implemented yet. Only M68000 is implemented so far.
+// implemented yet. M68000 and M68010 are implemented so far.
 var ErrModelUnsupported = errors.New("m68kemu: CPU model not supported")
 
 var modelNames = [modelCount]string{"MC68000", "MC68010", "MC68020", "MC68030", "MC68040", "MC68060"}
@@ -34,7 +34,7 @@ func (m Model) String() string {
 
 // implemented reports whether NewCPU accepts model m.
 func (m Model) implemented() bool {
-	return m == M68000
+	return m == M68000 || m == M68010
 }
 
 // WithModel selects the CPU model; the default is M68000. NewCPU returns

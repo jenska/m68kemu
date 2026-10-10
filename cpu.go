@@ -284,6 +284,11 @@ type (
 		SSP uint32
 		USP uint32
 		IR  uint16 // instruction register
+		// VBR, SFC and DFC exist from the MC68010 on and stay zero on the
+		// MC68000. Exception vectors are read from VBR + 4*vector.
+		VBR uint32
+		SFC uint8 // source function code for MOVES
+		DFC uint8 // destination function code for MOVES
 	}
 
 	// CPU is the interface returned by NewCPU for driving the emulator core.
@@ -1161,12 +1166,12 @@ func (cpu *cpu) readVector(offset uint32) (uint32, error) {
 		return 0, AddressError(offset)
 	}
 
-	address, err := cpu.readSystemProgram(Long, offset)
+	address, err := cpu.readSystemProgram(Long, cpu.regs.VBR+offset)
 	if err != nil {
 		return 0, err
 	}
 	if address == 0 {
-		return cpu.readSystemProgram(Long, XUninitializedInt<<2)
+		return cpu.readSystemProgram(Long, cpu.regs.VBR+XUninitializedInt<<2)
 	}
 	return address, nil
 }
