@@ -5,19 +5,6 @@ import (
 	"sync"
 )
 
-// Model selects the member of the 68000 family a CPU emulates.
-type Model int
-
-const (
-	M68000 Model = iota
-	M68010
-	M68020
-	M68030
-	M68040
-	M68060
-	modelCount
-)
-
 // opcodeSet is the immutable dispatch table for one model, shared by every
 // CPU of that model.
 type opcodeSet struct {

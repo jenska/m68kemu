@@ -33,6 +33,7 @@ type Option func(*cpuConfig)
 type cpuConfig struct {
 	deferReset    bool
 	cycleRounding uint32
+	model         Model
 }
 
 // WithDeferredReset skips the implicit Reset performed by NewCPU. The caller

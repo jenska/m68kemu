@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/SemVer
 
 ## [Unreleased]
 
+### Added
+
+- `Model` type with the constants `M68000` to `M68060`, the `WithModel`
+  option and a `Model()` method on `CPU`. Only `M68000` is implemented;
+  `NewCPU` returns `ErrModelUnsupported` for the others
+
+### Changed
+
+- The opcode dispatch tables are built per model on first use and shared by
+  every CPU of that model, instead of being package-level arrays pruned in
+  place by the first `NewCPU`. The MC68000 table is unchanged
+- `CPU` has a new method, `Model()`, which breaks code that implements the
+  interface outside this package
+
 ## [1.6.2] - 2026-10-04
 
 ### Changed

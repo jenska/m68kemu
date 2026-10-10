@@ -295,6 +295,7 @@ type (
 		RunInstructions(count uint64) error
 		RunUntil(options RunUntilOptions) (RunResult, error)
 		Cycles() uint64
+		Model() Model
 
 		// State inspection.
 		Registers() Registers
@@ -336,7 +337,8 @@ type (
 		bus    *Bus
 		// ops is the dispatch table of the CPU's model, shared with every
 		// other CPU of that model.
-		ops *opcodeSet
+		ops   *opcodeSet
+		model Model
 		// cycleRounding is the multiple each instruction's cycles are rounded
 		// up to (see WithCycleRounding); 0 or 1 disables it.
 		cycleRounding          uint32
@@ -1590,7 +1592,10 @@ func NewCPU(bus *Bus, opts ...Option) (CPU, error) {
 		opt(&cfg)
 	}
 
-	c := cpu{bus: bus, ops: opcodesFor(M68000), interrupts: newInterruptController(), cycleRounding: cfg.cycleRounding}
+	if !cfg.model.implemented() {
+		return nil, fmt.Errorf("%w: %v", ErrModelUnsupported, cfg.model)
+	}
+	c := cpu{bus: bus, ops: opcodesFor(cfg.model), model: cfg.model, interrupts: newInterruptController(), cycleRounding: cfg.cycleRounding}
 	bus.waitHook = func(states uint32) { c.addCycles(states) }
 
 	if cfg.deferReset {

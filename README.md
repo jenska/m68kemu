@@ -103,6 +103,19 @@ func main() {
 }
 ```
 
+### CPU Models
+
+`NewCPU` emulates an MC68000 by default. `WithModel` selects the model
+explicitly, and `Model()` reports it:
+
+```go
+cpu, err := m68kemu.NewCPU(bus, m68kemu.WithModel(m68kemu.M68000))
+```
+
+The constants `M68010` to `M68060` exist for the models on the
+[roadmap](doc/roadmap.md). Until a model is implemented, `NewCPU` returns
+an error that matches `m68kemu.ErrModelUnsupported` with `errors.Is`.
+
 ### Cycle Scheduler
 
 Machine devices can follow CPU time by attaching a scheduler:
