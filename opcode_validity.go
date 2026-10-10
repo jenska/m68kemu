@@ -7,10 +7,30 @@ package m68kemu
 // word raises the illegal-instruction exception (or line A/F) like on the
 // real CPU instead of running with an operand the instruction cannot take.
 
-// validFor reports whether op is a valid opcode word for model m. Only the
-// MC68000 map exists so far.
+// validFor reports whether op is a valid opcode word for model m.
 func validFor(m Model, op uint16) bool {
+	if m >= M68010 && valid68010Addition(op) {
+		return true
+	}
 	return valid68000(op)
+}
+
+// valid68010Addition reports whether op is one of the opcode words the
+// MC68010 adds to the MC68000 map. BKPT ($4848-$484F) is left out: without
+// hardware that answers its breakpoint acknowledge cycle it takes the
+// illegal-instruction exception, like an unassigned word.
+func valid68010Addition(op uint16) bool {
+	switch {
+	case op == 0x4E7A || op == 0x4E7B: // MOVEC
+		return true
+	case op == 0x4E74: // RTD
+		return true
+	case op&0xFFC0 == 0x42C0: // MOVE CCR,<ea>
+		return specIn(op, specDataAlterable)
+	case op&0xFF00 == 0x0E00: // MOVES
+		return (op>>6)&3 != 3 && specIn(op, specMemoryAlterable)
+	}
+	return false
 }
 
 // valid68000 reports whether op is a valid MC68000 opcode word, following

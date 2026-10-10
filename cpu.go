@@ -154,6 +154,10 @@ type (
 		Write            bool
 		InstructionFetch bool
 		PC               uint32
+		// FunctionCode is the value of the FC2-FC0 pins: 1 user data,
+		// 2 user program, 5 supervisor data, 6 supervisor program, or the
+		// SFC/DFC value of a MOVES access.
+		FunctionCode uint16
 	}
 
 	BusAccessCallback func(BusAccessInfo)
@@ -1891,6 +1895,7 @@ func (cpu *cpu) traceBusAccess(size Size, address uint32, value uint32, ctx acce
 		Write:            ctx.write,
 		InstructionFetch: ctx.instructionFetch(),
 		PC:               cpu.debugPC(),
+		FunctionCode:     ctx.functionCode & 7,
 	}
 
 	if ctx.instructionFetch() && !ctx.write {

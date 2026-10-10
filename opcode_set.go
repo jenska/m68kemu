@@ -41,6 +41,7 @@ var registrars = []func(*tableBuilder){
 	registerLeaPea,
 	registerSystem,
 	registerTrap,
+	register68010,
 }
 
 var opcodeSets [modelCount]struct {

@@ -36,28 +36,37 @@ func opcodeSnapshot(handlers *[0x10000]instruction, cycles *[0x10000]uint32) str
 	return b.String()
 }
 
-func TestOpcodeTableSnapshot68000(t *testing.T) {
-	ops := opcodesFor(M68000)
-	got := opcodeSnapshot(&ops.handlers, &ops.cycles)
+func TestOpcodeTableSnapshots(t *testing.T) {
+	for _, tt := range []struct {
+		model Model
+		path  string
+	}{
+		{M68000, "testdata/opcodes_68000.txt"},
+		{M68010, "testdata/opcodes_68010.txt"},
+	} {
+		t.Run(tt.model.String(), func(t *testing.T) {
+			ops := opcodesFor(tt.model)
+			got := opcodeSnapshot(&ops.handlers, &ops.cycles)
 
-	const path = "testdata/opcodes_68000.txt"
-	if *updateOpcodeSnapshot {
-		if err := os.WriteFile(path, []byte(got), 0o644); err != nil {
-			t.Fatal(err)
-		}
-	}
-	want, err := os.ReadFile(path)
-	if err != nil {
-		t.Fatalf("%v (run go test -run TestOpcodeTableSnapshot68000 -update-opcodes to create it)", err)
-	}
-	if got != string(want) {
-		gotLines, wantLines := strings.Split(got, "\n"), strings.Split(string(want), "\n")
-		for i := range min(len(gotLines), len(wantLines)) {
-			if gotLines[i] != wantLines[i] {
-				t.Fatalf("opcode table differs from %s at line %d:\n got  %s\n want %s", path, i+1, gotLines[i], wantLines[i])
+			if *updateOpcodeSnapshot {
+				if err := os.WriteFile(tt.path, []byte(got), 0o644); err != nil {
+					t.Fatal(err)
+				}
 			}
-		}
-		t.Fatalf("opcode table differs from %s: %d lines, want %d", path, len(gotLines), len(wantLines))
+			want, err := os.ReadFile(tt.path)
+			if err != nil {
+				t.Fatalf("%v (run go test -run TestOpcodeTableSnapshots -update-opcodes to create it)", err)
+			}
+			if got != string(want) {
+				gotLines, wantLines := strings.Split(got, "\n"), strings.Split(string(want), "\n")
+				for i := range min(len(gotLines), len(wantLines)) {
+					if gotLines[i] != wantLines[i] {
+						t.Fatalf("opcode table differs from %s at line %d:\n got  %s\n want %s", tt.path, i+1, gotLines[i], wantLines[i])
+					}
+				}
+				t.Fatalf("opcode table differs from %s: %d lines, want %d", tt.path, len(gotLines), len(wantLines))
+			}
+		})
 	}
 }
 

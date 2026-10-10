@@ -20,8 +20,10 @@ func registerSystem(b *tableBuilder) {
 	// once the privilege check passed, so a privilege violation costs 34.
 	b.add(resetInstruction, 0x4e70, 0xffff, 0, constantCycles(4))
 	b.add(stop, 0x4e72, 0xffff, 0, constantCycles(4))
-	b.add(movec68000, 0x4e7a, 0xffff, 0, constantCycles(4))
-	b.add(movec68000, 0x4e7b, 0xffff, 0, constantCycles(4))
+	if b.model == M68000 {
+		b.add(movec68000, 0x4e7a, 0xffff, 0, constantCycles(4))
+		b.add(movec68000, 0x4e7b, 0xffff, 0, constantCycles(4))
+	}
 
 	b.add(oriToCcr, 0x003c, 0xffff, 0, constantCycles(20))
 	b.add(oriToSr, 0x007c, 0xffff, 0, constantCycles(20))
@@ -38,7 +40,11 @@ func registerSystem(b *tableBuilder) {
 		eaMaskPreDecrement | eaMaskDisplacement | eaMaskIndex |
 		eaMaskAbsoluteShort | eaMaskAbsoluteLong
 
-	b.add(moveFromSr, 0x40c0, 0xffc0, controlDestinationMask, moveFromSrCycleCalculator())
+	moveFromSrHandler := moveFromSr
+	if b.model >= M68010 {
+		moveFromSrHandler = moveFromSrPrivileged
+	}
+	b.add(moveFromSrHandler, 0x40c0, 0xffc0, controlDestinationMask, moveFromSrCycleCalculator())
 	b.add(moveToCcr, 0x44c0, 0xffc0, controlSourceMask, moveControlCycleCalculator(Word))
 	b.add(moveToSr, 0x46c0, 0xffc0, controlSourceMask, moveControlCycleCalculator(Word))
 
