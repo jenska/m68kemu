@@ -17,7 +17,7 @@ The coprocessors get their own packages inside the module:
 
 ```
 m68kemu/        core: CPU, bus, EA, scheduler, integer instruction set of all models
-m68kemu/fpu/    MC68881/MC68882 and the reduced 68040/68060 FPUs
+m68kemu/fpu/    MC68881/MC68882 and the reduced 68040/68060 FPUs, built on github.com/jenska/float
 m68kemu/mmu/    MC68851, 68030, 68040 and 68060 PMMUs
 ```
 
@@ -29,9 +29,14 @@ The core talks to them through small interfaces:
 Without an FPU, F-line opcodes raise the line-F exception. Without an MMU,
 addresses are physical. The 68000 path therefore keeps its current speed.
 
-`fpu` is the one package that could later move to its own module. Correct
-80-bit extended-precision arithmetic is useful on its own and does not depend
-on the CPU. We would only move it if other projects want to use it.
+The 80-bit extended-precision arithmetic already lives in its own module,
+[github.com/jenska/float](https://github.com/jenska/float), because it is useful
+on its own and does not depend on the CPU. `fpu` holds what is specific to the
+68881/68882: the registers, opcode decoding, operands, frames and exceptions.
+
+`fpu` needs `float` to keep its rounding and exception state in a value
+(`Env`) instead of package-level variables. Each emulated FPU then has its own
+FPCR/FPSR state, and several CPUs can run in one process.
 
 ## Phases
 
@@ -73,11 +78,19 @@ the 68020 on, timing is an approximation, and the goal is correct behaviour.
 
 ### 4. FPU (`m68kemu/fpu`)
 
-* MC68881/MC68882 programming model: FP0–FP7, FPCR, FPSR, FPIAR
-* 80-bit extended precision with correct rounding modes and precision control
-* the transcendental functions (`FSIN`, `FETOX`, `FLOGN`, ...)
-* `FSAVE`/`FRESTORE` frames and FPU exceptions
-* tests against reference values, since host `float64` is not precise enough
+Prerequisite: `float` keeps its state in an `Env` value (see Repository
+Layout), and the coprocessor interface from phase 3 exists.
+
+* MC68881/MC68882 programming model: FP0–FP7, FPCR, FPSR, FPIAR; FPCR's
+  rounding mode and precision and FPSR's exception bytes map onto `float.Env`
+* arithmetic and transcendental functions (`FSIN`, `FETOX`, `FLOGN`, ...)
+  through `float`
+* operand formats .B, .W, .L, .S, .D, .X and .P, and the `FMOVECR` constants
+* FPSR condition codes and quotient byte; `FBcc`, `FScc`, `FDBcc`, `FTRAPcc`
+* `FSAVE`/`FRESTORE` frames and FPU exceptions (vectors 48–54), with traps
+  taken according to the FPCR exception-enable byte
+* tests: `float` covers numerical accuracy against reference values; `fpu`
+  tests cover decoding, operands, condition codes, frames and exceptions
 
 ### 5. PMMU (`m68kemu/mmu`)
 
