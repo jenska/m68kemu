@@ -1,6 +1,6 @@
 package m68kemu
 
-func init() {
+func registerArithmetic(b *tableBuilder) {
 	addSubEAMask := eaMaskDataRegister | eaMaskIndirect | eaMaskPostIncrement |
 		eaMaskPreDecrement | eaMaskDisplacement | eaMaskIndex |
 		eaMaskAbsoluteShort | eaMaskAbsoluteLong | eaMaskImmediate |
@@ -11,33 +11,33 @@ func init() {
 		eaMaskAbsoluteShort | eaMaskAbsoluteLong
 
 	// ADD.B <ea>,Dn
-	registerInstruction(add, 0xd000, 0xf1c0, addSubEAMask, addCycleCalculator(0, false))
+	b.add(add, 0xd000, 0xf1c0, addSubEAMask, addCycleCalculator(0, false))
 
 	// ADD.W/L <ea>,Dn
 	for opmode := uint16(1); opmode <= 2; opmode++ {
 		match := uint16(0xd000) | (opmode << 6)
-		registerInstruction(add, match, 0xf1c0, addSubWordLongEAMask, addCycleCalculator(opmode, false))
+		b.add(add, match, 0xf1c0, addSubWordLongEAMask, addCycleCalculator(opmode, false))
 	}
 
 	// ADD Dn,<ea>
 	for opmode := uint16(4); opmode <= 6; opmode++ {
 		match := uint16(0xd000) | (opmode << 6)
-		registerInstruction(add, match, 0xf1c0, addSubAlterableMask, addCycleCalculator(opmode, true))
+		b.add(add, match, 0xf1c0, addSubAlterableMask, addCycleCalculator(opmode, true))
 	}
 
 	// SUB.B <ea>,Dn
-	registerInstruction(sub, 0x9000, 0xf1c0, addSubEAMask, addCycleCalculator(0, false))
+	b.add(sub, 0x9000, 0xf1c0, addSubEAMask, addCycleCalculator(0, false))
 
 	// SUB.W/L <ea>,Dn
 	for opmode := uint16(1); opmode <= 2; opmode++ {
 		match := uint16(0x9000) | (opmode << 6)
-		registerInstruction(sub, match, 0xf1c0, addSubWordLongEAMask, addCycleCalculator(opmode, false))
+		b.add(sub, match, 0xf1c0, addSubWordLongEAMask, addCycleCalculator(opmode, false))
 	}
 
 	// SUB Dn,<ea>
 	for opmode := uint16(4); opmode <= 6; opmode++ {
 		match := uint16(0x9000) | (opmode << 6)
-		registerInstruction(sub, match, 0xf1c0, addSubAlterableMask, addCycleCalculator(opmode, true))
+		b.add(sub, match, 0xf1c0, addSubAlterableMask, addCycleCalculator(opmode, true))
 	}
 
 	addaSubaMask := eaMaskDataRegister | eaMaskAddressRegister | eaMaskIndirect | eaMaskPostIncrement |
@@ -45,10 +45,10 @@ func init() {
 		eaMaskAbsoluteShort | eaMaskAbsoluteLong | eaMaskPCDisplacement | eaMaskPCIndex | eaMaskImmediate
 	for opmode := uint16(3); opmode <= 7; opmode += 4 { // 3=word, 7=long
 		match := uint16(0xd000) | (opmode << 6)
-		registerInstruction(adda, match, 0xf1c0, addaSubaMask, addaSubaCycleCalculator())
+		b.add(adda, match, 0xf1c0, addaSubaMask, addaSubaCycleCalculator())
 
 		match = uint16(0x9000) | (opmode << 6)
-		registerInstruction(suba, match, 0xf1c0, addaSubaMask, addaSubaCycleCalculator())
+		b.add(suba, match, 0xf1c0, addaSubaMask, addaSubaCycleCalculator())
 	}
 
 	alterableMask := eaMaskDataRegister | eaMaskAddressRegister | eaMaskIndirect |
@@ -56,8 +56,8 @@ func init() {
 		eaMaskIndex | eaMaskAbsoluteShort | eaMaskAbsoluteLong
 
 	for size := range uint16(3) {
-		registerInstruction(addq, 0x5000|(size<<6), 0xf1c0, alterableMask, addqSubqCycleCalculator())
-		registerInstruction(subq, 0x5100|(size<<6), 0xf1c0, alterableMask, addqSubqCycleCalculator())
+		b.add(addq, 0x5000|(size<<6), 0xf1c0, alterableMask, addqSubqCycleCalculator())
+		b.add(subq, 0x5100|(size<<6), 0xf1c0, alterableMask, addqSubqCycleCalculator())
 	}
 
 	divMulMask := eaMaskDataRegister | eaMaskIndirect | eaMaskPostIncrement |
@@ -66,23 +66,23 @@ func init() {
 		eaMaskImmediate
 	// The table holds the source EA time; the handlers add the operand-dependent
 	// execution time.
-	registerInstruction(divu, 0x80c0, 0xf1c0, divMulMask, wordSourceCycleCalculator())
-	registerInstruction(divs, 0x81c0, 0xf1c0, divMulMask, wordSourceCycleCalculator())
-	registerInstruction(mulu, 0xc0c0, 0xf1c0, divMulMask, wordSourceCycleCalculator())
-	registerInstruction(muls, 0xc1c0, 0xf1c0, divMulMask, wordSourceCycleCalculator())
+	b.add(divu, 0x80c0, 0xf1c0, divMulMask, wordSourceCycleCalculator())
+	b.add(divs, 0x81c0, 0xf1c0, divMulMask, wordSourceCycleCalculator())
+	b.add(mulu, 0xc0c0, 0xf1c0, divMulMask, wordSourceCycleCalculator())
+	b.add(muls, 0xc1c0, 0xf1c0, divMulMask, wordSourceCycleCalculator())
 
 	alterableNoAddr := eaMaskDataRegister | eaMaskIndirect | eaMaskPostIncrement |
 		eaMaskPreDecrement | eaMaskDisplacement | eaMaskIndex |
 		eaMaskAbsoluteShort | eaMaskAbsoluteLong
 
 	for size := range uint16(3) {
-		registerInstruction(addi, uint16(0x0600)|(size<<6), 0xffc0, alterableNoAddr, arithmeticImmediateCycleCalculator())
-		registerInstruction(subi, uint16(0x0400)|(size<<6), 0xffc0, alterableNoAddr, arithmeticImmediateCycleCalculator())
+		b.add(addi, uint16(0x0600)|(size<<6), 0xffc0, alterableNoAddr, arithmeticImmediateCycleCalculator())
+		b.add(subi, uint16(0x0400)|(size<<6), 0xffc0, alterableNoAddr, arithmeticImmediateCycleCalculator())
 	}
 
 	for size := range uint16(3) {
 		match := uint16(0x4400) | (size << 6)
-		registerInstruction(negInstruction, match, 0xffc0, alterableNoAddr, singleOperandCycleCalculator())
+		b.add(negInstruction, match, 0xffc0, alterableNoAddr, singleOperandCycleCalculator())
 	}
 }
 
@@ -578,7 +578,7 @@ func negInstruction(cpu *cpu) error {
 	return nil
 }
 
-func init() {
+func registerCompare(b *tableBuilder) {
 	cmpEAMask := eaMaskDataRegister | eaMaskAddressRegister | eaMaskIndirect | eaMaskPostIncrement |
 		eaMaskPreDecrement | eaMaskDisplacement | eaMaskIndex |
 		eaMaskAbsoluteShort | eaMaskAbsoluteLong | eaMaskImmediate |
@@ -586,11 +586,11 @@ func init() {
 
 	for opmode := uint16(0); opmode <= 2; opmode++ {
 		match := uint16(0xb000) | (opmode << 6)
-		registerInstruction(cmpInstruction, match, 0xf1c0, cmpEAMask, cmpCycleCalculator(opmode))
+		b.add(cmpInstruction, match, 0xf1c0, cmpEAMask, cmpCycleCalculator(opmode))
 	}
 	for _, opmode := range []uint16{3, 7} {
 		match := uint16(0xb000) | (opmode << 6)
-		registerInstruction(cmpa, match, 0xf1c0, cmpEAMask, cmpaCycleCalculator())
+		b.add(cmpa, match, 0xf1c0, cmpEAMask, cmpaCycleCalculator())
 	}
 
 	cmpiMask := eaMaskDataRegister | eaMaskIndirect | eaMaskPostIncrement |
@@ -598,12 +598,12 @@ func init() {
 		eaMaskAbsoluteShort | eaMaskAbsoluteLong
 	for size := range uint16(3) {
 		match := uint16(0x0c00) | (size << 6)
-		registerInstruction(cmpi, match, 0xffc0, cmpiMask, cmpiCycleCalculator())
+		b.add(cmpi, match, 0xffc0, cmpiMask, cmpiCycleCalculator())
 	}
 
 	for size := range uint16(3) {
 		match := uint16(0xb108) | (size << 6)
-		registerInstruction(cmpm, match, 0xf1f8, 0, cmpmCycleCalculator())
+		b.add(cmpm, match, 0xf1f8, 0, cmpmCycleCalculator())
 	}
 }
 
@@ -745,15 +745,15 @@ func cmpaCycleCalculator() cycleCalculator {
 	}
 }
 
-func init() {
+func registerAddxSubxNegx(b *tableBuilder) {
 	// ADDX and SUBX operate on either data registers or pre-decrement
 	// memory operands depending on bit 3 of the opcode.
-	registerExtendInstruction(addx, 0xd100, addxSubxCycleCalculator)
-	registerExtendInstruction(subx, 0x9100, addxSubxCycleCalculator)
+	registerExtendInstruction(b, addx, 0xd100, addxSubxCycleCalculator)
+	registerExtendInstruction(b, subx, 0x9100, addxSubxCycleCalculator)
 
 	for size := range uint16(3) {
 		match := uint16(0x4000) | (size << 6)
-		registerInstruction(negx, match, 0xffc0, eaMaskDataRegister|eaMaskIndirect|
+		b.add(negx, match, 0xffc0, eaMaskDataRegister|eaMaskIndirect|
 			eaMaskPostIncrement|eaMaskPreDecrement|eaMaskDisplacement|
 			eaMaskIndex|eaMaskAbsoluteShort|eaMaskAbsoluteLong, singleOperandCycleCalculator())
 	}
@@ -864,15 +864,15 @@ func extendOperands(cpu *cpu, size Size) (extendOperand, extendOperand, error) {
 	}, nil
 }
 
-func registerExtendInstruction(op instruction, base uint16, calc cycleCalculator) {
+func registerExtendInstruction(b *tableBuilder, op instruction, base uint16, calc cycleCalculator) {
 	for size := range uint16(3) {
 		for dst := range uint16(8) {
 			for src := range uint16(8) {
 				for mode := uint16(0); mode <= 1; mode++ {
 					opcode := base | (dst << 9) | (size << 6) | (mode << 3) | src
-					opcodeTable[opcode] = op
+					b.set.handlers[opcode] = op
 					if calc != nil {
-						opcodeCycleTable[opcode] = calc(opcode)
+						b.set.cycles[opcode] = calc(opcode)
 					}
 				}
 			}
@@ -954,12 +954,12 @@ func addxSubxCycleCalculator(opcode uint16) uint32 {
 	}
 }
 
-func init() {
-	registerInstruction(abcd, 0xc100, 0xf1f8, 0, abcdCycleCalculator)
-	registerInstruction(abcd, 0xc108, 0xf1f8, 0, abcdCycleCalculator)
-	registerInstruction(sbcd, 0x8100, 0xf1f8, 0, sbcdCycleCalculator)
-	registerInstruction(sbcd, 0x8108, 0xf1f8, 0, sbcdCycleCalculator)
-	registerInstruction(nbcd, 0x4800, 0xffc0, eaMaskDataRegister|eaMaskIndirect|eaMaskPostIncrement|
+func registerBCD(b *tableBuilder) {
+	b.add(abcd, 0xc100, 0xf1f8, 0, abcdCycleCalculator)
+	b.add(abcd, 0xc108, 0xf1f8, 0, abcdCycleCalculator)
+	b.add(sbcd, 0x8100, 0xf1f8, 0, sbcdCycleCalculator)
+	b.add(sbcd, 0x8108, 0xf1f8, 0, sbcdCycleCalculator)
+	b.add(nbcd, 0x4800, 0xffc0, eaMaskDataRegister|eaMaskIndirect|eaMaskPostIncrement|
 		eaMaskPreDecrement|eaMaskDisplacement|eaMaskIndex|eaMaskAbsoluteShort|eaMaskAbsoluteLong,
 		nbcdCycleCalculator)
 }
@@ -1142,17 +1142,17 @@ func nbcdCycleCalculator(opcode uint16) uint32 {
 	return 8 + eaAccessCycles(mode, reg, Byte)
 }
 
-func init() {
+func registerClrTst(b *tableBuilder) {
 	alterableNoAddr := eaMaskDataRegister | eaMaskIndirect | eaMaskPostIncrement |
 		eaMaskPreDecrement | eaMaskDisplacement | eaMaskIndex |
 		eaMaskAbsoluteShort | eaMaskAbsoluteLong
 
 	for size := range uint16(3) {
 		match := uint16(0x4200) | (size << 6)
-		registerInstruction(clr, match, 0xffc0, alterableNoAddr, singleOperandCycleCalculator())
+		b.add(clr, match, 0xffc0, alterableNoAddr, singleOperandCycleCalculator())
 
 		match = uint16(0x4a00) | (size << 6)
-		registerInstruction(tst, match, 0xffc0, alterableNoAddr|eaMaskPCDisplacement|eaMaskPCIndex|eaMaskImmediate, tstCycleCalculator())
+		b.add(tst, match, 0xffc0, alterableNoAddr|eaMaskPCDisplacement|eaMaskPCIndex|eaMaskImmediate, tstCycleCalculator())
 	}
 }
 

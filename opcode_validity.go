@@ -1,26 +1,16 @@
 package m68kemu
 
-import "sync"
-
 // This file decides which opcode words the MC68000 has, following the
 // operation code map and the effective-address categories of the M68000
-// Family Programmer's Reference Manual. pruneInvalidOpcodes drops every
-// handler the instruction registrations attached to a word outside that
-// map, so such a word raises the illegal-instruction exception (or line A/F)
-// like on the real CPU instead of running with an operand the instruction
-// cannot take.
+// Family Programmer's Reference Manual. opcodesFor drops every handler the
+// instruction registrations attached to a word outside that map, so such a
+// word raises the illegal-instruction exception (or line A/F) like on the
+// real CPU instead of running with an operand the instruction cannot take.
 
-var pruneOnce sync.Once
-
-func pruneInvalidOpcodes() {
-	pruneOnce.Do(func() {
-		for op := range opcodeTable {
-			if opcodeTable[op] != nil && op != 0x4AFC && !valid68000(uint16(op)) {
-				opcodeTable[op] = nil
-				opcodeCycleTable[op] = 0
-			}
-		}
-	})
+// validFor reports whether op is a valid opcode word for model m. Only the
+// MC68000 map exists so far.
+func validFor(m Model, op uint16) bool {
+	return valid68000(op)
 }
 
 // valid68000 reports whether op is a valid MC68000 opcode word, following

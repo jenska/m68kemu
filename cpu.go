@@ -51,9 +51,6 @@ const (
 	eaMaskPCIndex         uint16 = 0x0001
 )
 
-var opcodeTable [0x10000]instruction
-var opcodeCycleTable [0x10000]uint32
-
 type (
 	instruction func(*cpu) error
 
@@ -63,7 +60,7 @@ type (
 	BreakpointType int
 
 	// cycleCalculator builds a static cycle count for a given opcode. Results are
-	// stored in OpcodeCycleTable during instruction registration and can be looked
+	// stored in the opcodeSet during instruction registration and can be looked
 	// up at execution time for fixed-cost instructions.
 	cycleCalculator func(opcode uint16) uint32
 
@@ -337,6 +334,9 @@ type (
 		regs   Registers
 		cycles uint64
 		bus    *Bus
+		// ops is the dispatch table of the CPU's model, shared with every
+		// other CPU of that model.
+		ops *opcodeSet
 		// cycleRounding is the multiple each instruction's cycles are rounded
 		// up to (see WithCycleRounding); 0 or 1 disables it.
 		cycleRounding          uint32
@@ -962,9 +962,9 @@ func (cpu *cpu) executeInstructionWithContext(opcode uint16, instructionPC uint3
 // is already set up by the caller.
 func (cpu *cpu) dispatchInstruction(opcode uint16, instructionPC uint32) error {
 	cpu.regs.IR = opcode
-	cpu.addCycles(opcodeCycleTable[opcode])
+	cpu.addCycles(cpu.ops.cycles[opcode])
 
-	handler := opcodeTable[opcode]
+	handler := cpu.ops.handlers[opcode]
 	if handler == nil {
 		return cpu.opcodeException(exceptionVectorForOpcode(opcode), instructionPC)
 	}
@@ -1590,8 +1590,7 @@ func NewCPU(bus *Bus, opts ...Option) (CPU, error) {
 		opt(&cfg)
 	}
 
-	pruneInvalidOpcodes()
-	c := cpu{bus: bus, interrupts: newInterruptController(), cycleRounding: cfg.cycleRounding}
+	c := cpu{bus: bus, ops: opcodesFor(M68000), interrupts: newInterruptController(), cycleRounding: cfg.cycleRounding}
 	bus.waitHook = func(states uint32) { c.addCycles(states) }
 
 	if cfg.deferReset {
@@ -1602,28 +1601,6 @@ func NewCPU(bus *Bus, opts ...Option) (CPU, error) {
 		return nil, err
 	}
 	return &c, nil
-}
-
-// registerInstruction adds an opcode handler to the CPU and records the
-// precomputed cycle count for each opcode value that matches the mask.
-func registerInstruction(ins instruction, match, mask uint16, eaMask uint16, calc cycleCalculator) {
-	for value := uint16(0); ; {
-		index := match | value
-		if validEA(index, eaMask) {
-			if opcodeTable[index] != nil {
-				panic(fmt.Errorf("instruction 0x%04x already registered (existing %p new %p)", index, opcodeTable[index], ins))
-			}
-			opcodeTable[index] = ins
-			if calc != nil {
-				opcodeCycleTable[index] = calc(index)
-			}
-		}
-
-		value = ((value | mask) + 1) & ^mask
-		if value == 0 {
-			break
-		}
-	}
 }
 
 func validEA(opcode, mask uint16) bool {
@@ -1810,7 +1787,7 @@ func (cpu *cpu) addCycles(c uint32) {
 // exception's time (RESET charges its long reset pulse only once the
 // privilege check passed), so the difference never needs to be taken back.
 func (cpu *cpu) overrideInstructionCycles(total uint32) {
-	if current := opcodeCycleTable[cpu.regs.IR]; total > current {
+	if current := cpu.ops.cycles[cpu.regs.IR]; total > current {
 		cpu.addCycles(total - current)
 	}
 }

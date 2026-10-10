@@ -263,7 +263,7 @@ func TestNegExtSwapExg(t *testing.T) {
 		t.Fatalf("SWAP should preserve extend flag")
 	}
 
-	handler := opcodeTable[0xc943]
+	handler := opcodesFor(M68000).handlers[0xc943]
 	if handler == nil {
 		t.Fatalf("EXG Dx,Dy opcode not registered")
 	}

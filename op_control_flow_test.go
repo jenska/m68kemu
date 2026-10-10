@@ -291,11 +291,11 @@ func TestMoveUspAllRegisterForms(t *testing.T) {
 			}
 
 			toUSP := uint16(0x4e60) | reg
-			if opcodeTable[toUSP] == nil {
+			if opcodesFor(M68000).handlers[toUSP] == nil {
 				t.Fatalf("MOVE A%d,USP opcode %04x not registered", reg, toUSP)
 			}
-			if opcodeCycleTable[toUSP] != 4 {
-				t.Fatalf("MOVE A%d,USP cycles=%d, want 4", reg, opcodeCycleTable[toUSP])
+			if opcodesFor(M68000).cycles[toUSP] != 4 {
+				t.Fatalf("MOVE A%d,USP cycles=%d, want 4", reg, opcodesFor(M68000).cycles[toUSP])
 			}
 			if err := cpu.executeInstruction(toUSP); err != nil {
 				t.Fatalf("MOVE A%d,USP failed: %v", reg, err)
@@ -308,11 +308,11 @@ func TestMoveUspAllRegisterForms(t *testing.T) {
 			cpu.regs.USP = destination
 
 			fromUSP := uint16(0x4e68) | reg
-			if opcodeTable[fromUSP] == nil {
+			if opcodesFor(M68000).handlers[fromUSP] == nil {
 				t.Fatalf("MOVE USP,A%d opcode %04x not registered", reg, fromUSP)
 			}
-			if opcodeCycleTable[fromUSP] != 4 {
-				t.Fatalf("MOVE USP,A%d cycles=%d, want 4", reg, opcodeCycleTable[fromUSP])
+			if opcodesFor(M68000).cycles[fromUSP] != 4 {
+				t.Fatalf("MOVE USP,A%d cycles=%d, want 4", reg, opcodesFor(M68000).cycles[fromUSP])
 			}
 			if err := cpu.executeInstruction(fromUSP); err != nil {
 				t.Fatalf("MOVE USP,A%d failed: %v", reg, err)
@@ -474,7 +474,7 @@ func TestChk(t *testing.T) {
 
 func TestChkException(t *testing.T) {
 	cpu, ram := newEnvironment(t)
-	if opcodeTable[0x4181] == nil {
+	if opcodesFor(M68000).handlers[0x4181] == nil {
 		t.Fatalf("CHK handler not registered")
 	}
 	// vector 6 handler at 0x4000

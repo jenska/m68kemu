@@ -6,14 +6,13 @@ import "testing"
 // operands while BCHG/BCLR/BSET, which write their operand, do not exist
 // with one on the 68000.
 func TestBitOpcodeRegistrationPCRelative(t *testing.T) {
-	pruneInvalidOpcodes()
 	for _, opcode := range []uint16{0x013a, 0x013b, 0x083a, 0x083b, 0x013c} {
-		if opcodeTable[opcode] == nil {
+		if opcodesFor(M68000).handlers[opcode] == nil {
 			t.Errorf("expected BTST opcode %04x to be registered", opcode)
 		}
 	}
 	for _, opcode := range []uint16{0x017a, 0x017b, 0x01ba, 0x01bb, 0x01fa, 0x01fb, 0x087a, 0x087b, 0x08ba, 0x08bb, 0x08fa, 0x08fb} {
-		if opcodeTable[opcode] != nil {
+		if opcodesFor(M68000).handlers[opcode] != nil {
 			t.Errorf("expected opcode %04x (bit change to a PC-relative operand) to be illegal", opcode)
 		}
 	}

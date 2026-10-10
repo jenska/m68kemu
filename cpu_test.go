@@ -227,7 +227,7 @@ func TestExecuteInstructionAddsOpcodeCycles(t *testing.T) {
 		t.Fatalf("executeInstruction failed: %v", err)
 	}
 
-	expected := uint64(opcodeCycleTable[opcode])
+	expected := uint64(opcodesFor(M68000).cycles[opcode])
 	if cpu.Cycles() != expected {
 		t.Fatalf("unexpected cycles after executeInstruction: got %d want %d", cpu.Cycles(), expected)
 	}
@@ -360,9 +360,10 @@ func TestRunCyclesDetectsStalledCycles(t *testing.T) {
 	}
 
 	const nopOpcode = uint16(0x4e71)
-	originalCycles := opcodeCycleTable[nopOpcode]
-	opcodeCycleTable[nopOpcode] = 0
-	defer func() { opcodeCycleTable[nopOpcode] = originalCycles }()
+	// The table is shared by every 68000, so change a private copy.
+	ops := *cpu.ops
+	ops.cycles[nopOpcode] = 0
+	cpu.ops = &ops
 
 	if err := cpu.RunCycles(1); err == nil {
 		t.Fatalf("RunCycles should fail when cycles do not advance")
@@ -397,7 +398,7 @@ func TestOpcodeCycleTable(t *testing.T) {
 	code := assemble(t, "MOVE.L D0,(A0)\nLSL.B #1,D0\nLSL.B D1,D0\nASL.W (A0)\nABCD D0,D1")
 	assertWordCycles := func(t *testing.T, word uint16, expected uint32) {
 		t.Helper()
-		if got := opcodeCycleTable[word]; got != expected {
+		if got := opcodesFor(M68000).cycles[word]; got != expected {
 			t.Fatalf("opcode %04x: unexpected cycles got %d want %d", word, got, expected)
 		}
 	}

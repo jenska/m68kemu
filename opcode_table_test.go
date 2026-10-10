@@ -7,6 +7,7 @@ import (
 	"reflect"
 	"runtime"
 	"strings"
+	"sync"
 	"testing"
 )
 
@@ -36,8 +37,8 @@ func opcodeSnapshot(handlers *[0x10000]instruction, cycles *[0x10000]uint32) str
 }
 
 func TestOpcodeTableSnapshot68000(t *testing.T) {
-	pruneInvalidOpcodes()
-	got := opcodeSnapshot(&opcodeTable, &opcodeCycleTable)
+	ops := opcodesFor(M68000)
+	got := opcodeSnapshot(&ops.handlers, &ops.cycles)
 
 	const path = "testdata/opcodes_68000.txt"
 	if *updateOpcodeSnapshot {
@@ -57,5 +58,34 @@ func TestOpcodeTableSnapshot68000(t *testing.T) {
 			}
 		}
 		t.Fatalf("opcode table differs from %s: %d lines, want %d", path, len(gotLines), len(wantLines))
+	}
+}
+
+func TestCPUsOfOneModelShareOpcodeSet(t *testing.T) {
+	a, _ := newEnvironment(t)
+	b, _ := newEnvironment(t)
+	if a.ops != b.ops {
+		t.Fatalf("two 68000 CPUs have different opcode sets")
+	}
+	if a.ops != opcodesFor(M68000) {
+		t.Fatalf("CPU does not use opcodesFor(M68000)")
+	}
+}
+
+// TestOpcodesForConcurrentBuild runs under -race: concurrent first calls must
+// build the table once and all return it. It uses M68060 because no other
+// test builds that table.
+func TestOpcodesForConcurrentBuild(t *testing.T) {
+	const n = 8
+	sets := make([]*opcodeSet, n)
+	var wg sync.WaitGroup
+	for i := range n {
+		wg.Go(func() { sets[i] = opcodesFor(M68060) })
+	}
+	wg.Wait()
+	for i, s := range sets {
+		if s == nil || s != sets[0] {
+			t.Fatalf("goroutine %d got opcode set %p, goroutine 0 got %p", i, s, sets[0])
+		}
 	}
 }

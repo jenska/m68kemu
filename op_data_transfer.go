@@ -5,13 +5,13 @@ import (
 	"math/bits"
 )
 
-func init() {
-	registerMove(moveb, 0x1000, moveCycleCalculator(Byte))
-	registerMove(movew, 0x3000, moveCycleCalculator(Word))
-	registerMove(movel, 0x2000, moveCycleCalculator(Long))
-	registerMoveA(0x3000, moveaw, moveAddressCycleCalculator(Word))
-	registerMoveA(0x2000, moveal, moveAddressCycleCalculator(Long))
-	registerInstruction(moveq, 0x7000, 0xf100, 0, constantCycles(4))
+func registerMoves(b *tableBuilder) {
+	registerMove(b, moveb, 0x1000, moveCycleCalculator(Byte))
+	registerMove(b, movew, 0x3000, moveCycleCalculator(Word))
+	registerMove(b, movel, 0x2000, moveCycleCalculator(Long))
+	registerMoveA(b, 0x3000, moveaw, moveAddressCycleCalculator(Word))
+	registerMoveA(b, 0x2000, moveal, moveAddressCycleCalculator(Long))
+	b.add(moveq, 0x7000, 0xf100, 0, constantCycles(4))
 }
 
 const moveSourceEAMask = eaMaskDataRegister |
@@ -35,15 +35,15 @@ func moveq(cpu *cpu) error {
 	return nil
 }
 
-func registerMoveA(base uint16, handler instruction, calc cycleCalculator) {
+func registerMoveA(b *tableBuilder, base uint16, handler instruction, calc cycleCalculator) {
 	const dstMode = uint16(1)
 	for dstReg := range uint16(8) {
 		match := base | (dstReg << 9) | (dstMode << 6)
-		registerInstruction(handler, match, 0xffc0, moveSourceEAMask, calc)
+		b.add(handler, match, 0xffc0, moveSourceEAMask, calc)
 	}
 }
 
-func registerMove(ins instruction, base uint16, calc cycleCalculator) {
+func registerMove(b *tableBuilder, ins instruction, base uint16, calc cycleCalculator) {
 	for dstMode := range uint16(8) {
 		// Address register destinations are handled by MOVEA.
 		if dstMode == 1 {
@@ -57,7 +57,7 @@ func registerMove(ins instruction, base uint16, calc cycleCalculator) {
 				continue
 			}
 			match := base | (dstReg << 9) | (dstMode << 6)
-			registerInstruction(ins, match, 0xffc0, moveSourceEAMask, calc)
+			b.add(ins, match, 0xffc0, moveSourceEAMask, calc)
 		}
 	}
 }
@@ -189,27 +189,27 @@ func moveAddressCycleCalculator(size Size) cycleCalculator {
 }
 
 // MOVEM: move multiple registers to/from memory
-func init() {
+func registerMovem(b *tableBuilder) {
 	// Register-to-memory: MOVEM.<size> <register list>,<ea>
 	for _, sizeBits := range []uint16{2 << 6, 3 << 6} {
-		registerMovemInstruction(0x4800, sizeBits, movemToMemory, eaMaskIndirect|eaMaskPreDecrement|eaMaskDisplacement|
+		registerMovemInstruction(b, 0x4800, sizeBits, movemToMemory, eaMaskIndirect|eaMaskPreDecrement|eaMaskDisplacement|
 			eaMaskIndex|eaMaskAbsoluteShort|eaMaskAbsoluteLong)
-		registerMovemInstruction(0x4c00, sizeBits, movemToRegisters, eaMaskIndirect|eaMaskPostIncrement|
+		registerMovemInstruction(b, 0x4c00, sizeBits, movemToRegisters, eaMaskIndirect|eaMaskPostIncrement|
 			eaMaskDisplacement|eaMaskIndex|eaMaskAbsoluteShort|eaMaskAbsoluteLong|eaMaskPCDisplacement|eaMaskPCIndex)
 	}
 }
 
-func registerMovemInstruction(match, sizeBits uint16, ins instruction, eaMask uint16) {
+func registerMovemInstruction(b *tableBuilder, match, sizeBits uint16, ins instruction, eaMask uint16) {
 	for mode := range uint16(8) {
 		for reg := range uint16(8) {
 			opcode := match | sizeBits | (mode << 3) | reg
 			if !validEA(opcode, eaMask) {
 				continue
 			}
-			if opcodeTable[opcode] != nil {
+			if b.set.handlers[opcode] != nil {
 				panic(fmt.Errorf("instruction 0x%04x already registered", opcode))
 			}
-			opcodeTable[opcode] = ins
+			b.set.handlers[opcode] = ins
 		}
 	}
 }
@@ -428,11 +428,11 @@ func movemToMemory(cpu *cpu) error {
 	return nil
 }
 
-func init() {
-	registerInstruction(movep, 0x0108, 0xf1f8, 0, movepCycleCalculator)
-	registerInstruction(movep, 0x0148, 0xf1f8, 0, movepCycleCalculator)
-	registerInstruction(movep, 0x0188, 0xf1f8, 0, movepCycleCalculator)
-	registerInstruction(movep, 0x01c8, 0xf1f8, 0, movepCycleCalculator)
+func registerMovep(b *tableBuilder) {
+	b.add(movep, 0x0108, 0xf1f8, 0, movepCycleCalculator)
+	b.add(movep, 0x0148, 0xf1f8, 0, movepCycleCalculator)
+	b.add(movep, 0x0188, 0xf1f8, 0, movepCycleCalculator)
+	b.add(movep, 0x01c8, 0xf1f8, 0, movepCycleCalculator)
 }
 
 func movep(cpu *cpu) error {
@@ -522,11 +522,11 @@ func movepCycleCalculator(opcode uint16) uint32 {
 	return 16
 }
 
-func init() {
+func registerLeaPea(b *tableBuilder) {
 	const leaPeaAddressMask = eaMaskIndirect | eaMaskPostIncrement | eaMaskPreDecrement | eaMaskDisplacement | eaMaskIndex | eaMaskAbsoluteShort | eaMaskAbsoluteLong | eaMaskPCDisplacement | eaMaskPCIndex
 
-	registerInstruction(lea, 0x41c0, 0xf1c0, leaPeaAddressMask, leaPeaCycleCalculator(0))
-	registerInstruction(pea, 0x4840, 0xffc0, leaPeaAddressMask, leaPeaCycleCalculator(8))
+	b.add(lea, 0x41c0, 0xf1c0, leaPeaAddressMask, leaPeaCycleCalculator(0))
+	b.add(pea, 0x4840, 0xffc0, leaPeaAddressMask, leaPeaCycleCalculator(8))
 }
 
 func lea(cpu *cpu) error {

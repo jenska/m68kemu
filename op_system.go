@@ -1,34 +1,34 @@
 package m68kemu
 
-func init() {
+func registerSystem(b *tableBuilder) {
 
-	registerInstruction(swapInstruction, 0x4840, 0xfff8, 0, constantCycles(4))
-	registerInstruction(extInstruction, 0x4880, 0xfff8, 0, constantCycles(4))
-	registerInstruction(extInstruction, 0x48c0, 0xfff8, 0, constantCycles(4))
-	registerInstruction(tasInstruction, 0x4ac0, 0xffc0, eaMaskDataRegister|eaMaskIndirect|eaMaskPostIncrement|
+	b.add(swapInstruction, 0x4840, 0xfff8, 0, constantCycles(4))
+	b.add(extInstruction, 0x4880, 0xfff8, 0, constantCycles(4))
+	b.add(extInstruction, 0x48c0, 0xfff8, 0, constantCycles(4))
+	b.add(tasInstruction, 0x4ac0, 0xffc0, eaMaskDataRegister|eaMaskIndirect|eaMaskPostIncrement|
 		eaMaskPreDecrement|eaMaskDisplacement|eaMaskIndex|eaMaskAbsoluteShort|eaMaskAbsoluteLong, tasCycleCalculator())
 
-	registerExgInstruction(0xc140, constantCycles(6))
-	registerExgInstruction(0xc148, constantCycles(6))
-	registerExgInstruction(0xc188, constantCycles(8))
+	registerExgInstruction(b, 0xc140, constantCycles(6))
+	registerExgInstruction(b, 0xc148, constantCycles(6))
+	registerExgInstruction(b, 0xc188, constantCycles(8))
 
-	registerInstruction(illegalInstruction, 0x4afc, 0xffff, 0, constantCycles(4))
-	registerInstruction(nop, 0x4e71, 0xffff, 0, constantCycles(4))
+	b.add(illegalInstruction, 0x4afc, 0xffff, 0, constantCycles(4))
+	b.add(nop, 0x4e71, 0xffff, 0, constantCycles(4))
 
-	registerInstruction(trapv, 0x4e76, 0xffff, 0, constantCycles(4))
+	b.add(trapv, 0x4e76, 0xffff, 0, constantCycles(4))
 	// RESET takes 132 cycles; resetInstruction adds the 128 of the reset pulse
 	// once the privilege check passed, so a privilege violation costs 34.
-	registerInstruction(resetInstruction, 0x4e70, 0xffff, 0, constantCycles(4))
-	registerInstruction(stop, 0x4e72, 0xffff, 0, constantCycles(4))
-	registerInstruction(movec68000, 0x4e7a, 0xffff, 0, constantCycles(4))
-	registerInstruction(movec68000, 0x4e7b, 0xffff, 0, constantCycles(4))
+	b.add(resetInstruction, 0x4e70, 0xffff, 0, constantCycles(4))
+	b.add(stop, 0x4e72, 0xffff, 0, constantCycles(4))
+	b.add(movec68000, 0x4e7a, 0xffff, 0, constantCycles(4))
+	b.add(movec68000, 0x4e7b, 0xffff, 0, constantCycles(4))
 
-	registerInstruction(oriToCcr, 0x003c, 0xffff, 0, constantCycles(20))
-	registerInstruction(oriToSr, 0x007c, 0xffff, 0, constantCycles(20))
-	registerInstruction(andiToCcr, 0x023c, 0xffff, 0, constantCycles(20))
-	registerInstruction(andiToSr, 0x027c, 0xffff, 0, constantCycles(20))
-	registerInstruction(eoriToCcr, 0x0a3c, 0xffff, 0, constantCycles(20))
-	registerInstruction(eoriToSr, 0x0a7c, 0xffff, 0, constantCycles(20))
+	b.add(oriToCcr, 0x003c, 0xffff, 0, constantCycles(20))
+	b.add(oriToSr, 0x007c, 0xffff, 0, constantCycles(20))
+	b.add(andiToCcr, 0x023c, 0xffff, 0, constantCycles(20))
+	b.add(andiToSr, 0x027c, 0xffff, 0, constantCycles(20))
+	b.add(eoriToCcr, 0x0a3c, 0xffff, 0, constantCycles(20))
+	b.add(eoriToSr, 0x0a7c, 0xffff, 0, constantCycles(20))
 
 	const controlSourceMask = eaMaskDataRegister | eaMaskIndirect | eaMaskPostIncrement |
 		eaMaskPreDecrement | eaMaskDisplacement | eaMaskIndex |
@@ -38,12 +38,12 @@ func init() {
 		eaMaskPreDecrement | eaMaskDisplacement | eaMaskIndex |
 		eaMaskAbsoluteShort | eaMaskAbsoluteLong
 
-	registerInstruction(moveFromSr, 0x40c0, 0xffc0, controlDestinationMask, moveFromSrCycleCalculator())
-	registerInstruction(moveToCcr, 0x44c0, 0xffc0, controlSourceMask, moveControlCycleCalculator(Word))
-	registerInstruction(moveToSr, 0x46c0, 0xffc0, controlSourceMask, moveControlCycleCalculator(Word))
+	b.add(moveFromSr, 0x40c0, 0xffc0, controlDestinationMask, moveFromSrCycleCalculator())
+	b.add(moveToCcr, 0x44c0, 0xffc0, controlSourceMask, moveControlCycleCalculator(Word))
+	b.add(moveToSr, 0x46c0, 0xffc0, controlSourceMask, moveControlCycleCalculator(Word))
 
-	registerInstruction(rte, 0x4e73, 0xffff, 0, constantCycles(20))
-	registerInstruction(rtr, 0x4e77, 0xffff, 0, constantCycles(20))
+	b.add(rte, 0x4e73, 0xffff, 0, constantCycles(20))
+	b.add(rtr, 0x4e77, 0xffff, 0, constantCycles(20))
 }
 
 // MOVEC is not implemented on a plain 68000. The opcode traps immediately as
@@ -326,13 +326,13 @@ func tasInstruction(cpu *cpu) error {
 	return dst.write(value | 0x80)
 }
 
-func registerExgInstruction(match uint16, calc cycleCalculator) {
+func registerExgInstruction(b *tableBuilder, match uint16, calc cycleCalculator) {
 	for rx := range uint16(8) {
 		for ry := range uint16(8) {
 			opcode := match | (ry << 9) | rx
-			opcodeTable[opcode] = exgInstruction
+			b.set.handlers[opcode] = exgInstruction
 			if calc != nil {
-				opcodeCycleTable[opcode] = calc(opcode)
+				b.set.cycles[opcode] = calc(opcode)
 			}
 		}
 	}
@@ -342,8 +342,8 @@ func illegalInstruction(cpu *cpu) error {
 	return cpu.exceptionWithCycles(XIllegal, exceptionCyclesIllegal)
 }
 
-func init() {
-	registerInstruction(trap, 0x4e40, 0xfff0, 0, constantCycles(34))
+func registerTrap(b *tableBuilder) {
+	b.add(trap, 0x4e40, 0xfff0, 0, constantCycles(34))
 }
 
 // trap handles TRAP #n instructions by stacking the exception frame and

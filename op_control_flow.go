@@ -1,21 +1,21 @@
 package m68kemu
 
-func init() {
+func registerBranches(b *tableBuilder) {
 	// BRA/Bcc with 8- or 16-bit displacement (no 32-bit on 68000)
 	for cond := range uint16(16) {
 		match := uint16(0x6000) | (cond << 8)
 		// Table 8-9: 8 cycles for a short branch not taken; branch adds the rest.
-		registerInstruction(branch, match, 0xff00, 0, constantCycles(8))
+		b.add(branch, match, 0xff00, 0, constantCycles(8))
 	}
 
 	for cond := range uint16(16) {
 		match := uint16(0x50c8) | (cond << 8)
 		// Table 8-9: 10 cycles when the loop branches; dbcc adds the rest.
-		registerInstruction(dbcc, match, 0xfff8, 0, constantCycles(10))
+		b.add(dbcc, match, 0xfff8, 0, constantCycles(10))
 	}
 
 	// Scc
-	registerInstruction(scc, 0x50c0, 0xf0c0, eaMaskDataRegister|eaMaskIndirect|
+	b.add(scc, 0x50c0, 0xf0c0, eaMaskDataRegister|eaMaskIndirect|
 		eaMaskPostIncrement|eaMaskPreDecrement|eaMaskDisplacement|eaMaskIndex|
 		eaMaskAbsoluteShort|eaMaskAbsoluteLong, sccCycleCalculator())
 }
@@ -152,14 +152,14 @@ func sccCycleCalculator() cycleCalculator {
 }
 
 // Jump and link-related instructions.
-func init() {
+func registerJumpLink(b *tableBuilder) {
 	const controlAlterableMask = eaMaskIndirect | eaMaskDisplacement | eaMaskIndex | eaMaskAbsoluteShort | eaMaskAbsoluteLong | eaMaskPCDisplacement | eaMaskPCIndex
 
-	registerInstruction(jmp, 0x4ec0, 0xffc0, controlAlterableMask, jmpCycleCalculator())
-	registerInstruction(linkInstruction, 0x4e50, 0xfff8, 0, constantCycles(16))
-	registerInstruction(unlkInstruction, 0x4e58, 0xfff8, 0, constantCycles(12))
-	registerMoveUsp()
-	registerInstruction(chkInstruction, 0x4180, 0xf1c0, chkEAMask, chkCycleCalculator())
+	b.add(jmp, 0x4ec0, 0xffc0, controlAlterableMask, jmpCycleCalculator())
+	b.add(linkInstruction, 0x4e50, 0xfff8, 0, constantCycles(16))
+	b.add(unlkInstruction, 0x4e58, 0xfff8, 0, constantCycles(12))
+	registerMoveUsp(b)
+	b.add(chkInstruction, 0x4180, 0xf1c0, chkEAMask, chkCycleCalculator())
 }
 
 func jmp(cpu *cpu) error {
@@ -179,14 +179,14 @@ func jmpCycleCalculator() cycleCalculator {
 	}
 }
 
-func registerMoveUsp() {
+func registerMoveUsp(b *tableBuilder) {
 	for reg := range uint16(8) {
 		toUSP := uint16(0x4e60) | reg
 		fromUSP := uint16(0x4e68) | reg
-		opcodeTable[toUSP] = moveToUsp
-		opcodeCycleTable[toUSP] = 4
-		opcodeTable[fromUSP] = moveFromUsp
-		opcodeCycleTable[fromUSP] = 4
+		b.set.handlers[toUSP] = moveToUsp
+		b.set.cycles[toUSP] = 4
+		b.set.handlers[fromUSP] = moveFromUsp
+		b.set.cycles[fromUSP] = 4
 	}
 }
 
@@ -293,11 +293,11 @@ func chkExceptionCycles(opcode uint16) uint32 {
 }
 
 // Subroutine control flow: JSR/RTS
-func init() {
+func registerSubroutine(b *tableBuilder) {
 	const controlAlterableMask = eaMaskIndirect | eaMaskDisplacement | eaMaskIndex | eaMaskAbsoluteShort | eaMaskAbsoluteLong | eaMaskPCDisplacement | eaMaskPCIndex
 
-	registerInstruction(jsr, 0x4e80, 0xffc0, controlAlterableMask, jsrCycleCalculator())
-	registerInstruction(rts, 0x4e75, 0xffff, 0, constantCycles(16))
+	b.add(jsr, 0x4e80, 0xffc0, controlAlterableMask, jsrCycleCalculator())
+	b.add(rts, 0x4e75, 0xffff, 0, constantCycles(16))
 }
 
 func jsr(cpu *cpu) error {

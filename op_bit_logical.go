@@ -2,7 +2,7 @@ package m68kemu
 
 import "fmt"
 
-func init() {
+func registerLogical(b *tableBuilder) {
 	logicalSourceMask := eaMaskDataRegister | eaMaskIndirect | eaMaskPostIncrement |
 		eaMaskPreDecrement | eaMaskDisplacement | eaMaskIndex |
 		eaMaskAbsoluteShort | eaMaskAbsoluteLong | eaMaskPCDisplacement | eaMaskPCIndex |
@@ -14,31 +14,31 @@ func init() {
 	// AND <ea>,Dn
 	for opmode := uint16(0); opmode <= 2; opmode++ {
 		match := uint16(0xc000) | (opmode << 6)
-		registerLogicalInstruction(andInstruction, match, 0xf1c0, logicalSourceMask, logicalCycleCalculator(opmode, false))
+		registerLogicalInstruction(b, andInstruction, match, 0xf1c0, logicalSourceMask, logicalCycleCalculator(opmode, false))
 	}
 
 	// AND Dn,<ea>
 	for opmode := uint16(4); opmode <= 6; opmode++ {
 		match := uint16(0xc000) | (opmode << 6)
-		registerLogicalInstruction(andInstruction, match, 0xf1c0, logicalDestinationMask, logicalCycleCalculator(opmode, true))
+		registerLogicalInstruction(b, andInstruction, match, 0xf1c0, logicalDestinationMask, logicalCycleCalculator(opmode, true))
 	}
 
 	// OR <ea>,Dn
 	for opmode := uint16(0); opmode <= 2; opmode++ {
 		match := uint16(0x8000) | (opmode << 6)
-		registerLogicalInstruction(orInstruction, match, 0xf1c0, logicalSourceMask, logicalCycleCalculator(opmode, false))
+		registerLogicalInstruction(b, orInstruction, match, 0xf1c0, logicalSourceMask, logicalCycleCalculator(opmode, false))
 	}
 
 	// OR Dn,<ea>
 	for opmode := uint16(4); opmode <= 6; opmode++ {
 		match := uint16(0x8000) | (opmode << 6)
-		registerLogicalInstruction(orInstruction, match, 0xf1c0, logicalDestinationMask, logicalCycleCalculator(opmode, true))
+		registerLogicalInstruction(b, orInstruction, match, 0xf1c0, logicalDestinationMask, logicalCycleCalculator(opmode, true))
 	}
 
 	// EOR Dn,<ea>
 	for size := range uint16(3) {
 		match := uint16(0xb100) | (size << 6)
-		registerLogicalInstruction(eorInstruction, match, 0xf1c0, logicalDestinationMask, logicalCycleCalculator(size, true))
+		registerLogicalInstruction(b, eorInstruction, match, 0xf1c0, logicalDestinationMask, logicalCycleCalculator(size, true))
 	}
 
 	// Immediate logical operations.
@@ -46,9 +46,9 @@ func init() {
 		eaMaskPreDecrement | eaMaskDisplacement | eaMaskIndex |
 		eaMaskAbsoluteShort | eaMaskAbsoluteLong
 	for size := range uint16(3) {
-		registerInstruction(oriImmediate, uint16(0x0000)|(size<<6), 0xffc0, immediateMask, logicalImmediateCycleCalculator())
-		registerInstruction(andiImmediate, uint16(0x0200)|(size<<6), 0xffc0, immediateMask, logicalImmediateCycleCalculator())
-		registerInstruction(eoriImmediate, uint16(0x0a00)|(size<<6), 0xffc0, immediateMask, logicalImmediateCycleCalculator())
+		b.add(oriImmediate, uint16(0x0000)|(size<<6), 0xffc0, immediateMask, logicalImmediateCycleCalculator())
+		b.add(andiImmediate, uint16(0x0200)|(size<<6), 0xffc0, immediateMask, logicalImmediateCycleCalculator())
+		b.add(eoriImmediate, uint16(0x0a00)|(size<<6), 0xffc0, immediateMask, logicalImmediateCycleCalculator())
 	}
 
 	// NOT <ea>
@@ -56,13 +56,13 @@ func init() {
 		eaMaskDisplacement | eaMaskIndex | eaMaskAbsoluteShort | eaMaskAbsoluteLong
 	for size := range uint16(3) {
 		match := uint16(0x4600) | (size << 6)
-		registerInstruction(notInstruction, match, 0xffc0, notMask, singleOperandCycleCalculator())
+		b.add(notInstruction, match, 0xffc0, notMask, singleOperandCycleCalculator())
 	}
 }
 
-// registerLogicalInstruction behaves like registerInstruction but skips opcode slots that
+// registerLogicalInstruction behaves like tableBuilder.add but skips opcode slots that
 // are already reserved by other instructions (for example, ABCD).
-func registerLogicalInstruction(ins instruction, match, mask uint16, eaMask uint16, calc cycleCalculator) {
+func registerLogicalInstruction(b *tableBuilder, ins instruction, match, mask uint16, eaMask uint16, calc cycleCalculator) {
 	for value := uint16(0); ; {
 		index := match | value
 		if (index & 0xf1f8) == 0xc100 { // Reserved for ABCD.
@@ -74,10 +74,10 @@ func registerLogicalInstruction(ins instruction, match, mask uint16, eaMask uint
 		}
 
 		if validEA(index, eaMask) {
-			if opcodeTable[index] == nil {
-				opcodeTable[index] = ins
+			if b.set.handlers[index] == nil {
+				b.set.handlers[index] = ins
 				if calc != nil {
-					opcodeCycleTable[index] = calc(index)
+					b.set.cycles[index] = calc(index)
 				}
 			}
 		}
@@ -276,7 +276,7 @@ func notInstruction(cpu *cpu) error {
 	return nil
 }
 
-func init() {
+func registerBitOps(b *tableBuilder) {
 	// Valid bit-instruction destinations include data registers plus the memory
 	// forms this emulator supports, including PC-relative operands.
 	bitOperandMask := eaMaskDataRegister | eaMaskIndirect | eaMaskPostIncrement |
@@ -285,17 +285,17 @@ func init() {
 		eaMaskPCDisplacement | eaMaskPCIndex
 
 	// Dynamic bit number (from Dx) uses opcodes with bit 11 clear and op type
-	// in bits 8-6. BTST Dn,#<data> tests an immediate; pruneInvalidOpcodes
+	// in bits 8-6. BTST Dn,#<data> tests an immediate; opcodesFor
 	// drops the immediate and PC-relative slots of BCHG/BCLR/BSET.
 	for op := range uint16(4) {
 		match := uint16(0x0100) | ((op + 4) << 6)
-		registerInstruction(bitDynamic, match, 0xf1c0, bitOperandMask|eaMaskImmediate, bitCycleCalculator(false, op))
+		b.add(bitDynamic, match, 0xf1c0, bitOperandMask|eaMaskImmediate, bitCycleCalculator(false, op))
 	}
 
 	// Static bit number (immediate) uses opcodes with bit 11 set and op type in bits 8-6.
 	for op := range uint16(4) {
 		match := uint16(0x0800) | (op << 6)
-		registerInstruction(bitImmediate, match, 0xffc0, bitOperandMask, bitCycleCalculator(true, op))
+		b.add(bitImmediate, match, 0xffc0, bitOperandMask, bitCycleCalculator(true, op))
 	}
 }
 
@@ -435,16 +435,16 @@ func bitOperation(cpu *cpu, bitNumber uint32, mode uint16, dst modifier) error {
 	return nil
 }
 
-func init() {
+func registerShiftRotate(b *tableBuilder) {
 	// Register forms: size field 00-10, every count/register combination.
 	for size := range uint16(3) {
-		registerInstruction(shiftRotate, 0xe000|(size<<6), 0xf0c0, 0, shiftRotateCycleCalculator)
+		b.add(shiftRotate, 0xe000|(size<<6), 0xf0c0, 0, shiftRotateCycleCalculator)
 	}
 	// Memory forms: size field 11, bit 11 clear (the 68020 bit-field
 	// instructions use the rest), and a memory alterable operand.
 	const memoryAlterable = eaMaskIndirect | eaMaskPostIncrement | eaMaskPreDecrement |
 		eaMaskDisplacement | eaMaskIndex | eaMaskAbsoluteShort | eaMaskAbsoluteLong
-	registerInstruction(shiftRotate, 0xe0c0, 0xf8c0, memoryAlterable, shiftRotateCycleCalculator)
+	b.add(shiftRotate, 0xe0c0, 0xf8c0, memoryAlterable, shiftRotateCycleCalculator)
 }
 
 func shiftRotate(cpu *cpu) error {

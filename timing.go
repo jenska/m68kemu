@@ -5,7 +5,7 @@ package m68kemu
 // Every figure includes the instruction's own bus cycles (opcode and extension
 // word fetches, operand reads and writes); bus wait states come on top.
 //
-// The calculators here produce the static part stored in opcodeCycleTable.
+// The calculators here produce the static part stored in opcodeSet.cycles.
 // Instructions whose time depends on run-time values (taken branches, bit
 // numbers, shift counts, MULU/MULS/DIVU/DIVS operands, MOVEM register lists)
 // add the dynamic part in their handlers.
