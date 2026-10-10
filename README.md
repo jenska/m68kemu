@@ -31,7 +31,7 @@ Still missing for a complete Atari ST:
 
 * Prefetch-sensitive behavior and any remaining compatibility gaps found by larger TOS / software workloads.
 
-The MC68010 is supported (see [CPU Models](#cpu-models)). Support for the MC68020 to MC68060, including PMMU and FPU, is planned. See [doc/roadmap.md](doc/roadmap.md).
+The MC68010 is supported (see [CPU Models](#cpu-models)). Support for the MC68020 to MC68040, including PMMU and FPU, is planned. See [doc/roadmap.md](doc/roadmap.md).
 
 ## Getting Started
 

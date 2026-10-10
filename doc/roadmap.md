@@ -1,8 +1,6 @@
 # Roadmap: MC68010 to MC68060
 
-m68kemu emulates the MC68000 today. The aim is to grow it into an emulator for
-the whole family, from the MC68010 to the MC68060, including the paged memory
-management unit (PMMU) and floating-point unit (FPU).
+m68kemu emulates the MC68000 and M68010 today. The aim is to grow it into an emulator for the whole family, from the MC68020 to the MC68040, including the paged memory management unit (PMMU) and floating-point unit (FPU).
 
 ## Repository Layout
 
@@ -16,8 +14,9 @@ every change to the core.
 The coprocessors get their own packages inside the module:
 
 ```
+
 m68kemu/        core: CPU, bus, EA, scheduler, integer instruction set of all models
-m68kemu/fpu/    MC68881/MC68882 and the reduced 68040/68060 FPUs, built on github.com/jenska/float
+m68kemu/fpu/    MC68881/MC68882 and the reduced 68040 FPU, built on github.com/jenska/float
 m68kemu/mmu/    MC68851, 68030, 68040 and 68060 PMMUs
 ```
 
@@ -78,19 +77,27 @@ the 68020 on, timing is an approximation, and the goal is correct behaviour.
 
 ### 4. FPU (`m68kemu/fpu`)
 
-Prerequisite: `float` keeps its state in an `Env` value (see Repository
-Layout), and the coprocessor interface from phase 3 exists.
+The FPU does not wait for phase 3. Most of it is independent of the CPU, and
+on a 68000 or 68010 the 68881 is a memory-mapped peripheral, so it comes in
+three parts; see [fpu.md](fpu.md):
 
-* MC68881/MC68882 programming model: FP0–FP7, FPCR, FPSR, FPIAR; FPCR's
-  rounding mode and precision and FPSR's exception bytes map onto `float.Env`
-* arithmetic and transcendental functions (`FSIN`, `FETOX`, `FLOGN`, ...)
-  through `float`
-* operand formats .B, .W, .L, .S, .D, .X and .P, and the `FMOVECR` constants
-* FPSR condition codes and quotient byte; `FBcc`, `FScc`, `FDBcc`, `FTRAPcc`
-* `FSAVE`/`FRESTORE` frames and FPU exceptions (vectors 48–54), with traps
-  taken according to the FPCR exception-enable byte
-* tests: `float` covers numerical accuracy against reference values; `fpu`
-  tests cover decoding, operands, condition codes, frames and exceptions
+* **4a. FPU core**, before phase 3: the MC68881/MC68882 programming model
+  (FP0–FP7, FPCR, FPSR, FPIAR) on `float.Env`; all general instructions with
+  their arithmetic and transcendental operations; the operand formats .B,
+  .W, .L, .S, .D, .X and .P; `FMOVECR`; condition codes, the quotient byte
+  and the condition predicates; exceptions and their vectors (48–54);
+  `FSAVE`/`FRESTORE` frames.
+* **4b. Memory-mapped 68881**, before phase 3: the coprocessor interface
+  registers (CIRs) as a bus device, for 68000 machines such as the Atari
+  Mega ST (SFP004) and Mega STE, which put the FPU at `$FFFA40`.
+* **4c. F-line instructions**, after phase 3: the 68020's coprocessor
+  interface drives the same FPU for `FADD`, `FBcc`, `FScc`, `FDBcc`,
+  `FTRAPcc`, `FSAVE`, `FRESTORE` and the rest, with the 68020 addressing
+  modes and stack frames.
+
+Tests: `float` covers numerical accuracy against reference values; `fpu`
+tests cover decoding, operands, condition codes, frames and exceptions, and
+run the routines of a real SFP004 library against the memory-mapped FPU.
 
 ### 5. PMMU (`m68kemu/mmu`)
 

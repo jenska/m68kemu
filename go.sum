@@ -1,3 +1,5 @@
+github.com/jenska/float v1.3.0 h1:tF+2/DMHQcprZBDlNLkDAaMMDBtJKzzCzogE9zW4k50=
+github.com/jenska/float v1.3.0/go.mod h1:J4Xfmq7s7hJNl6c+MOh87gIyH07WumTztYtEp8puV7g=
 github.com/jenska/m68kasm v1.6.1 h1:1SxwvP5/gHitfzluxFWB7cnwgedw5gePsHf/BRI3+fE=
 github.com/jenska/m68kasm v1.6.1/go.mod h1:0791j2jGF9H6JrtHde3qYZxCt2pJbQwT3VP7x/UZqYU=
 github.com/jenska/m68kdasm v1.3.0 h1:6IkebcLnfWN8oUK9SVeEq0uKeAH1Kgg+cWmqY9I4E0A=
