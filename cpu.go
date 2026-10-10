@@ -363,10 +363,6 @@ type (
 		// other CPU of that model.
 		ops   *opcodeSet
 		model Model
-		// restartRegs holds the registers at the start of the current
-		// instruction on the MC68010, where a bus or address error rolls
-		// back to them so RTE can rerun the instruction.
-		restartRegs Registers
 		// cycleRounding is the multiple each instruction's cycles are rounded
 		// up to (see WithCycleRounding); 0 or 1 disables it.
 		cycleRounding          uint32
@@ -384,8 +380,9 @@ type (
 		fastRegions      []fastMemRegion
 		fastRegionsReady bool
 		// debugActive is set whenever any per-instruction debug hook is live
-		// (breakpoints, pre-trace, or instruction/bus tracing) so executeNext
-		// can skip all of that bookkeeping on the common path.
+		// (breakpoints, pre-trace, or instruction/bus tracing), or the model
+		// is not the MC68000, so executeNext can skip all of that
+		// bookkeeping on the common path.
 		debugActive   bool
 		trap          TraceCallback
 		preTrap       PreTraceCallback
@@ -421,6 +418,11 @@ type (
 		history            []HistoryEntry
 		historyNext        int
 		historyCount       int
+		// restartRegs holds the registers at the start of the current
+		// instruction on the MC68010, where a bus or address error rolls
+		// back to them so RTE can rerun the instruction. It sits at the end,
+		// away from the fields the MC68000 touches on every instruction.
+		restartRegs Registers
 	}
 )
 
@@ -799,7 +801,7 @@ func (cpu *cpu) refreshDebugModes() {
 // call it on entry to pick up topology changes.
 func (cpu *cpu) refreshRunModes() {
 	cpu.debugActive = cpu.breakpoints != nil || cpu.preTrap != nil ||
-		cpu.traceInstructions || cpu.traceBus
+		cpu.traceInstructions || cpu.traceBus || cpu.model != M68000
 
 	debugFree := cpu.breakpoints == nil && !cpu.traceInstructions && !cpu.traceBus
 
@@ -918,6 +920,14 @@ func (cpu *cpu) beginInstructionContext(pc uint32) {
 	cpu.currentOpcodePC = pc & 0xffffff
 	cpu.currentOpcodeValid = true
 	cpu.instructionStartCycles = cpu.cycles
+}
+
+// beginRestartableContext is beginInstructionContext plus, on the MC68010,
+// saving the registers a bus or address error rolls back to. The MC68000
+// fast path in executeNext never gets here: refreshRunModes sends other
+// models down executeNextDebug.
+func (cpu *cpu) beginRestartableContext(pc uint32) {
+	cpu.beginInstructionContext(pc)
 	if cpu.model != M68000 {
 		cpu.restartRegs = cpu.regs
 	}
@@ -988,7 +998,7 @@ func (cpu *cpu) executeInstruction(opcode uint16) error {
 // executeInstructionWithContext is the slow path for callers (tests, the public
 // API) that invoke an opcode without an active instruction context.
 func (cpu *cpu) executeInstructionWithContext(opcode uint16, instructionPC uint32) error {
-	cpu.beginInstructionContext(instructionPC)
+	cpu.beginRestartableContext(instructionPC)
 	defer cpu.endInstructionContext()
 	return cpu.dispatchInstruction(opcode, instructionPC)
 }
@@ -1334,7 +1344,7 @@ func (cpu *cpu) executeNextDebug() error {
 	if cpu.traceInstructions {
 		beforeCycles = cpu.cycles
 	}
-	cpu.beginInstructionContext(pc)
+	cpu.beginRestartableContext(pc)
 
 	opcode, err := cpu.fetchOpcode()
 	if err != nil {
