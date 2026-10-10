@@ -252,3 +252,195 @@ func TestMoveFromSrPrivilege(t *testing.T) {
 		})
 	}
 }
+
+// flakyDevice answers for $20000-$200FF and fails its first write with a bus
+// error, like a page that a virtual-memory handler first has to map in.
+type flakyDevice struct {
+	failed bool
+	data   map[uint32]uint32
+}
+
+func (d *flakyDevice) AddressRange() (uint32, uint32) { return 0x20000, 0x200ff }
+func (d *flakyDevice) Read(s Size, a uint32) (uint32, error) {
+	return d.data[a], nil
+}
+func (d *flakyDevice) Write(s Size, a uint32, v uint32) error {
+	if !d.failed {
+		d.failed = true
+		return BusError(a)
+	}
+	d.data[a] = v & s.mask()
+	return nil
+}
+func (d *flakyDevice) Reset() {}
+
+// newFaultEnvironment010 returns a 68010 with RAM at 0, a flaky device, and
+// bus and address error handlers that consist of a single RTE.
+func newFaultEnvironment010(t *testing.T) (*cpu, *RAM, *flakyDevice) {
+	t.Helper()
+	ram := NewRAM(0, 0x10000)
+	dev := &flakyDevice{data: map[uint32]uint32{}}
+	ram.Write(Long, 0, 0x1000)
+	ram.Write(Long, 4, 0x2000)
+	ram.Write(Long, XBusError<<2, 0x6000)
+	ram.Write(Long, XAddressError<<2, 0x6000)
+	ram.Write(Word, 0x6000, 0x4e73) // RTE
+	c, err := NewCPU(NewBus(ram, dev), WithModel(M68010))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return c.(*cpu), ram, dev
+}
+
+func TestFormat0FrameAndRte(t *testing.T) {
+	cpu, ram := newEnvironment010(t)
+	cpu.regs.VBR = 0x8000
+	ram.Write(Long, 0x8000+(XTrap+3)<<2, 0x5000)
+	ram.Write(Word, 0x5000, 0x4e73) // RTE
+	load010(t, cpu, ram, "TRAP #3")
+	start, ssp := cpu.regs.PC, cpu.regs.A[7]
+
+	step(t, cpu)
+	frame, ok, err := cpu.CurrentExceptionFrame()
+	if err != nil || !ok {
+		t.Fatalf("CurrentExceptionFrame: ok=%v err=%v", ok, err)
+	}
+	want := ExceptionStackFrame{
+		Format:       ExceptionStackFrameFormat0,
+		StackPointer: ssp - 8,
+		SR:           0x2700,
+		PC:           start + 2,
+		VectorOffset: (XTrap + 3) << 2,
+	}
+	if frame != want {
+		t.Fatalf("frame = %+v, want %+v", frame, want)
+	}
+	if fv, _ := ram.Read(Word, ssp-2); fv != (XTrap+3)<<2 {
+		t.Fatalf("format/vector word = %04x, want format 0 and offset %x", fv, (XTrap+3)<<2)
+	}
+
+	step(t, cpu) // RTE
+	if cpu.regs.PC != start+2 || cpu.regs.A[7] != ssp {
+		t.Fatalf("after RTE PC=%x SP=%x, want PC=%x SP=%x", cpu.regs.PC, cpu.regs.A[7], start+2, ssp)
+	}
+}
+
+func TestInterruptPushesFormat0Frame(t *testing.T) {
+	cpu, ram := newEnvironment010(t)
+	ram.Write(Long, (autoVectorBase+3)<<2, 0x5000)
+	load010(t, cpu, ram, "NOP")
+	cpu.regs.SR = 0x2000
+	if err := cpu.RequestInterrupt(3, AutoVector); err != nil {
+		t.Fatal(err)
+	}
+	step(t, cpu)
+	if cpu.regs.PC != 0x5000 {
+		t.Fatalf("PC = %x, want the level 3 autovector handler", cpu.regs.PC)
+	}
+	if fv, _ := ram.Read(Word, cpu.regs.A[7]+6); fv != (autoVectorBase+3)<<2 {
+		t.Fatalf("format/vector word = %04x, want %04x", fv, (autoVectorBase+3)<<2)
+	}
+}
+
+func TestRteFormatError(t *testing.T) {
+	cpu, ram := newEnvironment010(t)
+	ram.Write(Long, XFormatError<<2, 0x5000)
+	load010(t, cpu, ram, "RTE")
+	sp := cpu.regs.A[7] - 8
+	cpu.regs.A[7] = sp
+	ram.Write(Word, sp, 0x2700)
+	ram.Write(Long, sp+2, 0x3000)
+	ram.Write(Word, sp+6, 0x2000) // format $2, which the 68010 does not have
+	step(t, cpu)
+	if cpu.regs.PC != 0x5000 {
+		t.Fatalf("PC = %x, want the format-error handler", cpu.regs.PC)
+	}
+}
+
+func TestBusErrorRestartsInstruction(t *testing.T) {
+	cpu, ram, dev := newFaultEnvironment010(t)
+	load010(t, cpu, ram, "MOVE.L D0,(A0)+")
+	cpu.regs.A[0], cpu.regs.D[0] = 0x20000, 0x12345678
+	start, ssp := cpu.regs.PC, cpu.regs.A[7]
+
+	var info ExceptionInfo
+	var a0 uint32
+	cpu.SetExceptionTracer(func(i ExceptionInfo) { info, a0 = i, cpu.regs.A[0] })
+
+	step(t, cpu) // the write faults
+	if cpu.regs.PC != 0x6000 || info.Vector != XBusError {
+		t.Fatalf("PC=%x vector=%d, want the bus error handler", cpu.regs.PC, info.Vector)
+	}
+	want := ExceptionStackFrame{
+		Format:       ExceptionStackFrameFormat8,
+		StackPointer: ssp - 58,
+		StatusWord:   uint16(functionCodeSupervisorData), // a long write: no RW, IF, DF, BY or HB
+		FaultAddress: 0x20000,
+		SR:           0x2700,
+		PC:           start,
+		VectorOffset: XBusError << 2,
+		DataOutput:   0x1234,
+	}
+	if info.Frame != want {
+		t.Fatalf("frame = %+v, want %+v", info.Frame, want)
+	}
+	if frame, _, err := cpu.CurrentExceptionFrame(); err != nil || frame != want {
+		t.Fatalf("frame read back = %+v (err %v), want %+v", frame, err, want)
+	}
+	if a0 != 0x20000 {
+		t.Fatalf("A0 in the handler = %x, want 20000: the post-increment is rolled back", a0)
+	}
+
+	step(t, cpu) // RTE
+	if cpu.regs.PC != start || cpu.regs.A[7] != ssp {
+		t.Fatalf("after RTE PC=%x SP=%x, want PC=%x SP=%x", cpu.regs.PC, cpu.regs.A[7], start, ssp)
+	}
+	step(t, cpu) // the instruction runs again and now succeeds
+	// The bus splits the long write into two word writes.
+	if dev.data[0x20000] != 0x1234 || dev.data[0x20002] != 0x5678 || cpu.regs.A[0] != 0x20004 {
+		t.Fatalf("after restart: stored %04x %04x, A0=%x; want 1234 5678 and A0 incremented once to 20004",
+			dev.data[0x20000], dev.data[0x20002], cpu.regs.A[0])
+	}
+}
+
+func TestFormat8SpecialStatusWord(t *testing.T) {
+	for _, tt := range []struct {
+		name    string
+		source  string
+		setup   func(*cpu)
+		ssw     uint16
+		address uint32
+		dob     uint16
+	}{
+		{"ByteWriteHighByte", "MOVE.B D0,(A0)", func(c *cpu) { c.regs.A[0], c.regs.D[0] = 0x20000, 0xab },
+			1<<10 | 1<<9 | 5, 0x20000, 0xab},
+		{"WordReadOddAddress", "MOVE.W (A0),D0", func(c *cpu) { c.regs.A[0] = 0x3001 },
+			1<<12 | 1<<8 | 5, 0x3001, 0},
+		{"InstructionFetchOddPC", "NOP", func(c *cpu) { c.regs.PC = 0x2001 },
+			1<<13 | 1<<8 | 6, 0x2001, 0},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			cpu, ram, _ := newFaultEnvironment010(t)
+			load010(t, cpu, ram, tt.source)
+			tt.setup(cpu)
+			var info ExceptionInfo
+			cpu.SetExceptionTracer(func(i ExceptionInfo) { info = i })
+			step(t, cpu)
+			f := info.Frame
+			if f.Format != ExceptionStackFrameFormat8 || f.StatusWord != tt.ssw || f.FaultAddress != tt.address || f.DataOutput != tt.dob {
+				t.Fatalf("frame = %+v, want format 8, SSW %04x, fault address %x, data output %04x", f, tt.ssw, tt.address, tt.dob)
+			}
+		})
+	}
+}
+
+func TestM68000FramesUnchanged(t *testing.T) {
+	cpu, ram := newEnvironment(t)
+	ram.Write(Long, XTrap<<2, 0x5000)
+	ram.Write(Word, cpu.regs.PC, 0x4e40) // TRAP #0
+	ssp := cpu.regs.A[7]
+	step(t, cpu)
+	if cpu.regs.A[7] != ssp-6 || cpu.lastException.Frame.Format != ExceptionStackFrameGroup12 {
+		t.Fatalf("68000 TRAP frame: SP=%x format=%d, want SP=%x and the 6-byte group 1/2 frame", cpu.regs.A[7], cpu.lastException.Frame.Format, ssp-6)
+	}
+}

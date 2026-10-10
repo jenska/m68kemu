@@ -48,7 +48,11 @@ func registerSystem(b *tableBuilder) {
 	b.add(moveToCcr, 0x44c0, 0xffc0, controlSourceMask, moveControlCycleCalculator(Word))
 	b.add(moveToSr, 0x46c0, 0xffc0, controlSourceMask, moveControlCycleCalculator(Word))
 
-	b.add(rte, 0x4e73, 0xffff, 0, constantCycles(20))
+	rteHandler := rte
+	if b.model >= M68010 {
+		rteHandler = rteFormatted
+	}
+	b.add(rteHandler, 0x4e73, 0xffff, 0, constantCycles(20))
 	b.add(rtr, 0x4e77, 0xffff, 0, constantCycles(20))
 }
 

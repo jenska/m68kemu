@@ -14,6 +14,7 @@ const (
 	XPrivViolation    = 8
 	XLineA            = 10
 	XLineF            = 11
+	XFormatError      = 14 // MC68010 and later: RTE found an unknown frame format
 	XUninitializedInt = 15
 	XTrap             = 32
 
@@ -99,18 +100,28 @@ type (
 
 	PreTraceCallback func(PreTraceInfo)
 
-	// ExceptionStackFrameFormat identifies the 68000 frame layout captured for an exception.
+	// ExceptionStackFrameFormat identifies the frame layout captured for an exception.
 	ExceptionStackFrameFormat int
 
 	// ExceptionStackFrame mirrors the exception frame currently stored on the supervisor stack.
 	ExceptionStackFrame struct {
-		Format              ExceptionStackFrameFormat
-		StackPointer        uint32
+		Format       ExceptionStackFrameFormat
+		StackPointer uint32
+		// StatusWord is the 68000 group 0 status word or the MC68010
+		// special status word.
 		StatusWord          uint16
 		FaultAddress        uint32
 		InstructionRegister uint16
 		SR                  uint16
 		PC                  uint32
+		// VectorOffset is the vector offset from the format/vector word of
+		// an MC68010 frame.
+		VectorOffset uint16
+		// DataOutput, DataInput and InstructionInput are the buffers of an
+		// MC68010 format $8 frame.
+		DataOutput       uint16
+		DataInput        uint16
+		InstructionInput uint16
 	}
 
 	// ExceptionInfo describes one taken exception after vectoring has completed.
@@ -337,6 +348,10 @@ type (
 		write          bool
 		notInstruction bool
 		valid          bool
+		// size and value describe the access, for the MC68010 special
+		// status word and data output buffer.
+		size  Size
+		value uint32
 	}
 
 	//  CPU core
@@ -348,6 +363,10 @@ type (
 		// other CPU of that model.
 		ops   *opcodeSet
 		model Model
+		// restartRegs holds the registers at the start of the current
+		// instruction on the MC68010, where a bus or address error rolls
+		// back to them so RTE can rerun the instruction.
+		restartRegs Registers
 		// cycleRounding is the multiple each instruction's cycles are rounded
 		// up to (see WithCycleRounding); 0 or 1 disables it.
 		cycleRounding          uint32
@@ -424,8 +443,10 @@ const (
 )
 
 const (
-	ExceptionStackFrameGroup12 ExceptionStackFrameFormat = iota
-	ExceptionStackFrameGroup0
+	ExceptionStackFrameGroup12 ExceptionStackFrameFormat = iota // 68000: SR, PC
+	ExceptionStackFrameGroup0                                   // 68000 bus or address error
+	ExceptionStackFrameFormat0                                  // MC68010: SR, PC, format/vector word
+	ExceptionStackFrameFormat8                                  // MC68010 bus or address error
 )
 
 const (
@@ -543,7 +564,7 @@ func (cpu *cpu) readContext(size Size, address uint32, ctx accessContext) (uint3
 			if r := cpu.fastRegionFor(size, address); r != nil {
 				result, err := r.read(size, address)
 				if err != nil {
-					cpu.recordFault(faultAddress(address, err), ctx)
+					cpu.recordFault(faultAddress(address, err), ctx, size, 0)
 					return 0, err
 				}
 				if r.wait != 0 {
@@ -557,7 +578,7 @@ func (cpu *cpu) readContext(size Size, address uint32, ctx accessContext) (uint3
 		}
 		if result, ok, err := cpu.fastRAMRead(size, address); ok {
 			if err != nil {
-				cpu.recordFault(faultAddress(address, err), ctx)
+				cpu.recordFault(faultAddress(address, err), ctx, size, 0)
 			} else if cpu.shouldTraceBusAccess(ctx) {
 				cpu.traceBusAccess(size, address, result, ctx)
 			}
@@ -565,7 +586,7 @@ func (cpu *cpu) readContext(size Size, address uint32, ctx accessContext) (uint3
 		}
 		result, err := cpu.bus.Read(size, address)
 		if err != nil {
-			cpu.recordFault(faultAddress(address, err), ctx)
+			cpu.recordFault(faultAddress(address, err), ctx, size, 0)
 		} else if cpu.shouldTraceBusAccess(ctx) {
 			cpu.traceBusAccess(size, address, result, ctx)
 		}
@@ -596,7 +617,7 @@ func (cpu *cpu) writeContext(size Size, address uint32, value uint32, ctx access
 		if len(cpu.fastRegions) != 0 {
 			if r := cpu.fastRegionFor(size, address); r != nil && !r.readOnly {
 				if err := r.write(size, address, value); err != nil {
-					cpu.recordFault(faultAddress(address, err), ctx)
+					cpu.recordFault(faultAddress(address, err), ctx, size, value)
 					return err
 				}
 				if r.wait != 0 {
@@ -610,14 +631,14 @@ func (cpu *cpu) writeContext(size Size, address uint32, value uint32, ctx access
 		}
 		if ok, err := cpu.fastRAMWrite(size, address, value); ok {
 			if err != nil {
-				cpu.recordFault(faultAddress(address, err), ctx)
+				cpu.recordFault(faultAddress(address, err), ctx, size, value)
 			} else if cpu.shouldTraceBusAccess(ctx) {
 				cpu.traceBusAccess(size, address, value, ctx)
 			}
 			return err
 		}
 		if err := cpu.bus.Write(size, address, value); err != nil {
-			cpu.recordFault(faultAddress(address, err), ctx)
+			cpu.recordFault(faultAddress(address, err), ctx, size, value)
 			return err
 		}
 		if cpu.shouldTraceBusAccess(ctx) {
@@ -897,6 +918,9 @@ func (cpu *cpu) beginInstructionContext(pc uint32) {
 	cpu.currentOpcodePC = pc & 0xffffff
 	cpu.currentOpcodeValid = true
 	cpu.instructionStartCycles = cpu.cycles
+	if cpu.model != M68000 {
+		cpu.restartRegs = cpu.regs
+	}
 }
 
 func (cpu *cpu) endInstructionContext() {
@@ -1028,7 +1052,15 @@ func (cpu *cpu) raiseExceptionWithPC(vector uint32, newSR uint16, stackedPC uint
 	}()
 	cpu.setSR(newSR)
 
-	// 68000 stack frame: PC (long), SR (word).
+	// 68000 stack frame: PC (long), SR (word). The MC68010 format $0 frame
+	// adds the format/vector word above them.
+	format := ExceptionStackFrameGroup12
+	if cpu.model != M68000 {
+		format = ExceptionStackFrameFormat0
+		if err := cpu.pushException(Word, uint32(formatWord(0, vector))); err != nil {
+			return err
+		}
+	}
 	if err := cpu.pushException(Long, stackedPC); err != nil {
 		return err
 	}
@@ -1043,10 +1075,13 @@ func (cpu *cpu) raiseExceptionWithPC(vector uint32, newSR uint16, stackedPC uint
 
 	cpu.regs.PC = handler
 	frame := ExceptionStackFrame{
-		Format:       ExceptionStackFrameGroup12,
+		Format:       format,
 		StackPointer: cpu.regs.A[7],
 		SR:           originalSR,
 		PC:           stackedPC,
+	}
+	if format == ExceptionStackFrameFormat0 {
+		frame.VectorOffset = uint16(vectorOffset)
 	}
 	cpu.dispatchException(ExceptionInfo{
 		Vector:        vector,
@@ -1076,6 +1111,9 @@ func (cpu *cpu) exceptionWithCycles(vector uint32, total uint32) error {
 func (cpu *cpu) raiseGroup0Exception(vector uint32, newSR uint16) error {
 	if vector > 255 {
 		return fmt.Errorf("invalid vector %d", vector)
+	}
+	if cpu.model != M68000 {
+		return cpu.raiseFormat8Exception(vector)
 	}
 
 	originalSR := cpu.regs.SR
@@ -1531,7 +1569,7 @@ func (cpu *cpu) fetchOpcode() (uint16, error) {
 	fetchPC := cpu.regs.PC
 	if opcode, ok, err := cpu.readProgramFastWord(cpu.regs.PC); ok {
 		if err != nil {
-			cpu.recordProgramFault(cpu.regs.PC, err)
+			cpu.recordProgramFault(cpu.regs.PC, Word, err)
 			return 0, err
 		}
 		cpu.rememberOpcodePC(fetchPC)
@@ -1675,7 +1713,7 @@ func (cpu *cpu) popPc(s Size) (uint32, error) {
 	case Word:
 		if res, ok, err := cpu.readProgramFastWord(cpu.regs.PC); ok {
 			if err != nil {
-				cpu.recordProgramFault(cpu.regs.PC, err)
+				cpu.recordProgramFault(cpu.regs.PC, Word, err)
 				return 0, err
 			}
 			cpu.regs.PC += uint32(s)
@@ -1687,7 +1725,7 @@ func (cpu *cpu) popPc(s Size) (uint32, error) {
 	case Long:
 		if res, ok, err := cpu.readProgramFastLong(cpu.regs.PC); ok {
 			if err != nil {
-				cpu.recordProgramFault(cpu.regs.PC, err)
+				cpu.recordProgramFault(cpu.regs.PC, Long, err)
 				return 0, err
 			}
 			cpu.regs.PC += uint32(s)
@@ -1780,8 +1818,8 @@ func (cpu *cpu) readProgramFastLong(address uint32) (uint32, bool, error) {
 		uint32(mem[idx+3]), true, nil
 }
 
-func (cpu *cpu) recordProgramFault(address uint32, err error) {
-	cpu.recordFault(faultAddress(address, err), accessContext{functionCode: cpu.programFunctionCode()})
+func (cpu *cpu) recordProgramFault(address uint32, size Size, err error) {
+	cpu.recordFault(faultAddress(address, err), accessContext{functionCode: cpu.programFunctionCode()}, size, 0)
 }
 
 // addCycles increments the CPU cycle counter using a uint32 input to keep call
@@ -1839,7 +1877,7 @@ func (cpu *cpu) programFunctionCode() uint16 {
 	return functionCodeUserProgram
 }
 
-func (cpu *cpu) recordFault(address uint32, ctx accessContext) {
+func (cpu *cpu) recordFault(address uint32, ctx accessContext, size Size, value uint32) {
 	cpu.fault = faultInfo{
 		address:        address & 0xffffff,
 		pc:             cpu.regs.PC,
@@ -1848,6 +1886,8 @@ func (cpu *cpu) recordFault(address uint32, ctx accessContext) {
 		write:          ctx.write,
 		notInstruction: ctx.notInstruction,
 		valid:          true,
+		size:           size,
+		value:          value,
 	}
 }
 
@@ -2071,8 +2111,8 @@ func cloneExceptionInfo(info ExceptionInfo) ExceptionInfo {
 	return info
 }
 
-// ReadExceptionStackFrame decodes a 68000 exception frame directly from memory
-// without requiring the caller to know the byte layout.
+// ReadExceptionStackFrame decodes an exception frame of the given format
+// directly from memory without requiring the caller to know the byte layout.
 func ReadExceptionStackFrame(bus AddressBus, sp uint32, format ExceptionStackFrameFormat) (ExceptionStackFrame, error) {
 	frame := ExceptionStackFrame{
 		Format:       format,
@@ -2118,6 +2158,30 @@ func ReadExceptionStackFrame(bus AddressBus, sp uint32, format ExceptionStackFra
 		frame.InstructionRegister = uint16(ir)
 		frame.SR = uint16(sr)
 		frame.PC = pc
+		return frame, nil
+	case ExceptionStackFrameFormat0, ExceptionStackFrameFormat8:
+		var err error
+		read := func(s Size, offset uint32) uint32 {
+			if err != nil {
+				return 0
+			}
+			var v uint32
+			v, err = bus.Read(s, sp+offset)
+			return v
+		}
+		frame.SR = uint16(read(Word, 0))
+		frame.PC = read(Long, 2)
+		frame.VectorOffset = uint16(read(Word, 6)) & 0x0fff
+		if format == ExceptionStackFrameFormat8 {
+			frame.StatusWord = uint16(read(Word, 8))
+			frame.FaultAddress = read(Long, 10)
+			frame.DataOutput = uint16(read(Word, 16))
+			frame.DataInput = uint16(read(Word, 20))
+			frame.InstructionInput = uint16(read(Word, 24))
+		}
+		if err != nil {
+			return ExceptionStackFrame{}, err
+		}
 		return frame, nil
 	default:
 		return ExceptionStackFrame{}, fmt.Errorf("unknown exception stack frame format %d", format)
