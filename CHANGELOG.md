@@ -37,6 +37,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/SemVer
   effective-address operand objects were shared package-level values. Every
   CPU now has its own, so separate CPUs (each with its own `Bus`) can run
   concurrently
+- `RequestInterrupt` is safe to call from any goroutine, also while the CPU
+  runs; it used to race with the CPU's interrupt check
 
 ## [1.6.2] - 2026-10-04
 

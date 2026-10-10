@@ -223,7 +223,14 @@ models. A CPU, its `Bus`, the devices on that bus and its scheduler belong
 together: drive them from one goroutine at a time, and give every CPU its own
 `Bus`. `NewCPU` installs a wait-state hook on the bus, so a second CPU on the
 same bus would replace the first one's. The methods of a single CPU are not
-safe to call from several goroutines at once.
+safe to call from several goroutines at once, with one exception:
+`RequestInterrupt` may be called from any goroutine, also while the CPU runs,
+so a device in its own goroutine can raise interrupts and wake a CPU waiting
+in `STOP`. Such a request is taken at the next instruction boundary after the
+CPU sees it, so its point in emulated time depends on the host's scheduling.
+For cycle-exact timing, request interrupts from `CycleScheduler` events,
+which run on the CPU's goroutine. An `IRQSource` is always called on the
+CPU's goroutine.
 
 ## Testing
 

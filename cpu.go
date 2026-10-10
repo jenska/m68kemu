@@ -307,8 +307,9 @@ type (
 	}
 
 	// CPU is the interface returned by NewCPU for driving the emulator core.
-	// Different CPUs may run in parallel goroutines, each with its own Bus;
-	// a single CPU must not be used from several goroutines at once.
+	// Different CPUs may run in parallel goroutines, each with its own Bus.
+	// A single CPU must not be used from several goroutines at once, except
+	// for RequestInterrupt, which any goroutine may call.
 	CPU interface {
 		// Execution.
 		Reset() error
@@ -844,6 +845,13 @@ func (cpu *cpu) Scheduler() *CycleScheduler {
 // RequestInterrupt queues an interrupt at the given level (1-7). Pass
 // AutoVector for vector to auto-vector it (vector 24+level); any other value is
 // taken as the device-supplied vector number.
+//
+// Unlike the other CPU methods, RequestInterrupt may be called from any
+// goroutine, also while the CPU runs. The CPU takes the request at the first
+// instruction boundary after it sees it, so a request from another goroutine
+// lands at a point in emulated time that depends on the host's scheduling.
+// For cycle-exact timing, request the interrupt from a CycleScheduler event,
+// which runs on the CPU's goroutine.
 func (cpu *cpu) RequestInterrupt(level, vector uint8) error {
 	return cpu.interrupts.request(level, vector)
 }
@@ -1268,7 +1276,7 @@ func (cpu *cpu) checkInterrupts() error {
 		}
 	}
 
-	if cpu.interrupts == nil || cpu.interrupts.maxLevel <= mask {
+	if cpu.interrupts == nil || !cpu.interrupts.above(mask) {
 		return nil
 	}
 	return cpu.serviceInterrupt()

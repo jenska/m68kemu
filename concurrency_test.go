@@ -133,3 +133,94 @@ func TestCPUsRunConcurrently(t *testing.T) {
 		}
 	}
 }
+
+// newInterruptCounter returns a CPU that spins in a loop with interrupts
+// enabled and whose level 2 autovector handler counts interrupts in D7.
+// program is placed at $2000.
+func newInterruptCounter(t *testing.T, program string) *cpu {
+	t.Helper()
+	ram := NewRAM(0, 0x10000)
+	ram.Write(Long, 0, 0x1000)
+	ram.Write(Long, 4, 0x2000)
+	ram.Write(Long, (autoVectorBase+2)<<2, 0x3000)
+	for i, b := range assemble(t, program) {
+		ram.Write(Byte, 0x2000+uint32(i), uint32(b))
+	}
+	for i, b := range assemble(t, "ADDQ.L #1,D7\nRTE") {
+		ram.Write(Byte, 0x3000+uint32(i), uint32(b))
+	}
+	c, err := NewCPU(NewBus(ram))
+	if err != nil {
+		t.Fatal(err)
+	}
+	cpu := c.(*cpu)
+	cpu.regs.SR = 0x2000
+	return cpu
+}
+
+// TestRequestInterruptFromOtherGoroutines sends interrupt requests from
+// several goroutines while the CPU runs; every request must be taken once.
+func TestRequestInterruptFromOtherGoroutines(t *testing.T) {
+	cpu := newInterruptCounter(t, "loop: BRA.S loop")
+	const senders, perSender = 4, 250
+
+	var wg sync.WaitGroup
+	for range senders {
+		wg.Go(func() {
+			for range perSender {
+				if err := cpu.RequestInterrupt(2, AutoVector); err != nil {
+					t.Error(err)
+					return
+				}
+			}
+		})
+	}
+	sent := make(chan struct{})
+	go func() { wg.Wait(); close(sent) }()
+
+	done := false
+	for range 100_000 {
+		if err := cpu.RunCycles(1000); err != nil {
+			t.Fatal(err)
+		}
+		select {
+		case <-sent:
+			done = true
+		default:
+		}
+		if done && cpu.regs.D[7] == senders*perSender && !cpu.interrupts.above(0) {
+			return
+		}
+	}
+	t.Fatalf("handler counted %d interrupts, want %d", cpu.regs.D[7], senders*perSender)
+}
+
+// TestRequestInterruptWakesStoppedCPU wakes a CPU waiting in STOP from
+// another goroutine, the way a device running in its own goroutine would.
+func TestRequestInterruptWakesStoppedCPU(t *testing.T) {
+	cpu := newInterruptCounter(t, "STOP #$2000\nloop: BRA.S loop")
+	if err := cpu.RunCycles(100); err != nil {
+		t.Fatal(err)
+	}
+	if !cpu.stopped {
+		t.Fatalf("CPU should wait in STOP")
+	}
+
+	go func() {
+		if err := cpu.RequestInterrupt(2, AutoVector); err != nil {
+			t.Error(err)
+		}
+	}()
+	for range 100_000 {
+		if err := cpu.RunCycles(100); err != nil {
+			t.Fatal(err)
+		}
+		if cpu.regs.D[7] == 1 {
+			if cpu.stopped {
+				t.Fatalf("CPU still stopped after taking the interrupt")
+			}
+			return
+		}
+	}
+	t.Fatalf("interrupt from another goroutine did not wake the CPU")
+}
