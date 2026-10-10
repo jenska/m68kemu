@@ -5,6 +5,14 @@ opcode handlers so more than one CPU model can exist, **without changing any
 behaviour**. Every existing test stays green, and the MC68000 remains the
 default and the only supported model.
 
+**Status: done**, except the optional address mask (step 4). Steps 1 and 2
+went into one commit, since pruning had nothing left to edit once the global
+tables were gone. `opcodesFor(M68000)` matches the snapshot in
+`testdata/opcodes_68000.txt` for all 65,536 opcode words. Benchmarks on an
+Apple M1 (10 runs each, base and new interleaved) show no significant change:
+RecursiveFibonacci +1.3% (p=0.063), PrimeSieve +0.5% (p=0.12),
+RunEightMillionCycles ±0%.
+
 ## Current State
 
 | Global | Where | Written by | Model-specific? |
