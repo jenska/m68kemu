@@ -307,6 +307,8 @@ type (
 	}
 
 	// CPU is the interface returned by NewCPU for driving the emulator core.
+	// Different CPUs may run in parallel goroutines, each with its own Bus;
+	// a single CPU must not be used from several goroutines at once.
 	CPU interface {
 		// Execution.
 		Reset() error
@@ -418,6 +420,8 @@ type (
 		history            []HistoryEntry
 		historyNext        int
 		historyCount       int
+		// operands are the CPU's own effective-address operand objects.
+		operands eaTables
 		// restartRegs holds the registers at the start of the current
 		// instruction on the MC68010, where a bus or address error rolls
 		// back to them so RTE can rerun the instruction. It sits at the end,
@@ -1653,6 +1657,7 @@ func NewCPU(bus *Bus, opts ...Option) (CPU, error) {
 		return nil, fmt.Errorf("%w: %v", ErrModelUnsupported, cfg.model)
 	}
 	c := cpu{bus: bus, ops: opcodesFor(cfg.model), model: cfg.model, interrupts: newInterruptController(), cycleRounding: cfg.cycleRounding}
+	c.operands.init()
 	bus.waitHook = func(states uint32) { c.addCycles(states) }
 
 	if cfg.deferReset {

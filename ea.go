@@ -85,53 +85,62 @@ var (
 		{8, 12, 8, 10, 4, 0, 0, 0},       // (xxx).W, (xxx).L, (d16,PC), (d8,PC,Xn), #<data>
 	}
 
-	eaSrc = []ea{
-		&eaRegister{areg: dy},
-		&eaRegister{areg: ay},
-		&eaRegisterIndirect{eaRegister{areg: ay}, 0},
-		&eaPostIncrement{eaRegisterIndirect{eaRegister{areg: ay}, 0}},
-		&eaPreDecrement{eaRegisterIndirect{eaRegister{areg: ay}, 0}},
-		&eaDisplacement{eaRegisterIndirect{eaRegister{areg: ay}, 0}},
-		&eaIndirectIndex{eaRegisterIndirect{eaRegister{areg: ay}, 0}, ix68000},
-		&eaAbsolute{eaSize: Word},
-		&eaAbsolute{eaSize: Long},
-		&eaPCDisplacement{eaDisplacement{eaRegisterIndirect{eaRegister{areg: nil}, 0}}},
-		&eaPCIndirectIndex{eaIndirectIndex{eaRegisterIndirect{eaRegister{areg: nil}, 0}, ix68000}},
-		&eaImmediate{},
-	}
-
-	eaSrc2 = []ea{
-		&eaRegister{areg: dy},
-		&eaRegister{areg: ay},
-		&eaRegisterIndirect{eaRegister{areg: ay}, 0},
-		&eaPostIncrement{eaRegisterIndirect{eaRegister{areg: ay}, 0}},
-		&eaPreDecrement{eaRegisterIndirect{eaRegister{areg: ay}, 0}},
-		&eaDisplacement{eaRegisterIndirect{eaRegister{areg: ay}, 0}},
-		&eaIndirectIndex{eaRegisterIndirect{eaRegister{areg: ay}, 0}, ix68000},
-		&eaAbsolute{eaSize: Word},
-		&eaAbsolute{eaSize: Long},
-		&eaPCDisplacement{eaDisplacement{eaRegisterIndirect{eaRegister{areg: nil}, 0}}},
-		&eaPCIndirectIndex{eaIndirectIndex{eaRegisterIndirect{eaRegister{areg: nil}, 0}, ix68000}},
-		&eaStatusRegister{},
-	}
-
-	eaDst = []ea{
-		&eaRegister{areg: udx},
-		&eaRegister{areg: ax},
-		&eaRegisterIndirect{eaRegister{areg: ax}, 0},
-		&eaPostIncrement{eaRegisterIndirect{eaRegister{areg: ax}, 0}},
-		&eaPreDecrement{eaRegisterIndirect{eaRegister{areg: ax}, 0}},
-		&eaDisplacement{eaRegisterIndirect{eaRegister{areg: ax}, 0}},
-		&eaIndirectIndex{eaRegisterIndirect{eaRegister{areg: ax}, 0}, ix68000},
-		&eaAbsolute{eaSize: Word},
-		&eaAbsolute{eaSize: Long},
-		&eaPCDisplacement{eaDisplacement{eaRegisterIndirect{eaRegister{areg: nil}, 0}}},
-		&eaPCIndirectIndex{eaIndirectIndex{eaRegisterIndirect{eaRegister{areg: nil}, 0}, ix68000}},
-		&eaStatusRegister{},
-	}
-
 	opcodeMetaTable [0x10000]opcodeMeta
 )
+
+// eaTables holds, for the source, the alternative source (SR in place of
+// immediate data) and the destination of an instruction, one operand object
+// per addressing mode. An object keeps the state of the operand being
+// resolved, so every CPU has its own tables; sharing them would let CPUs in
+// different goroutines overwrite each other's operands. The objects are
+// stored in the tables themselves, inside the cpu struct, so they sit next
+// to each other in memory. init must run once the cpu is at its final
+// address.
+type eaTables struct {
+	src, src2, dst eaTable
+}
+
+// eaModeCount is the number of operand indexes: modes 0-6 and the mode 7
+// variants up to immediate data (srcIndex and dstIndex in opcodeMeta).
+const eaModeCount = 12
+
+type eaTable struct {
+	modes   [eaModeCount]ea
+	dn, an  eaRegister
+	ind     eaRegisterIndirect
+	postInc eaPostIncrement
+	preDec  eaPreDecrement
+	disp    eaDisplacement
+	index   eaIndirectIndex
+	absW    eaAbsolute
+	absL    eaAbsolute
+	pcDisp  eaPCDisplacement
+	pcIndex eaPCIndirectIndex
+	imm     eaImmediate
+	sr      eaStatusRegister
+}
+
+func (t *eaTables) init() {
+	t.src.init(dy, ay, false)
+	t.src2.init(dy, ay, true)
+	t.dst.init(udx, ax, true)
+}
+
+// init wires the table for operands whose register field selects dreg or
+// areg; the last mode 7 slot is SR when statusRegister is set, immediate data
+// otherwise.
+func (t *eaTable) init(dreg, areg func(*cpu) *uint32, statusRegister bool) {
+	t.dn.areg, t.an.areg = dreg, areg
+	t.ind.areg, t.postInc.areg, t.preDec.areg, t.disp.areg, t.index.areg = areg, areg, areg, areg, areg
+	t.index.index, t.pcIndex.index = ix68000, ix68000
+	t.absW.eaSize, t.absL.eaSize = Word, Long
+	var last ea = &t.imm
+	if statusRegister {
+		last = &t.sr
+	}
+	t.modes = [eaModeCount]ea{&t.dn, &t.an, &t.ind, &t.postInc, &t.preDec, &t.disp, &t.index,
+		&t.absW, &t.absL, &t.pcDisp, &t.pcIndex, last}
+}
 
 type opcodeMeta struct {
 	x        uint8
@@ -172,17 +181,17 @@ func init() {
 
 func (cpu *cpu) ResolveSrcEA(o Size) (modifier, error) {
 	meta := opcodeMetaTable[cpu.regs.IR]
-	return eaSrc[meta.srcIndex].init(cpu, o)
+	return cpu.operands.src.modes[meta.srcIndex].init(cpu, o)
 }
 
 func (cpu *cpu) ResolveSrcEA2(o Size) (modifier, error) {
 	meta := opcodeMetaTable[cpu.regs.IR]
-	return eaSrc2[meta.srcIndex].init(cpu, o)
+	return cpu.operands.src2.modes[meta.srcIndex].init(cpu, o)
 }
 
 func (cpu *cpu) ResolveDstEA(o Size) (modifier, error) {
 	meta := opcodeMetaTable[cpu.regs.IR]
-	return eaDst[meta.dstIndex].init(cpu, o)
+	return cpu.operands.dst.modes[meta.dstIndex].init(cpu, o)
 }
 
 func x(ir uint16) uint16 { return uint16(opcodeMetaTable[ir].x) }

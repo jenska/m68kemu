@@ -31,6 +31,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/SemVer
 - `CPU` has a new method, `Model()`, which breaks code that implements the
   interface outside this package
 
+### Fixed
+
+- CPUs running in parallel goroutines corrupted each other's operands: the
+  effective-address operand objects were shared package-level values. Every
+  CPU now has its own, so separate CPUs (each with its own `Bus`) can run
+  concurrently
+
 ## [1.6.2] - 2026-10-04
 
 ### Changed

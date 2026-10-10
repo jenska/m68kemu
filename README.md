@@ -216,6 +216,15 @@ result, err := cpu.RunUntil(m68kemu.RunUntilOptions{
 
 If you want a rolling "what just happened?" buffer without always logging, call `cpu.SetHistoryLimit(n)` and inspect `cpu.History()`. After an exception, `cpu.CurrentExceptionFrame()` and `m68kemu.ReadExceptionStackFrame(...)` can decode the pushed 68000 frame directly from memory.
 
+### Concurrency
+
+Separate CPUs can run in parallel goroutines, including CPUs of different
+models. A CPU, its `Bus`, the devices on that bus and its scheduler belong
+together: drive them from one goroutine at a time, and give every CPU its own
+`Bus`. `NewCPU` installs a wait-state hook on the bus, so a second CPU on the
+same bus would replace the first one's. The methods of a single CPU are not
+safe to call from several goroutines at once.
+
 ## Testing
 
 The emulator has an extensive test suite, including instruction-level tests and small programs.
