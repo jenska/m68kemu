@@ -10,8 +10,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/SemVer
 ### Added
 
 - `Model` type with the constants `M68000` to `M68060`, the `WithModel`
-  option and a `Model()` method on `CPU`. Only `M68000` is implemented;
-  `NewCPU` returns `ErrModelUnsupported` for the others
+  option and a `Model()` method on `CPU`. `M68000` and `M68010` are
+  implemented; `NewCPU` returns `ErrModelUnsupported` for the others
+- MC68010 model (`WithModel(M68010)`): the VBR, SFC and DFC registers
+  (new fields in `Registers`); MOVEC, MOVES, RTD and MOVE CCR,<ea>;
+  privileged MOVE SR,<ea>; format $0 and $8 exception stack frames; RTE
+  with format checking and the format-error exception (`XFormatError`).
+  RTE from a bus or address error frame reruns the faulted instruction.
+  Timing reuses the MC68000 cycle counts. See `doc/mc68010.md`
+- `ExceptionStackFrameFormat0` and `ExceptionStackFrameFormat8`, and the
+  `ExceptionStackFrame` fields `VectorOffset`, `DataOutput`, `DataInput`
+  and `InstructionInput`; `ReadExceptionStackFrame` decodes the new formats
+- `BusAccessInfo.FunctionCode`
 
 ### Changed
 

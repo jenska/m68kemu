@@ -6,7 +6,7 @@ This project provides a Motorola 68000 CPU emulator for retro-computing projects
 
 ## Features
 
-* Motorola 68000 instruction set emulation.
+* Motorola 68000 instruction set emulation, and the MC68010 as a second model.
 * Timing-aware execution with per-instruction cycle accounting.
 * Supervisor and user modes.
 * Interrupt handling and exception processing.
@@ -31,7 +31,7 @@ Still missing for a complete Atari ST:
 
 * Prefetch-sensitive behavior and any remaining compatibility gaps found by larger TOS / software workloads.
 
-Support for the MC68010 to MC68060, including PMMU and FPU, is planned. See [doc/roadmap.md](doc/roadmap.md).
+The MC68010 is supported (see [CPU Models](#cpu-models)). Support for the MC68020 to MC68060, including PMMU and FPU, is planned. See [doc/roadmap.md](doc/roadmap.md).
 
 ## Getting Started
 
@@ -109,10 +109,18 @@ func main() {
 explicitly, and `Model()` reports it:
 
 ```go
-cpu, err := m68kemu.NewCPU(bus, m68kemu.WithModel(m68kemu.M68000))
+cpu, err := m68kemu.NewCPU(bus, m68kemu.WithModel(m68kemu.M68010))
 ```
 
-The constants `M68010` to `M68060` exist for the models on the
+The MC68010 adds the VBR, SFC and DFC registers, the instructions MOVEC,
+MOVES, RTD and MOVE CCR,<ea>, a privileged MOVE SR,<ea>, and exception stack
+frames with a format/vector word. After a bus or address error, RTE runs the
+faulted instruction again. The emulator restarts the instruction where the
+real CPU would continue it from saved internal state. The 68010 currently
+uses the MC68000 cycle counts. [doc/mc68010.md](doc/mc68010.md) has the
+details.
+
+The constants `M68020` to `M68060` exist for the models on the
 [roadmap](doc/roadmap.md). Until a model is implemented, `NewCPU` returns
 an error that matches `m68kemu.ErrModelUnsupported` with `errors.Is`.
 

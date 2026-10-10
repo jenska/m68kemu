@@ -40,14 +40,14 @@ FPCR/FPSR state, and several CPUs can run in one process.
 
 ## Phases
 
-### 1. Per-model dispatch (no behaviour change)
+### 1. Per-model dispatch (done; see [multi_model_dispatch.md](multi_model_dispatch.md))
 
 The opcode handler and cycle tables are package-level globals today, so one
 process can only emulate one kind of CPU. This phase replaces them with
 immutable tables per model, chosen with `WithModel` when the CPU is created.
 The detailed plan is in [multi_model_dispatch.md](multi_model_dispatch.md).
 
-### 2. MC68010
+### 2. MC68010 (done; see [mc68010.md](mc68010.md))
 
 A small step that tests whether the phase 1 design holds up:
 
