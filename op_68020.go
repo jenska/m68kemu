@@ -60,6 +60,10 @@ func register68020(b *tableBuilder) {
 		b.add(cas, 0x08c0|size<<9, 0xffc0, memoryAlterableMask, constantCycles(16))
 	}
 	b.add(cas2, 0x0cfc, 0xffff, 0, constantCycles(24))
+	// F-line: the coprocessor interface. Types 6 and 7 are undefined.
+	for kind := range uint16(6) {
+		b.add(coprocessorInstruction, 0xf000|kind<<6, 0xf1c0, 0, constantCycles(4))
+	}
 	b.add(cas2, 0x0efc, 0xffff, 0, constantCycles(24))
 	for size := range uint16(3) {
 		b.add(chk2, 0x00c0|size<<9, 0xffc0, controlMask, constantCycles(18))
@@ -98,6 +102,8 @@ func valid68020Addition(op uint16) bool {
 		return specIn(op, specMemoryAlterable)
 	case op&0xf9c0 == 0x00c0 && (op>>9)&3 != 3: // CHK2, CMP2
 		return specIn(op, specControl)
+	case op&0xf000 == 0xf000: // coprocessor interface
+		return (op>>6)&7 <= 5
 	}
 	return false
 }

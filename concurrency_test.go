@@ -97,7 +97,7 @@ func TestCPUsRunConcurrently(t *testing.T) {
 			inputs[i][j] = uint16(rng.Intn(0x10000))
 		}
 	}
-	model := func(i int) Model { return []Model{M68000, M68010}[i%2] }
+	model := func(i int) Model { return []Model{M68000, M68010, M68020}[i%3] }
 	hooks := func(i int) bool { return i%4 >= 2 }
 
 	type result struct {

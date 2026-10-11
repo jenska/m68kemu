@@ -19,8 +19,8 @@ func TestWithModel(t *testing.T) {
 	}{
 		{M68000, nil},
 		{M68010, nil},
-		{M68020, ErrModelUnsupported},
-		{M68030, ErrModelUnsupported},
+		{M68020, nil},
+		{M68030, nil},
 		{M68040, ErrModelUnsupported},
 		{M68060, ErrModelUnsupported},
 		{Model(-1), ErrModelUnsupported},

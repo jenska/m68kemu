@@ -440,6 +440,8 @@ type (
 		history            []HistoryEntry
 		historyNext        int
 		historyCount       int
+		// coprocessors are attached by ID through WithCoprocessor.
+		coprocessors [8]Coprocessor
 		// operands are the CPU's own effective-address operand objects.
 		operands eaTables
 		// restartRegs holds the registers at the start of the current
@@ -1763,6 +1765,11 @@ func NewCPU(bus *Bus, opts ...Option) (CPU, error) {
 	if !cfg.model.implemented() {
 		return nil, fmt.Errorf("%w: %v", ErrModelUnsupported, cfg.model)
 	}
+	for _, a := range cfg.coprocessors {
+		if cfg.model < M68020 || a.id < 0 || a.id > 7 {
+			return nil, fmt.Errorf("%w: ID %d on the %v", ErrCoprocessorUnsupported, a.id, cfg.model)
+		}
+	}
 	return newCPU(bus, cfg)
 }
 
@@ -1771,6 +1778,9 @@ func NewCPU(bus *Bus, opts ...Option) (CPU, error) {
 func newCPU(bus *Bus, cfg cpuConfig) (*cpu, error) {
 	c := cpu{bus: bus, ops: opcodesFor(cfg.model), model: cfg.model, addrMask: cfg.model.addressMask(), interrupts: newInterruptController(), cycleRounding: cfg.cycleRounding}
 	c.operands.init(cfg.model)
+	for _, a := range cfg.coprocessors {
+		c.coprocessors[a.id&7] = a.c
+	}
 	bus.waitHook = func(states uint32) { c.addCycles(states) }
 
 	if cfg.deferReset {

@@ -43,6 +43,8 @@ func TestOpcodeTableSnapshots(t *testing.T) {
 	}{
 		{M68000, "testdata/opcodes_68000.txt"},
 		{M68010, "testdata/opcodes_68010.txt"},
+		{M68020, "testdata/opcodes_68020.txt"},
+		{M68030, "testdata/opcodes_68030.txt"},
 	} {
 		t.Run(tt.model.String(), func(t *testing.T) {
 			ops := opcodesFor(tt.model)
