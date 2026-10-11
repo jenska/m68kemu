@@ -17,7 +17,7 @@ import (
 func runFLine(t *testing.T, f *fpu.FPU, source string, setup func(*m68kemu.RAM)) (m68kemu.CPU, *m68kemu.RAM) {
 	t.Helper()
 	code, listing, err := asm.AssembleStringWithListingWithOptions(source,
-		asm.ParseOptions{Target: asm.Target{CPU: asm.CPU68020, Features: asm.FeatFPU}})
+		asm.ParseOptions{Target: asm.Target{CPU: asm.CPU68020, Features: asm.FeatFPU | asm.FeatFPUFull}})
 	if err != nil {
 		t.Fatalf("assembler: %v", err)
 	}
@@ -65,7 +65,7 @@ func TestFLineArithmeticAndConditions(t *testing.T) {
 	FBEQ     equal
 	MOVEQ    #-1,D2
 equal:	FSEQ     D3
-	DC.W     $F204,$A800       ; FMOVE.L FPSR,D4
+	FMOVE.L  FPSR,D4
 	FMOVECR  #$32,FP1
 	MOVEQ    #2,D5
 loop:	FDBNE    D5,loop           ; equal: no loop
@@ -96,10 +96,10 @@ func TestFLineFmovemAndSaveRestore(t *testing.T) {
 	cpu, ram := runFLine(t, f, `
 	FMOVE.L  #10,FP0
 	FMOVE.L  #20,FP1
-	DC.W     $F227,$E003       ; FMOVEM.X FP0-FP1,-(A7): predecrement, bits 0-1
+	FMOVEM.X FP0-FP1,-(A7)
 	MOVE.L   A7,A2
 	MOVE.L   (A7),D6           ; first long of the lowest register
-	DC.W     $F21F,$D030       ; FMOVEM.X (A7)+,FP2-FP3: postincrement, bits 5-4
+	FMOVEM.X (A7)+,FP2-FP3
 	FSAVE    -(A7)
 	MOVE.L   A7,A3
 	FRESTORE (A7)+
@@ -123,7 +123,7 @@ done:	BRA.S    done
 func TestFLinePendingExceptionAndTrap(t *testing.T) {
 	f := fpu.New(fpu.MC68881)
 	cpu, _ := runFLine(t, f, `
-	DC.W     $F23C,$9000,0,$0400 ; FMOVE.L #$400,FPCR: enable DZ
+	FMOVE.L  #$400,FPCR          ; enable DZ
 	FMOVE.L  #1,FP0
 	FDIV.L   #0,FP0
 fnop:	FNOP                         ; takes the pending DZ exception

@@ -206,15 +206,13 @@ func TestRteFormatErrorOn68020(t *testing.T) {
 func TestIndexedAddressingModes020(t *testing.T) {
 	cpu, ram := newEnvironmentFor(t, M68020)
 	setTrapVectors(ram)
-	// m68kasm v1.6.2 swaps the preindexed and postindexed encodings, so the
-	// memory indirect modes are written as words (m68kdasm decodes them as
-	// noted).
 	load020(t, cpu, ram, `
 	LEA     (8,A0,D1.W*2),A1        ; brief format, scaled index
 	MOVE.L  (A0,D1.L*8),D0
-	DC.W    $2430,$1D37,0,8,0,12    ; MOVE.L ([8,A0],D1.L*4,12),D2: postindexed
-	DC.W    $2630,$1333,0,8,-1,-4   ; MOVE.L ([8,A0,D1.W*2],-4),D3: preindexed
+	MOVE.L  ([8,A0],D1.L*4,12),D2   ; memory indirect, postindexed
+	MOVE.L  ([8,A0,D1.W*2],-4),D3   ; memory indirect, preindexed
 	LEA     (6,PC,D1.W*4),A4
+	LEA     ($1234.W,ZA0,ZD0),A2    ; full format, base and index suppressed
 `)
 	start := cpu.regs.PC
 	cpu.regs.A[0], cpu.regs.D[1] = 0x3000, 2
@@ -223,7 +221,7 @@ func TestIndexedAddressingModes020(t *testing.T) {
 	ram.Write(Long, 0x4000+8+12, 0xbbbb0002)
 	ram.Write(Long, 0x300c, 0x5000) // pointer for the preindexed mode: 3000+8+2*2
 	ram.Write(Long, 0x5000-4, 0xcccc0003)
-	for range 5 {
+	for range 6 {
 		step(t, cpu)
 	}
 	if cpu.regs.A[1] != 0x3000+8+4 {
@@ -232,24 +230,17 @@ func TestIndexedAddressingModes020(t *testing.T) {
 	if uint32(cpu.regs.D[0]) != 0xaaaa0001 || uint32(cpu.regs.D[2]) != 0xbbbb0002 || uint32(cpu.regs.D[3]) != 0xcccc0003 {
 		t.Fatalf("D0=%x D2=%x D3=%x, want aaaa0001, bbbb0002, cccc0003", uint32(cpu.regs.D[0]), uint32(cpu.regs.D[2]), uint32(cpu.regs.D[3]))
 	}
-	lea := start + 4 + 4 + 12 + 12 // address of the last LEA
+	lea := start + 4 + 4 + 12 + 12 // address of LEA (6,PC,D1.W*4)
 	if cpu.regs.A[4] != lea+2+6+8 {
 		t.Fatalf("LEA (6,PC,D1.W*4) = %x, want %x (extension word address + 6 + 8)", cpu.regs.A[4], lea+2+6+8)
 	}
 
-	// Full format with base and index suppressed and a word base
-	// displacement: LEA ($1234.W,ZA0,ZD0),A2.
-	pc := cpu.regs.PC
-	for i, w := range []uint16{0x45f0, 0x01e0, 0x1234} {
-		ram.Write(Word, pc+uint32(2*i), uint32(w))
-	}
-	step(t, cpu)
 	if cpu.regs.A[2] != 0x1234 {
 		t.Fatalf("LEA ($1234.W,ZA0,ZD0) = %x, want 1234", cpu.regs.A[2])
 	}
 
-	// I/IS = 100 is reserved.
-	pc = cpu.regs.PC
+	// I/IS = 100 is reserved, so no assembler emits it: write the words.
+	pc := cpu.regs.PC
 	ram.Write(Word, pc, 0x45f0)
 	ram.Write(Word, pc+2, 0x0114)
 	step(t, cpu)

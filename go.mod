@@ -4,6 +4,6 @@ go 1.27
 
 require (
 	github.com/jenska/float v1.3.0
-	github.com/jenska/m68kasm v1.6.2
+	github.com/jenska/m68kasm v1.6.3
 	github.com/jenska/m68kdasm v1.3.0
 )
