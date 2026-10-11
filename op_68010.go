@@ -35,8 +35,8 @@ func generalRegister(cpu *cpu, r uint16) *uint32 {
 }
 
 // movec copies a control register to a general register (MOVEC Rc,Rn, $4E7A)
-// or back (MOVEC Rn,Rc, $4E7B). An unknown control register raises the
-// illegal-instruction exception.
+// or back (MOVEC Rn,Rc, $4E7B). A control register the model does not have
+// raises the illegal-instruction exception.
 func movec(cpu *cpu) error {
 	if ok, err := cpu.requireSupervisor(); err != nil || !ok {
 		return err
@@ -48,36 +48,17 @@ func movec(cpu *cpu) error {
 	rn := generalRegister(cpu, uint16(ext>>12))
 	toControl := cpu.regs.IR&1 != 0
 
-	switch ext & 0xfff {
-	case 0x000:
-		if toControl {
-			cpu.regs.SFC = uint8(*rn & 7)
-		} else {
-			*rn = uint32(cpu.regs.SFC)
-		}
-	case 0x001:
-		if toControl {
-			cpu.regs.DFC = uint8(*rn & 7)
-		} else {
-			*rn = uint32(cpu.regs.DFC)
-		}
-	case 0x800:
-		if toControl {
-			cpu.regs.USP = *rn
-		} else {
-			*rn = cpu.regs.USP
-		}
-	case 0x801:
-		if toControl {
-			cpu.regs.VBR = *rn
-		} else {
-			*rn = cpu.regs.VBR
-		}
-	default:
+	reg, ok := cpu.controlRegister(uint16(ext & 0xfff))
+	if !ok {
 		// Give back the extension word, so the stacked PC is the same as for
 		// an unassigned opcode word.
 		cpu.regs.PC -= uint32(Word)
 		return cpu.exceptionWithCycles(XIllegal, exceptionCyclesIllegal)
+	}
+	if toControl {
+		reg.set(*rn)
+	} else {
+		*rn = reg.get()
 	}
 	return nil
 }
@@ -164,4 +145,58 @@ func moveFromSrPrivileged(cpu *cpu) error {
 		return err
 	}
 	return moveFromSr(cpu)
+}
+
+// controlAccess reads and writes one MOVEC control register.
+type controlAccess struct {
+	get func() uint32
+	set func(uint32)
+}
+
+// CACR bits that hold state; the others are write-only actions (clear the
+// cache or an entry) or unused, and read as zero.
+const (
+	cacrBits68020 = 0x0003 // E, F
+	cacrBits68030 = 0x3313 // EI, FI, IBE, ED, FD, DBE, WA
+)
+
+// controlRegister returns the MOVEC control register with the given code, if
+// the model has it: SFC, DFC, USP and VBR from the MC68010 on; CACR, CAAR,
+// MSP and ISP from the MC68020 on.
+func (cpu *cpu) controlRegister(code uint16) (controlAccess, bool) {
+	r := &cpu.regs
+	stack := func(slot *uint32) controlAccess {
+		return controlAccess{
+			get: func() uint32 { return *cpu.stackPointer(slot) },
+			set: func(v uint32) { *cpu.stackPointer(slot) = v },
+		}
+	}
+	switch code {
+	case 0x000:
+		return controlAccess{func() uint32 { return uint32(r.SFC) }, func(v uint32) { r.SFC = uint8(v & 7) }}, true
+	case 0x001:
+		return controlAccess{func() uint32 { return uint32(r.DFC) }, func(v uint32) { r.DFC = uint8(v & 7) }}, true
+	case 0x800:
+		return stack(&r.USP), true
+	case 0x801:
+		return controlAccess{func() uint32 { return r.VBR }, func(v uint32) { r.VBR = v }}, true
+	}
+	if cpu.model < M68020 {
+		return controlAccess{}, false
+	}
+	switch code {
+	case 0x002:
+		bits := uint32(cacrBits68020)
+		if cpu.model >= M68030 {
+			bits = cacrBits68030
+		}
+		return controlAccess{func() uint32 { return r.CACR }, func(v uint32) { r.CACR = v & bits }}, true
+	case 0x802:
+		return controlAccess{func() uint32 { return r.CAAR }, func(v uint32) { r.CAAR = v }}, true
+	case 0x803:
+		return stack(&r.MSP), true
+	case 0x804:
+		return stack(&r.SSP), true
+	}
+	return controlAccess{}, false
 }

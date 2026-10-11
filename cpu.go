@@ -25,6 +25,7 @@ const (
 	srExtend        = 0x0010
 	srInterruptMask = 0x0700
 	srSupervisor    = 0x2000
+	srMaster        = 0x1000 // MC68020 and later: MSP instead of ISP
 )
 
 const (
@@ -118,10 +119,17 @@ type (
 		// an MC68010 frame.
 		VectorOffset uint16
 		// DataOutput, DataInput and InstructionInput are the buffers of an
-		// MC68010 format $8 frame.
-		DataOutput       uint16
-		DataInput        uint16
+		// MC68010 format $8 frame; DataOutput and DataInput are also those
+		// of an MC68020 format $A or $B frame.
+		DataOutput       uint32
+		DataInput        uint32
 		InstructionInput uint16
+		// InstructionAddress is the address of the instruction that caused
+		// an MC68020 format $2 or $9 frame.
+		InstructionAddress uint32
+		// StageBAddress is the address of an MC68020 instruction fetch that
+		// faulted (format $B).
+		StageBAddress uint32
 	}
 
 	// ExceptionInfo describes one taken exception after vectoring has completed.
@@ -304,6 +312,13 @@ type (
 		VBR uint32
 		SFC uint8 // source function code for MOVES
 		DFC uint8 // destination function code for MOVES
+		// MSP, CACR and CAAR exist from the MC68020 on. There SSP is the
+		// interrupt stack pointer (ISP), and the M bit of SR selects MSP
+		// or ISP in supervisor mode. Like USP and SSP, MSP holds the value
+		// of an inactive stack pointer; the active one is A[7].
+		MSP  uint32
+		CACR uint32
+		CAAR uint32
 	}
 
 	// CPU is the interface returned by NewCPU for driving the emulator core.
@@ -457,6 +472,11 @@ const (
 	ExceptionStackFrameGroup0                                   // 68000 bus or address error
 	ExceptionStackFrameFormat0                                  // MC68010: SR, PC, format/vector word
 	ExceptionStackFrameFormat8                                  // MC68010 bus or address error
+	ExceptionStackFrameFormat1                                  // MC68020: throwaway
+	ExceptionStackFrameFormat2                                  // MC68020: SR, PC, format/vector word, instruction address
+	ExceptionStackFrameFormat9                                  // MC68020: coprocessor mid-instruction
+	ExceptionStackFrameFormatA                                  // MC68020: short bus fault
+	ExceptionStackFrameFormatB                                  // MC68020: long bus fault
 )
 
 const (
@@ -563,6 +583,9 @@ func (cpu *cpu) readSystemProgram(size Size, address uint32) (uint32, error) {
 
 func (cpu *cpu) readContext(size Size, address uint32, ctx accessContext) (uint32, error) {
 	address &= cpu.addrMask
+	if address&1 != 0 && size != Byte && cpu.model >= M68020 && !ctx.programSpace() {
+		return cpu.readMisaligned(size, address, ctx)
+	}
 	switch size {
 	case Byte, Word, Long:
 		if cpu.breakpoints != nil {
@@ -617,6 +640,9 @@ func (cpu *cpu) writeSystemData(size Size, address uint32, value uint32) error {
 
 func (cpu *cpu) writeContext(size Size, address uint32, value uint32, ctx accessContext) error {
 	address &= cpu.addrMask
+	if address&1 != 0 && size != Byte && cpu.model >= M68020 && !ctx.programSpace() {
+		return cpu.writeMisaligned(size, address, value, ctx)
+	}
 	switch size {
 	case Byte, Word, Long:
 		if cpu.breakpoints != nil {
@@ -1078,11 +1104,21 @@ func (cpu *cpu) raiseExceptionWithPC(vector uint32, newSR uint16, stackedPC uint
 	cpu.setSR(newSR)
 
 	// 68000 stack frame: PC (long), SR (word). The MC68010 format $0 frame
-	// adds the format/vector word above them.
+	// adds the format/vector word above them; the MC68020 format $2 frame
+	// also the address of the instruction that caused the exception.
 	format := ExceptionStackFrameGroup12
+	var instructionAddress uint32
 	if cpu.model != M68000 {
 		format = ExceptionStackFrameFormat0
-		if err := cpu.pushException(Word, uint32(formatWord(0, vector))); err != nil {
+		frameFormat := uint16(0)
+		if cpu.model >= M68020 && usesFormat2(vector) {
+			format, frameFormat = ExceptionStackFrameFormat2, 2
+			instructionAddress = opcodeAddress
+			if err := cpu.pushException(Long, instructionAddress); err != nil {
+				return err
+			}
+		}
+		if err := cpu.pushException(Word, uint32(formatWord(frameFormat, vector))); err != nil {
 			return err
 		}
 	}
@@ -1105,8 +1141,9 @@ func (cpu *cpu) raiseExceptionWithPC(vector uint32, newSR uint16, stackedPC uint
 		SR:           originalSR,
 		PC:           stackedPC,
 	}
-	if format == ExceptionStackFrameFormat0 {
+	if format != ExceptionStackFrameGroup12 {
 		frame.VectorOffset = uint16(vectorOffset)
+		frame.InstructionAddress = instructionAddress
 	}
 	cpu.dispatchException(ExceptionInfo{
 		Vector:        vector,
@@ -1138,7 +1175,7 @@ func (cpu *cpu) raiseGroup0Exception(vector uint32, newSR uint16) error {
 		return fmt.Errorf("invalid vector %d", vector)
 	}
 	if cpu.model != M68000 {
-		return cpu.raiseFormat8Exception(vector)
+		return cpu.raiseBusFault(vector)
 	}
 
 	originalSR := cpu.regs.SR
@@ -1213,6 +1250,10 @@ func (cpu *cpu) group0ExceptionWithoutInstruction(vector uint32, total uint32) e
 
 // setSR keeps USP/SSP in sync when the supervisor bit changes.
 func (cpu *cpu) setSR(value uint16) {
+	if cpu.model >= M68020 {
+		cpu.setSR020(value)
+		return
+	}
 	if (cpu.regs.SR^value)&srSupervisor != 0 {
 		if value&srSupervisor != 0 {
 			cpu.regs.USP = cpu.regs.A[7]
@@ -1223,6 +1264,37 @@ func (cpu *cpu) setSR(value uint16) {
 		}
 	}
 	cpu.regs.SR = value
+}
+
+// setSR020 is setSR for the MC68020 and later, which have three stack
+// pointers: USP (S clear), ISP (S set, M clear) and MSP (S and M set).
+func (cpu *cpu) setSR020(value uint16) {
+	if old, now := cpu.stackSlot(cpu.regs.SR), cpu.stackSlot(value); old != now {
+		*old = cpu.regs.A[7]
+		cpu.regs.A[7] = *now
+	}
+	cpu.regs.SR = value
+}
+
+// stackSlot returns the register that holds the stack pointer SR selects
+// while it is inactive.
+func (cpu *cpu) stackSlot(sr uint16) *uint32 {
+	switch {
+	case sr&srSupervisor == 0:
+		return &cpu.regs.USP
+	case sr&srMaster != 0:
+		return &cpu.regs.MSP
+	}
+	return &cpu.regs.SSP
+}
+
+// stackPointer returns the stack pointer slot points to, which is A7 if it
+// is the active one.
+func (cpu *cpu) stackPointer(slot *uint32) *uint32 {
+	if slot == cpu.stackSlot(cpu.regs.SR) {
+		return &cpu.regs.A[7]
+	}
+	return slot
 }
 
 func (cpu *cpu) readVector(offset uint32) (uint32, error) {
@@ -1250,6 +1322,21 @@ func (cpu *cpu) interrupt(level uint8, vector uint32, autoVector bool) error {
 	cpu.addCycles(exceptionCyclesInterrupt)
 	if err := cpu.raiseException(vector, newSR); err != nil {
 		return err
+	}
+	if cpu.model >= M68020 && cpu.regs.SR&srMaster != 0 {
+		// The interrupt frame went onto the master stack. Clear M and leave
+		// a throwaway copy on the interrupt stack, whose RTE returns to the
+		// master stack.
+		throwawaySR := cpu.regs.SR
+		cpu.setSR(throwawaySR &^ srMaster)
+		for _, w := range []struct {
+			size  Size
+			value uint32
+		}{{Word, uint32(formatWord(1, vector))}, {Long, originalPC}, {Word, uint32(throwawaySR)}} {
+			if err := cpu.pushException(w.size, w.value); err != nil {
+				return err
+			}
+		}
 	}
 	cpu.dispatchInterrupt(InterruptInfo{
 		Level:      level,
@@ -1667,6 +1754,12 @@ func NewCPU(bus *Bus, opts ...Option) (CPU, error) {
 	if !cfg.model.implemented() {
 		return nil, fmt.Errorf("%w: %v", ErrModelUnsupported, cfg.model)
 	}
+	return newCPU(bus, cfg)
+}
+
+// newCPU builds a CPU of any model, implemented or not; tests use it for
+// models that NewCPU does not accept yet.
+func newCPU(bus *Bus, cfg cpuConfig) (*cpu, error) {
 	c := cpu{bus: bus, ops: opcodesFor(cfg.model), model: cfg.model, addrMask: cfg.model.addressMask(), interrupts: newInterruptController(), cycleRounding: cfg.cycleRounding}
 	c.operands.init()
 	bus.waitHook = func(states uint32) { c.addCycles(states) }
@@ -2052,6 +2145,50 @@ func (f faultInfo) snapshot() DebugFaultInfo {
 	}
 }
 
+// programSpace reports whether the access is to program space, where the
+// MC68020 still requires even addresses.
+func (ctx accessContext) programSpace() bool {
+	fc := ctx.functionCode & 7
+	return fc == functionCodeUserProgram || fc == functionCodeSupervisorProg
+}
+
+// readMisaligned reads a word or long at an odd address, which the MC68020
+// and later allow for operands, as aligned byte and word accesses: a byte
+// and a byte for a word, a byte, a word and a byte for a long.
+func (cpu *cpu) readMisaligned(size Size, address uint32, ctx accessContext) (uint32, error) {
+	hi, err := cpu.readContext(Byte, address, ctx)
+	if err != nil {
+		return 0, err
+	}
+	if size == Word {
+		lo, err := cpu.readContext(Byte, address+1, ctx)
+		return hi<<8 | lo, err
+	}
+	mid, err := cpu.readContext(Word, address+1, ctx)
+	if err != nil {
+		return 0, err
+	}
+	lo, err := cpu.readContext(Byte, address+3, ctx)
+	return hi<<24 | mid<<8 | lo, err
+}
+
+// writeMisaligned is the write counterpart of readMisaligned.
+func (cpu *cpu) writeMisaligned(size Size, address, value uint32, ctx accessContext) error {
+	if size == Word {
+		if err := cpu.writeContext(Byte, address, value>>8, ctx); err != nil {
+			return err
+		}
+		return cpu.writeContext(Byte, address+1, value, ctx)
+	}
+	if err := cpu.writeContext(Byte, address, value>>24, ctx); err != nil {
+		return err
+	}
+	if err := cpu.writeContext(Word, address+1, value>>8, ctx); err != nil {
+		return err
+	}
+	return cpu.writeContext(Byte, address+3, value, ctx)
+}
+
 func (ctx accessContext) instructionFetch() bool {
 	return !ctx.notInstruction && !ctx.write &&
 		(ctx.functionCode == functionCodeUserProgram || ctx.functionCode == functionCodeSupervisorProg)
@@ -2191,7 +2328,8 @@ func ReadExceptionStackFrame(bus AddressBus, sp uint32, format ExceptionStackFra
 		frame.SR = uint16(sr)
 		frame.PC = pc
 		return frame, nil
-	case ExceptionStackFrameFormat0, ExceptionStackFrameFormat8:
+	case ExceptionStackFrameFormat0, ExceptionStackFrameFormat8, ExceptionStackFrameFormat1,
+		ExceptionStackFrameFormat2, ExceptionStackFrameFormat9, ExceptionStackFrameFormatA, ExceptionStackFrameFormatB:
 		var err error
 		read := func(s Size, offset uint32) uint32 {
 			if err != nil {
@@ -2204,12 +2342,28 @@ func ReadExceptionStackFrame(bus AddressBus, sp uint32, format ExceptionStackFra
 		frame.SR = uint16(read(Word, 0))
 		frame.PC = read(Long, 2)
 		frame.VectorOffset = uint16(read(Word, 6)) & 0x0fff
-		if format == ExceptionStackFrameFormat8 {
+		switch format {
+		case ExceptionStackFrameFormat8:
 			frame.StatusWord = uint16(read(Word, 8))
 			frame.FaultAddress = read(Long, 10)
-			frame.DataOutput = uint16(read(Word, 16))
-			frame.DataInput = uint16(read(Word, 20))
+			frame.DataOutput = read(Word, 16)
+			frame.DataInput = read(Word, 20)
 			frame.InstructionInput = uint16(read(Word, 24))
+		case ExceptionStackFrameFormat2, ExceptionStackFrameFormat9:
+			frame.InstructionAddress = read(Long, 8)
+		case ExceptionStackFrameFormatA, ExceptionStackFrameFormatB:
+			frame.StatusWord = uint16(read(Word, 10))
+			frame.DataOutput = read(Long, 24)
+			if frame.StatusWord&(1<<8) != 0 {
+				frame.FaultAddress = read(Long, 16)
+			}
+			if format == ExceptionStackFrameFormatB {
+				frame.StageBAddress = read(Long, 36)
+				frame.DataInput = read(Long, 44)
+				if frame.StatusWord&(1<<8) == 0 {
+					frame.FaultAddress = frame.StageBAddress
+				}
+			}
 		}
 		if err != nil {
 			return ExceptionStackFrame{}, err

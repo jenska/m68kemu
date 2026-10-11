@@ -410,7 +410,7 @@ func TestFormat8SpecialStatusWord(t *testing.T) {
 		setup   func(*cpu)
 		ssw     uint16
 		address uint32
-		dob     uint16
+		dob     uint32
 	}{
 		{"ByteWriteHighByte", "MOVE.B D0,(A0)", func(c *cpu) { c.regs.A[0], c.regs.D[0] = 0x20000, 0xab },
 			1<<10 | 1<<9 | 5, 0x20000, 0xab},
