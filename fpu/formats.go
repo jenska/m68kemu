@@ -130,7 +130,8 @@ func (f *FPU) loadPacked(b []byte) (float.X80, uint8) {
 	if w0&(1<<30) != 0 {
 		exp = -exp
 	}
-	s.WriteString("e" + strconv.Itoa(exp))
+	s.WriteString("e")
+	s.WriteString(strconv.Itoa(exp))
 
 	// The decimal input is rounded to extended precision in the FPCR's
 	// rounding mode; inexactness is INEX1.
