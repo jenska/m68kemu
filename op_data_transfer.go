@@ -267,7 +267,7 @@ func movemReadAddress(cpu *cpu, mode, reg uint16) (uint32, error) {
 		addr = uint32(int32(cpu.regs.A[reg]) + int32(int16(ext)))
 	case 6: // (d8,An,Xn)
 		a := cpu.regs.A[reg]
-		extAddr, err := ix68000(cpu, a)
+		extAddr, err := cpu.indexedAddress(a)
 		if err != nil {
 			return 0, err
 		}
@@ -297,7 +297,7 @@ func movemReadAddress(cpu *cpu, mode, reg uint16) (uint32, error) {
 			addr = uint32(int32(pc) + int32(int16(ext)))
 		case 3: // (d8,PC,Xn)
 			pc := cpu.regs.PC
-			extAddr, err := ix68000(cpu, pc)
+			extAddr, err := cpu.indexedAddress(pc)
 			if err != nil {
 				return 0, err
 			}

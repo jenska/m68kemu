@@ -120,19 +120,23 @@ type eaTable struct {
 	sr      eaStatusRegister
 }
 
-func (t *eaTables) init() {
-	t.src.init(dy, ay, false)
-	t.src2.init(dy, ay, true)
-	t.dst.init(udx, ax, true)
+func (t *eaTables) init(m Model) {
+	index := ix68000
+	if m >= M68020 {
+		index = ix68020
+	}
+	t.src.init(dy, ay, false, index)
+	t.src2.init(dy, ay, true, index)
+	t.dst.init(udx, ax, true, index)
 }
 
 // init wires the table for operands whose register field selects dreg or
 // areg; the last mode 7 slot is SR when statusRegister is set, immediate data
 // otherwise.
-func (t *eaTable) init(dreg, areg func(*cpu) *uint32, statusRegister bool) {
+func (t *eaTable) init(dreg, areg func(*cpu) *uint32, statusRegister bool, index func(*cpu, uint32) (uint32, error)) {
 	t.dn.areg, t.an.areg = dreg, areg
 	t.ind.areg, t.postInc.areg, t.preDec.areg, t.disp.areg, t.index.areg = areg, areg, areg, areg, areg
-	t.index.index, t.pcIndex.index = ix68000, ix68000
+	t.index.index, t.pcIndex.index = index, index
 	t.absW.eaSize, t.absL.eaSize = Word, Long
 	var last ea = &t.imm
 	if statusRegister {
@@ -494,6 +498,96 @@ func ix68000(c *cpu, a uint32) (uint32, error) {
 	}
 
 	return uint32(int32(a) + index + displacement), nil
+}
+
+// indexedAddress returns the address of an indexed operand, (d8,An,Xn) or
+// (d8,PC,Xn) and on the MC68020 also the full extension word modes, with
+// base the value of An or the address of the extension word.
+func (c *cpu) indexedAddress(base uint32) (uint32, error) {
+	if c.model >= M68020 {
+		return ix68020(c, base)
+	}
+	return ix68000(c, base)
+}
+
+// ix68020 decodes an MC68020 index extension word. In the brief format the
+// index is scaled by 1, 2, 4 or 8 (bits 10-9). The full format (bit 8 set)
+// can suppress the base (BS, bit 7) and the index (IS, bit 6), adds a null,
+// word or long base displacement (BD SIZE, bits 5-4) and, selected by I/IS
+// (bits 2-0), reads the address from memory before (preindexed) or after
+// (postindexed) adding the index, then adds a null, word or long outer
+// displacement. Reserved encodings raise the illegal-instruction exception.
+func ix68020(c *cpu, base uint32) (uint32, error) {
+	ext, err := c.popPc(Word)
+	if err != nil {
+		return 0, err
+	}
+	reg := (ext >> 12) & 7
+	var index uint32
+	if ext&0x8000 != 0 {
+		index = c.regs.A[reg]
+	} else {
+		index = uint32(c.regs.D[reg])
+	}
+	if ext&0x0800 == 0 {
+		index = uint32(int32(int16(index)))
+	}
+	index <<= (ext >> 9) & 3
+
+	if ext&0x0100 == 0 { // brief format
+		return base + index + uint32(int32(int8(ext))), nil
+	}
+
+	iis := ext & 7
+	if ext&0x0008 != 0 || ext&0x0030 == 0 || (ext&0x0040 != 0 && iis >= 4) || iis == 4 {
+		if err := c.exception(XIllegal); err != nil {
+			return 0, err
+		}
+		return 0, errExceptionTaken
+	}
+	if ext&0x0080 != 0 { // base suppressed
+		base = 0
+	}
+	if ext&0x0040 != 0 { // index suppressed
+		index = 0
+	}
+	bd, err := c.displacement((ext >> 4) & 3)
+	if err != nil {
+		return 0, err
+	}
+	if iis == 0 {
+		return base + bd + index, nil
+	}
+
+	address := base + bd
+	if iis < 4 { // preindexed
+		address += index
+	}
+	address, err = c.read(Long, address)
+	if err != nil {
+		return 0, err
+	}
+	if iis >= 4 { // postindexed
+		address += index
+	}
+	od, err := c.displacement(iis & 3)
+	if err != nil {
+		return 0, err
+	}
+	return address + od, nil
+}
+
+// displacement reads a base or outer displacement of a full extension word:
+// size 1 is null, 2 a sign-extended word, 3 a long.
+func (c *cpu) displacement(size uint32) (uint32, error) {
+	switch size {
+	case 2:
+		d, err := c.popPc(Word)
+		return uint32(int32(int16(d))), err
+	case 3:
+		return c.popPc(Long)
+	}
+	return 0, nil
 }
 
 func eaAccessCycles(mode, reg uint16, size Size) uint32 {

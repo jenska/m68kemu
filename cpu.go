@@ -1,6 +1,7 @@
 package m68kemu
 
 import (
+	"errors"
 	"fmt"
 	"strings"
 )
@@ -1383,7 +1384,15 @@ func (cpu *cpu) serviceInterrupt() error {
 	return cpu.interrupt(level, vector, autoVector)
 }
 
+// errExceptionTaken ends an instruction that has already taken an
+// exception, for example from a reserved addressing mode in the middle of
+// decoding an operand.
+var errExceptionTaken = errors.New("m68kemu: exception taken")
+
 func (cpu *cpu) handleFaultError(err error, currentInstruction bool) error {
+	if err == errExceptionTaken {
+		return nil
+	}
 	switch err.(type) {
 	case BusError:
 		if currentInstruction {
@@ -1761,7 +1770,7 @@ func NewCPU(bus *Bus, opts ...Option) (CPU, error) {
 // models that NewCPU does not accept yet.
 func newCPU(bus *Bus, cfg cpuConfig) (*cpu, error) {
 	c := cpu{bus: bus, ops: opcodesFor(cfg.model), model: cfg.model, addrMask: cfg.model.addressMask(), interrupts: newInterruptController(), cycleRounding: cfg.cycleRounding}
-	c.operands.init()
+	c.operands.init(cfg.model)
 	bus.waitHook = func(states uint32) { c.addCycles(states) }
 
 	if cfg.deferReset {
