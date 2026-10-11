@@ -79,8 +79,8 @@ type CIR struct {
 	data     []byte // operand bytes received or still to send
 	// in backs data while operand bytes come in, so they need no
 	// allocation: up to 96 for FMOVEM of all eight registers.
-	in [96]byte
-	header   uint32 // FRESTORE frame header
+	in     [96]byte
+	header uint32 // FRESTORE frame header
 
 	restoreStatus  uint16
 	registerSelect uint16
