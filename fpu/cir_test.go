@@ -14,9 +14,7 @@ import (
 // SFP004 does: A0 points to the operand CIR at $FFFA50, so the command CIR is
 // at -6(A0) and the response CIR at -16(A0). After a command that transfers
 // an operand, the code waits while the response is $8900; after a
-// register-to-register command it waits while bit 15 is set. Like the
-// library, the tests encode that loop as words: m68kasm v1.6.1 lays out TST
-// with a displacement as two bytes, so a label after it would be wrong.
+// register-to-register command it waits while bit 15 is set.
 
 const cirBase = 0xfffa40
 
@@ -101,7 +99,8 @@ w2:     CMPI.W  #$8900,-16(A0)
 	MOVE.L  (A0),D0
 	MOVE.L  (A0),D1
 	MOVE.W  #$009E,-6(A0)     ; FGETEXP FP0,FP1
-	DC.W    $4A68,$FFF0,$6BFA ; w3: TST.W -16(A0); BMI.S w3
+w3:     TST.W   -16(A0)
+	BMI.S   w3
 	MOVE.W  #$7080,-6(A0)     ; FMOVE.W FP1,<ea>
 w4:     CMPI.W  #$8900,-16(A0)
 	BEQ.S   w4
