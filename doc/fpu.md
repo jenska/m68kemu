@@ -107,8 +107,9 @@ The register map is from the Atari hardware register list
 (the GNU C math library for the SFP004 by M. Ritzert and others), whose
 routines run unchanged in the tests. That library relies on these responses:
 
-* `$8900` (null primitive, come again) while the FPU is busy; the emulated
-  FPU finishes every command at once, so it never reports busy;
+* `$8900` (null primitive, come again) while the FPU is busy; without a
+  `Clock` the emulated FPU finishes every command at once and never reports
+  busy (see Timing);
 * a value other than `$8900` once an operand transfer is expected;
 * bit 15 clear once a register-to-register command has finished.
 
@@ -119,9 +120,37 @@ bit 0 of the null primitive, and the FSAVE idle frame (version `$1F`, size
 `$18` for the 68881 and `$38` for the 68882). An unknown command reports the
 F-line vector (11).
 
+## Timing
+
+`FPU.Cycles` returns the execution time of a command in FPU clock cycles,
+from a table of the typical times in the MC68881/MC68882 User's Manual
+(`fpu/timing.go`). The values are recalled from memory and not verified
+against the manual. A register-to-register operation takes its opmode's time
+(FMOVE 33, FADD/FSUB 51, FMUL 71, FDIV 103, FSQRT 107, FSIN 391, FSINCOS
+451, ...); a memory source adds its conversion (integer 18, single 12,
+double 14, extended 6, packed 842); FMOVE to memory takes the time of its
+destination format (double 77, extended 47, packed 1937). Control register
+moves take 30 cycles per register, FMOVEM 33 plus 25 per register.
+
+Both paths run the FPU concurrently with the CPU:
+
+* **68020/68030.** `fpu.FPU.Coprocessor` implements
+  `m68kemu.CoprocessorTiming`. A general instruction that returns nothing to
+  the CPU leaves the FPU busy for its time while the CPU continues; the next
+  FPU instruction waits for it. A store keeps the CPU waiting for its result.
+  The FPU is clocked like the CPU.
+* **CIR.** With `CIR.Clock` set (for example to the CPU's `Cycles`), each
+  command keeps the FPU busy for its time, queued behind the previous one,
+  and the response CIR reads `$8900` until it is done, so the polling loops
+  of 68000 software run as on the real card. A `Clock` that scales the CPU
+  cycles models an FPU on a different clock.
+
 ## Simplifications
 
-* Every command finishes at once; there is no execution timing.
+* Execution times are typical values and do not depend on the operands. The
+  MC68882 uses the MC68881's times; its faster conversions and its overlap
+  of consecutive FPU instructions are not modelled. The CPU side of the
+  coprocessor protocol costs only the instruction's base cycles.
 * Results are written even when an enabled exception occurs.
 * Packed decimal output rounds to nearest rather than in the FPCR rounding
   mode, and decides INEX2 from 25 guard digits.

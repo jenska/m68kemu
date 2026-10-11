@@ -404,7 +404,7 @@ func TestOpcodeCycleTable(t *testing.T) {
 	}
 
 	moveOpcode := uint16(code[0])<<8 | uint16(code[1])
-	assertWordCycles(t, moveOpcode, moveCycles(moveOpcode, Long))
+	assertWordCycles(t, moveOpcode, moveCycleCalculator(Long)(moveOpcode))
 
 	shiftImmediate := uint16(code[2])<<8 | uint16(code[3])
 	assertWordCycles(t, shiftImmediate, shiftRegisterCycleCalculator(shiftImmediate))
@@ -416,5 +416,5 @@ func TestOpcodeCycleTable(t *testing.T) {
 	assertWordCycles(t, shiftMemory, shiftMemoryCycleCalculator(shiftMemory))
 
 	abcdOpcode := uint16(code[8])<<8 | uint16(code[9])
-	assertWordCycles(t, abcdOpcode, abcdCycleCalculator(abcdOpcode))
+	assertWordCycles(t, abcdOpcode, bcdCycleCalculator(abcdOpcode))
 }

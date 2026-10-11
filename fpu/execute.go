@@ -3,6 +3,7 @@ package fpu
 import (
 	"encoding/binary"
 	"errors"
+	"math/bits"
 
 	"github.com/jenska/float"
 )
@@ -58,7 +59,7 @@ func Decode(cmd uint16) (Operation, error) {
 			op.Register = int(cmd>>4) & 7
 		}
 	case classLoadControl, classStoreControl:
-		n := popcount(uint8(src))
+		n := bits.OnesCount8(uint8(src))
 		if n == 0 || cmd&0x3ff != 0 {
 			return op, ErrUnimplemented
 		}
@@ -89,7 +90,7 @@ func (op *Operation) SetDynamic(value uint32) {
 	if class != classLoadRegisters && class != classStoreRegisters {
 		return
 	}
-	n := 12 * popcount(op.registerList(value))
+	n := 12 * bits.OnesCount8(op.registerList(value))
 	if class == classLoadRegisters {
 		op.In = n
 	} else {
@@ -126,7 +127,21 @@ func (op Operation) transferOrder(value uint32) []int {
 	return regs
 }
 
+// validOpmodes caches isValidOpmode, which every decode asks.
+var validOpmodes = func() (valid [0x80]bool) {
+	for opmode := range valid {
+		valid[opmode] = isValidOpmode(uint16(opmode))
+	}
+	return valid
+}()
+
+// validOpmode reports whether opmode (bits 6-0 of a command word) is an
+// operation the MC68881/MC68882 defines.
 func validOpmode(opmode uint16) bool {
+	return validOpmodes[opmode&0x7f]
+}
+
+func isValidOpmode(opmode uint16) bool {
 	switch {
 	case opmode <= 0x04, opmode == 0x06, opmode >= 0x08 && opmode <= 0x0a,
 		opmode >= 0x0c && opmode <= 0x12, opmode >= 0x14 && opmode <= 0x16,
@@ -138,7 +153,8 @@ func validOpmode(opmode uint16) bool {
 }
 
 // Execute runs op. in holds op.In bytes of source operand; dynamic is the
-// value of op.Register when it is not -1. Execute returns op.Out bytes.
+// value of op.Register when it is not -1. Execute returns op.Out bytes,
+// which stay valid until the next call.
 func (f *FPU) Execute(op Operation, dynamic uint32, in []byte) ([]byte, error) {
 	if len(in) < op.In {
 		return nil, errors.New("fpu: operand too short")

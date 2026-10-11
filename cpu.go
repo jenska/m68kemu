@@ -3,6 +3,7 @@ package m68kemu
 import (
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 )
 
@@ -402,9 +403,8 @@ type (
 		fastRegions      []fastMemRegion
 		fastRegionsReady bool
 		// debugActive is set whenever any per-instruction debug hook is live
-		// (breakpoints, pre-trace, or instruction/bus tracing), or the model
-		// is not the MC68000, so executeNext can skip all of that
-		// bookkeeping on the common path.
+		// (breakpoints, pre-trace, or instruction/bus tracing), so
+		// executeNext can skip all of that bookkeeping on the common path.
 		debugActive   bool
 		trap          TraceCallback
 		preTrap       PreTraceCallback
@@ -442,6 +442,14 @@ type (
 		historyCount       int
 		// coprocessors are attached by ID through WithCoprocessor.
 		coprocessors [8]Coprocessor
+		// coprocessorTimings holds each coprocessor that implements
+		// CoprocessorTiming, so cpGeneral does not ask on every instruction.
+		coprocessorTimings [8]CoprocessorTiming
+		// coprocessorBusy is the cycle count at which each coprocessor
+		// finishes its current command (see CoprocessorTiming).
+		coprocessorBusy [8]uint64
+		// cpOperand is reused for the source operands of cpGEN.
+		cpOperand []byte
 		// operands are the CPU's own effective-address operand objects.
 		operands eaTables
 		// restartRegs holds the registers at the start of the current
@@ -697,41 +705,35 @@ func (cpu *cpu) fastRAMDevice() *RAM {
 	return cpu.bus.fastRAM
 }
 
+// fastRAMIndex returns the index into the fast RAM of a size-byte access at
+// address, or ok false when there is no fast RAM or the access is not wholly
+// inside it; the bus then decides, also on errors.
+func (cpu *cpu) fastRAMIndex(size Size, address uint32) (ram *RAM, idx uint32, ok bool) {
+	ram = cpu.fastRAMDevice()
+	if ram == nil || address < ram.offset {
+		return nil, 0, false
+	}
+	idx = address - ram.offset
+	n := uint32(len(ram.mem))
+	return ram, idx, idx < n && n-idx >= uint32(size)
+}
+
 func (cpu *cpu) fastRAMRead(size Size, address uint32) (uint32, bool, error) {
-	ram := cpu.fastRAMDevice()
-	if ram == nil {
+	ram, idx, ok := cpu.fastRAMIndex(size, address)
+	if !ok {
 		return 0, false, nil
 	}
-
-	memLen := uint32(len(ram.mem))
-	if address < ram.offset {
-		return 0, true, BusError(address)
-	}
-	idx := address - ram.offset
-
 	switch size {
 	case Byte:
-		if idx >= memLen {
-			return 0, true, BusError(address)
-		}
 		return uint32(ram.mem[idx]), true, nil
 	case Word:
 		if address&1 != 0 {
 			return 0, true, AddressError(address)
 		}
-		if idx+1 >= memLen {
-			return 0, true, BusError(address)
-		}
 		return uint32(ram.mem[idx])<<8 | uint32(ram.mem[idx+1]), true, nil
 	case Long:
 		if address&1 != 0 {
 			return 0, true, AddressError(address)
-		}
-		if idx+1 >= memLen {
-			return 0, true, BusError(address)
-		}
-		if idx+3 >= memLen {
-			return 0, true, BusError((address + uint32(Word)) & cpu.addrMask)
 		}
 		return uint32(ram.mem[idx])<<24 |
 			uint32(ram.mem[idx+1])<<16 |
@@ -743,30 +745,17 @@ func (cpu *cpu) fastRAMRead(size Size, address uint32) (uint32, bool, error) {
 }
 
 func (cpu *cpu) fastRAMWrite(size Size, address uint32, value uint32) (bool, error) {
-	ram := cpu.fastRAMDevice()
-	if ram == nil {
+	ram, idx, ok := cpu.fastRAMIndex(size, address)
+	if !ok {
 		return false, nil
 	}
-
-	memLen := uint32(len(ram.mem))
-	if address < ram.offset {
-		return true, BusError(address)
-	}
-	idx := address - ram.offset
-
 	switch size {
 	case Byte:
-		if idx >= memLen {
-			return true, BusError(address)
-		}
 		ram.mem[idx] = uint8(value)
 		return true, nil
 	case Word:
 		if address&1 != 0 {
 			return true, AddressError(address)
-		}
-		if idx+1 >= memLen {
-			return true, BusError(address)
 		}
 		ram.mem[idx] = uint8(value >> 8)
 		ram.mem[idx+1] = uint8(value)
@@ -775,14 +764,8 @@ func (cpu *cpu) fastRAMWrite(size Size, address uint32, value uint32) (bool, err
 		if address&1 != 0 {
 			return true, AddressError(address)
 		}
-		if idx+1 >= memLen {
-			return true, BusError(address)
-		}
 		ram.mem[idx] = uint8(value >> 24)
 		ram.mem[idx+1] = uint8(value >> 16)
-		if idx+3 >= memLen {
-			return true, BusError((address + uint32(Word)) & cpu.addrMask)
-		}
 		ram.mem[idx+2] = uint8(value >> 8)
 		ram.mem[idx+3] = uint8(value)
 		return true, nil
@@ -838,7 +821,7 @@ func (cpu *cpu) refreshDebugModes() {
 // call it on entry to pick up topology changes.
 func (cpu *cpu) refreshRunModes() {
 	cpu.debugActive = cpu.breakpoints != nil || cpu.preTrap != nil ||
-		cpu.traceInstructions || cpu.traceBus || cpu.model != M68000
+		cpu.traceInstructions || cpu.traceBus
 
 	debugFree := cpu.breakpoints == nil && !cpu.traceInstructions && !cpu.traceBus
 
@@ -920,7 +903,7 @@ func (cpu *cpu) SetHistoryLimit(limit int) {
 }
 
 func (cpu *cpu) History() []HistoryEntry {
-	if len(cpu.history) == 0 || cpu.historyCount == 0 {
+	if cpu.historyCount == 0 {
 		return nil
 	}
 
@@ -966,10 +949,8 @@ func (cpu *cpu) beginInstructionContext(pc uint32) {
 	cpu.instructionStartCycles = cpu.cycles
 }
 
-// beginRestartableContext is beginInstructionContext plus, on the MC68010,
-// saving the registers a bus or address error rolls back to. The MC68000
-// fast path in executeNext never gets here: refreshRunModes sends other
-// models down executeNextDebug.
+// beginRestartableContext is beginInstructionContext plus, from the MC68010
+// on, saving the registers a bus or address error rolls back to.
 func (cpu *cpu) beginRestartableContext(pc uint32) {
 	cpu.beginInstructionContext(pc)
 	if cpu.model != M68000 {
@@ -1079,8 +1060,10 @@ func (cpu *cpu) raiseException(vector uint32, newSR uint16) error {
 	return cpu.raiseExceptionWithPC(vector, newSR, cpu.regs.PC, cpu.regs.PC)
 }
 
-func (cpu *cpu) synchronousException(vector uint32, newSR uint16, stackedPC uint32) error {
-	return cpu.raiseExceptionWithPC(vector, newSR, stackedPC, stackedPC)
+// synchronousException takes an exception the instruction raised, stacking
+// stackedPC.
+func (cpu *cpu) synchronousException(vector uint32, stackedPC uint32) error {
+	return cpu.raiseExceptionWithPC(vector, cpu.regs.SR|srSupervisor, stackedPC, stackedPC)
 }
 
 func (cpu *cpu) trapException(vector uint32) error {
@@ -1089,7 +1072,7 @@ func (cpu *cpu) trapException(vector uint32) error {
 	if stackedPC == instructionPC {
 		stackedPC = (instructionPC + uint32(Word)) & cpu.addrMask
 	}
-	return cpu.synchronousException(vector, cpu.regs.SR|srSupervisor, stackedPC)
+	return cpu.synchronousException(vector, stackedPC)
 }
 
 func (cpu *cpu) raiseExceptionWithPC(vector uint32, newSR uint16, stackedPC uint32, exceptionPC uint32) error {
@@ -1173,10 +1156,9 @@ func (cpu *cpu) exceptionWithCycles(vector uint32, total uint32) error {
 	return cpu.exception(vector)
 }
 
-func (cpu *cpu) raiseGroup0Exception(vector uint32, newSR uint16) error {
-	if vector > 255 {
-		return fmt.Errorf("invalid vector %d", vector)
-	}
+// raiseGroup0Exception takes a bus or address error for the fault recorded
+// in cpu.fault.
+func (cpu *cpu) raiseGroup0Exception(vector uint32) error {
 	if cpu.model != M68000 {
 		return cpu.raiseBusFault(vector)
 	}
@@ -1187,7 +1169,7 @@ func (cpu *cpu) raiseGroup0Exception(vector uint32, newSR uint16) error {
 	defer func() {
 		cpu.inException = false
 	}()
-	cpu.setSR(newSR)
+	cpu.setSR(originalSR | srSupervisor)
 
 	sp := cpu.regs.A[7] - group0ExceptionFrameSize
 	cpu.regs.A[7] = sp
@@ -1239,16 +1221,6 @@ func (cpu *cpu) raiseGroup0Exception(vector uint32, newSR uint16) error {
 		Group0:        true,
 	})
 	return nil
-}
-
-func (cpu *cpu) group0ExceptionForCurrentInstruction(vector uint32, total uint32) error {
-	cpu.overrideInstructionCycles(total)
-	return cpu.raiseGroup0Exception(vector, cpu.regs.SR|srSupervisor)
-}
-
-func (cpu *cpu) group0ExceptionWithoutInstruction(vector uint32, total uint32) error {
-	cpu.addCycles(total)
-	return cpu.raiseGroup0Exception(vector, cpu.regs.SR|srSupervisor)
 }
 
 // setSR keeps USP/SSP in sync when the supervisor bit changes.
@@ -1392,23 +1364,24 @@ func (cpu *cpu) serviceInterrupt() error {
 var errExceptionTaken = errors.New("m68kemu: exception taken")
 
 func (cpu *cpu) handleFaultError(err error, currentInstruction bool) error {
-	if err == errExceptionTaken {
-		return nil
-	}
+	var vector uint32
 	switch err.(type) {
 	case BusError:
-		if currentInstruction {
-			return cpu.group0ExceptionForCurrentInstruction(XBusError, exceptionCyclesBusAddress)
-		}
-		return cpu.group0ExceptionWithoutInstruction(XBusError, exceptionCyclesBusAddress)
+		vector = XBusError
 	case AddressError:
-		if currentInstruction {
-			return cpu.group0ExceptionForCurrentInstruction(XAddressError, exceptionCyclesBusAddress)
-		}
-		return cpu.group0ExceptionWithoutInstruction(XAddressError, exceptionCyclesBusAddress)
+		vector = XAddressError
 	default:
+		if err == errExceptionTaken {
+			return nil
+		}
 		return err
 	}
+	if currentInstruction {
+		cpu.overrideInstructionCycles(exceptionCyclesBusAddress)
+	} else {
+		cpu.addCycles(exceptionCyclesBusAddress)
+	}
+	return cpu.raiseGroup0Exception(vector)
 }
 
 // executeNext runs one whole instruction boundary: fetch, execute, and the
@@ -1419,23 +1392,19 @@ func (cpu *cpu) executeNext() error {
 		return cpu.executeNextDebug()
 	}
 
-	cpu.beginInstructionContext(cpu.regs.PC)
+	cpu.beginRestartableContext(cpu.regs.PC)
 
 	opcode, err := cpu.fetchOpcode()
 	if err != nil {
 		cpu.endInstructionContext()
 		return cpu.handleFaultError(err, false)
 	}
-	if err := cpu.dispatchInstruction(opcode, cpu.consumeOpcodePC()); err != nil {
-		cpu.endInstructionContext()
-		return err
-	}
-	if err := cpu.checkInterrupts(); err != nil {
-		cpu.endInstructionContext()
-		return err
+	err = cpu.dispatchInstruction(opcode, cpu.consumeOpcodePC())
+	if err == nil {
+		err = cpu.checkInterrupts()
 	}
 	cpu.endInstructionContext()
-	return nil
+	return err
 }
 
 // executeNextDebug is executeNext with the full pre/post instruction debug
@@ -1467,11 +1436,11 @@ func (cpu *cpu) executeNextDebug() error {
 	if cpu.preTrap != nil {
 		cpu.sendPreTrace(pc, opcode, beforeRegs)
 	}
-	if err := cpu.dispatchInstruction(opcode, cpu.consumeOpcodePC()); err != nil {
-		cpu.endInstructionContext()
-		return err
+	err = cpu.dispatchInstruction(opcode, cpu.consumeOpcodePC())
+	if err == nil {
+		err = cpu.checkInterrupts()
 	}
-	if err := cpu.checkInterrupts(); err != nil {
+	if err != nil {
 		cpu.endInstructionContext()
 		return err
 	}
@@ -1486,7 +1455,7 @@ func (cpu *cpu) executeNextDebug() error {
 // Step fetches the next opcode at the program counter and executes it.
 func (cpu *cpu) Step() error {
 	cpu.refreshRunModes()
-	if cpu.stepExceptionValid || cpu.stepInterruptValid || len(cpu.traceBytes) != 0 || len(cpu.stepBusAccesses) != 0 {
+	if cpu.hasStepDebugState() {
 		cpu.resetStepDebugState()
 	}
 
@@ -1511,7 +1480,7 @@ func (cpu *cpu) RunCycles(budget uint64) error {
 	target := start + budget
 
 	for cpu.cycles < target {
-		if cpu.stepExceptionValid || cpu.stepInterruptValid || len(cpu.traceBytes) != 0 || len(cpu.stepBusAccesses) != 0 {
+		if cpu.hasStepDebugState() {
 			cpu.resetStepDebugState()
 		}
 		before := cpu.cycles
@@ -1598,6 +1567,12 @@ func (cpu *cpu) RunUntil(options RunUntilOptions) (RunResult, error) {
 			return result, nil
 		}
 	}
+}
+
+// hasStepDebugState reports whether the previous step left scratch state that
+// resetStepDebugState must clear.
+func (cpu *cpu) hasStepDebugState() bool {
+	return cpu.stepExceptionValid || cpu.stepInterruptValid || len(cpu.traceBytes) != 0 || len(cpu.stepBusAccesses) != 0
 }
 
 // resetStepDebugState clears per-step scratch state before a new Step/RunCycles
@@ -1689,24 +1664,23 @@ func (cpu *cpu) checkAccessBreakpoint(address uint32, kind BreakpointType) error
 }
 
 func (cpu *cpu) fetchOpcode() (uint16, error) {
-	fetchPC := cpu.regs.PC
-	if opcode, ok, err := cpu.readProgramFastWord(cpu.regs.PC); ok {
+	pc := cpu.regs.PC
+	opcode, ok, err := cpu.readProgramFastWord(pc)
+	if ok {
 		if err != nil {
-			cpu.recordProgramFault(cpu.regs.PC, Word, err)
+			cpu.recordProgramFault(pc, Word, err)
 			return 0, err
 		}
-		cpu.rememberOpcodePC(fetchPC)
-		cpu.regs.PC += uint32(Word)
-		return opcode, nil
-	}
-
-	if opcode, err := cpu.readProgram(Word, cpu.regs.PC); err == nil {
-		cpu.rememberOpcodePC(fetchPC)
-		cpu.regs.PC += uint32(Word)
-		return uint16(opcode), nil
 	} else {
-		return 0, err
+		value, err := cpu.readProgram(Word, pc)
+		if err != nil {
+			return 0, err
+		}
+		opcode = uint16(value)
 	}
+	cpu.rememberOpcodePC(pc)
+	cpu.regs.PC += uint32(Word)
+	return opcode, nil
 }
 
 func (cpu *cpu) Reset() error {
@@ -1729,22 +1703,18 @@ func (cpu *cpu) Reset() error {
 	}
 	cpu.regs.PC = pc
 	cpu.cycles = 0
+	cpu.coprocessorBusy = [8]uint64{}
 	cpu.fault = faultInfo{}
 	cpu.inException = false
 	cpu.lastException = ExceptionInfo{}
 	cpu.lastExceptionValid = false
-	cpu.stepException = ExceptionInfo{}
-	cpu.stepExceptionValid = false
 	cpu.lastInterrupt = InterruptInfo{}
 	cpu.lastInterruptValid = false
-	cpu.stepInterrupt = InterruptInfo{}
-	cpu.stepInterruptValid = false
 	cpu.lastOpcodePC = 0
 	cpu.lastOpcodePCValid = false
 	cpu.currentOpcodePC = 0
 	cpu.currentOpcodeValid = false
-	cpu.traceBytes = cpu.traceBytes[:0]
-	cpu.stepBusAccesses = cpu.stepBusAccesses[:0]
+	cpu.resetStepDebugState()
 	cpu.historyNext = 0
 	cpu.historyCount = 0
 	cpu.refreshDebugModes()
@@ -1780,6 +1750,7 @@ func newCPU(bus *Bus, cfg cpuConfig) (*cpu, error) {
 	c.operands.init(cfg.model)
 	for _, a := range cfg.coprocessors {
 		c.coprocessors[a.id&7] = a.c
+		c.coprocessorTimings[a.id&7], _ = a.c.(CoprocessorTiming)
 	}
 	bus.waitHook = func(states uint32) { c.addCycles(states) }
 
@@ -1798,33 +1769,16 @@ func validEA(opcode, mask uint16) bool {
 		return true
 	}
 
-	switch opcode & 0x3f {
-	case 0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07:
-		return (mask & eaMaskDataRegister) != 0
-	case 0x08, 0x09, 0x0a, 0x0b, 0x0c, 0x0d, 0x0e, 0x0f:
-		return (mask & eaMaskAddressRegister) != 0
-	case 0x10, 0x11, 0x12, 0x13, 0x14, 0x15, 0x16, 0x17:
-		return (mask & eaMaskIndirect) != 0
-	case 0x18, 0x19, 0x1a, 0x1b, 0x1c, 0x1d, 0x1e, 0x1f:
-		return (mask & eaMaskPostIncrement) != 0
-	case 0x20, 0x21, 0x22, 0x23, 0x24, 0x25, 0x26, 0x27:
-		return (mask & eaMaskPreDecrement) != 0
-	case 0x28, 0x29, 0x2a, 0x2b, 0x2c, 0x2d, 0x2e, 0x2f:
-		return (mask & eaMaskDisplacement) != 0
-	case 0x30, 0x31, 0x32, 0x33, 0x34, 0x35, 0x36, 0x37:
-		return (mask & eaMaskIndex) != 0
-	case 0x38:
-		return (mask & eaMaskAbsoluteShort) != 0
-	case 0x39:
-		return (mask & eaMaskAbsoluteLong) != 0
-	case 0x3a:
-		return (mask & eaMaskPCDisplacement) != 0
-	case 0x3b:
-		return (mask & eaMaskPCIndex) != 0
-	case 0x3c:
-		return (mask & eaMaskImmediate) != 0
+	// Modes 0-6 take the mask bits from eaMaskDataRegister down to
+	// eaMaskIndex in order; mode 7 has its own bit per register.
+	mode, reg := eaFields(opcode)
+	if mode < 7 {
+		return mask&(eaMaskDataRegister>>mode) != 0
 	}
-	return false
+	if reg > 4 {
+		return false
+	}
+	return mask&[...]uint16{eaMaskAbsoluteShort, eaMaskAbsoluteLong, eaMaskPCDisplacement, eaMaskPCIndex, eaMaskImmediate}[reg] != 0
 }
 
 func (cpu *cpu) push(s Size, value uint32) error {
@@ -1838,52 +1792,50 @@ func (cpu *cpu) pushException(s Size, value uint32) error {
 }
 
 func (cpu *cpu) pop(s Size) (uint32, error) {
-	if res, err := cpu.read(s, cpu.regs.A[7]); err == nil {
-		cpu.regs.A[7] += uint32(s) // sometimes odd
-		return res, nil
-	} else {
+	res, err := cpu.read(s, cpu.regs.A[7])
+	if err != nil {
 		return 0, err
 	}
+	cpu.regs.A[7] += uint32(s) // sometimes odd
+	return res, nil
 }
 
 func (cpu *cpu) popPc(s Size) (uint32, error) {
+	var res uint32
+	var ok bool
+	var err error
 	switch s {
 	case Word:
-		if res, ok, err := cpu.readProgramFastWord(cpu.regs.PC); ok {
-			if err != nil {
-				cpu.recordProgramFault(cpu.regs.PC, Word, err)
-				return 0, err
-			}
-			cpu.regs.PC += uint32(s)
-			if cpu.regs.PC&1 != 0 {
-				cpu.regs.PC++ // never odd
-			}
-			return uint32(res), nil
-		}
+		var w uint16
+		w, ok, err = cpu.readProgramFastWord(cpu.regs.PC)
+		res = uint32(w)
 	case Long:
-		if res, ok, err := cpu.readProgramFastLong(cpu.regs.PC); ok {
-			if err != nil {
-				cpu.recordProgramFault(cpu.regs.PC, Long, err)
-				return 0, err
-			}
-			cpu.regs.PC += uint32(s)
-			if cpu.regs.PC&1 != 0 {
-				cpu.regs.PC++ // never odd
-			}
-			return res, nil
-		}
+		res, ok, err = cpu.readProgramFastLong(cpu.regs.PC)
 	}
-
-	if res, err := cpu.readProgram(s, cpu.regs.PC); err == nil {
-		cpu.regs.PC += uint32(s)
-		if cpu.regs.PC&1 != 0 {
-			cpu.regs.PC++ // never odd
-		}
-		return res, nil
-
-	} else {
+	if ok && err != nil {
+		cpu.recordProgramFault(cpu.regs.PC, s, err)
 		return 0, err
 	}
+	if !ok {
+		if res, err = cpu.readProgram(s, cpu.regs.PC); err != nil {
+			return 0, err
+		}
+	}
+	cpu.regs.PC += uint32(s)
+	if cpu.regs.PC&1 != 0 {
+		cpu.regs.PC++ // never odd
+	}
+	return res, nil
+}
+
+// popImmediate reads immediate data of size s from the instruction stream. A
+// byte is the low half of a word.
+func (cpu *cpu) popImmediate(s Size) (uint32, error) {
+	if s == Byte {
+		v, err := cpu.popPc(Word)
+		return v & 0xff, err
+	}
+	return cpu.popPc(s)
 }
 
 // readProgramFastWord serves an instruction word from a fast path: first a
@@ -1914,7 +1866,7 @@ func (cpu *cpu) readProgramFastWord(address uint32) (uint16, bool, error) {
 	mem := cpu.fastFetchMem
 	idx := address - cpu.fastFetchOffset
 	if address < cpu.fastFetchOffset || idx+1 >= uint32(len(mem)) {
-		return 0, true, BusError(address)
+		return 0, false, nil // outside the fast RAM: the bus decides
 	}
 	return uint16(mem[idx])<<8 | uint16(mem[idx+1]), true, nil
 }
@@ -1944,11 +1896,8 @@ func (cpu *cpu) readProgramFastLong(address uint32) (uint32, bool, error) {
 	}
 	mem := cpu.fastFetchMem
 	idx := address - cpu.fastFetchOffset
-	if address < cpu.fastFetchOffset || idx+1 >= uint32(len(mem)) {
-		return 0, true, BusError(address)
-	}
-	if idx+3 >= uint32(len(mem)) {
-		return 0, true, BusError((address + uint32(Word)) & cpu.addrMask)
+	if address < cpu.fastFetchOffset || idx+3 >= uint32(len(mem)) {
+		return 0, false, nil // not wholly in the fast RAM: the bus decides
 	}
 	return uint32(mem[idx])<<24 |
 		uint32(mem[idx+1])<<16 |
@@ -2285,18 +2234,8 @@ func (cpu *cpu) appendHistory(entry HistoryEntry) {
 }
 
 func cloneHistoryEntry(entry HistoryEntry) HistoryEntry {
-	entry.Trace = cloneTraceInfo(entry.Trace)
-	entry.Exception = cloneExceptionInfo(entry.Exception)
+	entry.Trace.Bytes = slices.Clone(entry.Trace.Bytes)
 	return entry
-}
-
-func cloneTraceInfo(info TraceInfo) TraceInfo {
-	info.Bytes = append([]byte(nil), info.Bytes...)
-	return info
-}
-
-func cloneExceptionInfo(info ExceptionInfo) ExceptionInfo {
-	return info
 }
 
 // ReadExceptionStackFrame decodes an exception frame of the given format
@@ -2306,58 +2245,28 @@ func ReadExceptionStackFrame(bus AddressBus, sp uint32, format ExceptionStackFra
 		Format:       format,
 		StackPointer: sp & 0xffffff,
 	}
+	var err error
+	read := func(s Size, offset uint32) uint32 {
+		if err != nil {
+			return 0
+		}
+		var v uint32
+		v, err = bus.Read(s, sp+offset)
+		return v
+	}
 
 	switch format {
 	case ExceptionStackFrameGroup12:
-		sr, err := bus.Read(Word, sp)
-		if err != nil {
-			return ExceptionStackFrame{}, err
-		}
-		pc, err := bus.Read(Long, sp+uint32(Word))
-		if err != nil {
-			return ExceptionStackFrame{}, err
-		}
-		frame.SR = uint16(sr)
-		frame.PC = pc
-		return frame, nil
+		frame.SR = uint16(read(Word, 0))
+		frame.PC = read(Long, 2)
 	case ExceptionStackFrameGroup0:
-		statusWord, err := bus.Read(Word, sp)
-		if err != nil {
-			return ExceptionStackFrame{}, err
-		}
-		faultAddress, err := bus.Read(Long, sp+2)
-		if err != nil {
-			return ExceptionStackFrame{}, err
-		}
-		ir, err := bus.Read(Word, sp+6)
-		if err != nil {
-			return ExceptionStackFrame{}, err
-		}
-		sr, err := bus.Read(Word, sp+8)
-		if err != nil {
-			return ExceptionStackFrame{}, err
-		}
-		pc, err := bus.Read(Long, sp+10)
-		if err != nil {
-			return ExceptionStackFrame{}, err
-		}
-		frame.StatusWord = uint16(statusWord)
-		frame.FaultAddress = faultAddress
-		frame.InstructionRegister = uint16(ir)
-		frame.SR = uint16(sr)
-		frame.PC = pc
-		return frame, nil
+		frame.StatusWord = uint16(read(Word, 0))
+		frame.FaultAddress = read(Long, 2)
+		frame.InstructionRegister = uint16(read(Word, 6))
+		frame.SR = uint16(read(Word, 8))
+		frame.PC = read(Long, 10)
 	case ExceptionStackFrameFormat0, ExceptionStackFrameFormat8, ExceptionStackFrameFormat1,
 		ExceptionStackFrameFormat2, ExceptionStackFrameFormat9, ExceptionStackFrameFormatA, ExceptionStackFrameFormatB:
-		var err error
-		read := func(s Size, offset uint32) uint32 {
-			if err != nil {
-				return 0
-			}
-			var v uint32
-			v, err = bus.Read(s, sp+offset)
-			return v
-		}
 		frame.SR = uint16(read(Word, 0))
 		frame.PC = read(Long, 2)
 		frame.VectorOffset = uint16(read(Word, 6)) & 0x0fff
@@ -2384,13 +2293,13 @@ func ReadExceptionStackFrame(bus AddressBus, sp uint32, format ExceptionStackFra
 				}
 			}
 		}
-		if err != nil {
-			return ExceptionStackFrame{}, err
-		}
-		return frame, nil
 	default:
 		return ExceptionStackFrame{}, fmt.Errorf("unknown exception stack frame format %d", format)
 	}
+	if err != nil {
+		return ExceptionStackFrame{}, err
+	}
+	return frame, nil
 }
 
 // CurrentExceptionFrame rereads the most recent exception frame from the stack,
@@ -2409,7 +2318,7 @@ func (cpu *cpu) CurrentExceptionFrame() (ExceptionStackFrame, bool, error) {
 
 func (cpu *cpu) traceInstructionBytes(pc uint32) []byte {
 	if len(cpu.traceBytes) != 0 {
-		return append([]byte(nil), cpu.traceBytes...)
+		return slices.Clone(cpu.traceBytes)
 	}
 	return traceInstructionBytes(cpu.bus, pc, cpu.regs.IR)
 }

@@ -62,12 +62,16 @@ type PeekDevice interface {
 type Bus struct {
 	// mask selects the address bits the bus decodes: 24 (the default) or
 	// 32.
-	mask                uint32
-	devices             []Device
-	waitStates          uint32
-	waitHook            func(states uint32)
-	singleDevice        Device
-	singleRAM           *RAM
+	mask         uint32
+	devices      []Device
+	waitStates   uint32
+	waitHook     func(states uint32)
+	singleDevice Device
+	singleRAM    *RAM
+	// primaryRAM is the first RAM that no earlier device overlaps, so the
+	// bus would always pick it for its addresses. fastRAM is primaryRAM
+	// while no wait states apply; the CPU then reads and writes it directly.
+	primaryRAM          *RAM
 	fastRAM             *RAM
 	hasWaitStateDevices bool
 	hasPageMap          bool
@@ -277,6 +281,7 @@ func (b *Bus) writeCycle(s Size, address uint32, value uint32) error {
 func (b *Bus) refreshTopology() {
 	b.singleDevice = nil
 	b.singleRAM = nil
+	b.primaryRAM = nil
 	b.fastRAM = nil
 	b.hasWaitStateDevices = false
 	b.hasPageMap = false
@@ -331,18 +336,13 @@ func (b *Bus) refreshTopology() {
 		b.hasPageMap = true
 		for page := start >> 16; page <= end>>16; page++ {
 			pageStart := page << 16
-			rangeStart := max(start, pageStart)
-			rangeEnd := end
-			pageEnd := pageStart | 0xffff
-			if rangeEnd > pageEnd {
-				rangeEnd = pageEnd
-			}
-			b.addPageRange(page, rangeStart, rangeEnd, dev, contains)
+			b.addPageRange(page, max(start, pageStart), min(end, pageStart|0xffff), dev, contains)
 		}
 	}
 
 	b.rangedCount = len(b.scanList)
 	b.scanList = append(b.scanList, unranged...)
+	b.primaryRAM = b.findPrimaryRAM()
 
 	b.refreshFastRAM()
 }
@@ -371,7 +371,38 @@ func (b *Bus) refreshFastRAM() {
 	if b.waitStates != 0 || b.hasWaitStateDevices {
 		return
 	}
-	b.fastRAM = b.singleRAM
+	b.fastRAM = b.primaryRAM
+}
+
+// findPrimaryRAM returns the first RAM whose range no earlier device with an
+// address range overlaps. Devices without one are only asked for addresses
+// that no ranged device answers, so they never take the RAM's addresses.
+func (b *Bus) findPrimaryRAM() *RAM {
+	for i, dev := range b.devices {
+		ram, ok := dev.(*RAM)
+		if !ok || len(ram.mem) == 0 {
+			continue
+		}
+		start, end := ram.AddressRange()
+		if start&b.mask != start || end&b.mask != end || end < start {
+			continue // the range wraps or exceeds the bus width
+		}
+		overlapped := false
+		for _, earlier := range b.devices[:i] {
+			if r, ok := earlier.(AddressRangeDevice); ok {
+				s, e := r.AddressRange()
+				s, e = s&b.mask, e&b.mask
+				if s <= e && s <= end && e >= start {
+					overlapped = true
+					break
+				}
+			}
+		}
+		if !overlapped {
+			return ram
+		}
+	}
+	return nil
 }
 
 func (b *Bus) findDevice(address uint32) Device {
@@ -456,11 +487,7 @@ func (d *mappedDevice) Peek(size Size, address uint32) (uint32, error) {
 	if !d.containsAccess(size, address) {
 		return 0, BusError(address & d.mask)
 	}
-	peekable, ok := d.device.(PeekDevice)
-	if !ok {
-		return 0, fmt.Errorf("peek unsupported at %08x", address&d.mask)
-	}
-	return peekable.Peek(size, address)
+	return peekDevice(d.device, size, address)
 }
 
 func (d *mappedDevice) Write(size Size, address uint32, value uint32) error {
@@ -525,7 +552,7 @@ func (b *Bus) addPageRange(page, start, end uint32, dev Device, contains func(ui
 		if cursor < current.start {
 			uncovered = append(uncovered, pageRange{
 				start:    cursor,
-				end:      minUint32(end, current.start-1),
+				end:      min(end, current.start-1),
 				device:   dev,
 				contains: contains,
 			})
@@ -589,11 +616,4 @@ func findInRanges(ranges []pageRange, address uint32) *pageRange {
 		return current
 	}
 	return nil
-}
-
-func minUint32(a, b uint32) uint32 {
-	if a < b {
-		return a
-	}
-	return b
 }

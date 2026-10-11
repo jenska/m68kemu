@@ -1,14 +1,11 @@
 package m68kemu
 
-import (
-	"fmt"
-	"math/bits"
-)
+import "math/bits"
 
 func registerMoves(b *tableBuilder) {
-	registerMove(b, moveb, 0x1000, moveCycleCalculator(Byte))
-	registerMove(b, movew, 0x3000, moveCycleCalculator(Word))
-	registerMove(b, movel, 0x2000, moveCycleCalculator(Long))
+	registerMove(b, 0x1000, moveCycleCalculator(Byte))
+	registerMove(b, 0x3000, moveCycleCalculator(Word))
+	registerMove(b, 0x2000, moveCycleCalculator(Long))
 	registerMoveA(b, 0x3000, moveaw, moveAddressCycleCalculator(Word))
 	registerMoveA(b, 0x2000, moveal, moveAddressCycleCalculator(Long))
 	b.add(moveq, 0x7000, 0xf100, 0, constantCycles(4))
@@ -43,7 +40,7 @@ func registerMoveA(b *tableBuilder, base uint16, handler instruction, calc cycle
 	}
 }
 
-func registerMove(b *tableBuilder, ins instruction, base uint16, calc cycleCalculator) {
+func registerMove(b *tableBuilder, base uint16, calc cycleCalculator) {
 	for dstMode := range uint16(8) {
 		// Address register destinations are handled by MOVEA.
 		if dstMode == 1 {
@@ -57,13 +54,17 @@ func registerMove(b *tableBuilder, ins instruction, base uint16, calc cycleCalcu
 				continue
 			}
 			match := base | (dstReg << 9) | (dstMode << 6)
-			b.add(ins, match, 0xffc0, moveSourceEAMask, calc)
+			b.add(move, match, 0xffc0, moveSourceEAMask, calc)
 		}
 	}
 }
 
-func moveb(cpu *cpu) error {
-	src, err := cpu.ResolveSrcEA(Byte)
+// moveSizes maps the size field of MOVE, bits 13-12, to the operand size.
+var moveSizes = [4]Size{1: Byte, 2: Long, 3: Word}
+
+func move(cpu *cpu) error {
+	size := moveSizes[(cpu.regs.IR>>12)&3]
+	src, err := cpu.ResolveSrcEA(size)
 	if err != nil {
 		return err
 	}
@@ -72,7 +73,7 @@ func moveb(cpu *cpu) error {
 		return err
 	}
 
-	dst, err := cpu.ResolveDstEA(Byte)
+	dst, err := cpu.ResolveDstEA(size)
 	if err != nil {
 		return err
 	}
@@ -81,53 +82,7 @@ func moveb(cpu *cpu) error {
 		return err
 	}
 
-	updateNZClearVC(cpu, value, Byte)
-	return nil
-}
-
-func movew(cpu *cpu) error {
-	src, err := cpu.ResolveSrcEA(Word)
-	if err != nil {
-		return err
-	}
-	value, err := src.read()
-	if err != nil {
-		return err
-	}
-
-	dst, err := cpu.ResolveDstEA(Word)
-	if err != nil {
-		return err
-	}
-
-	if err := dst.write(value); err != nil {
-		return err
-	}
-
-	updateNZClearVC(cpu, value, Word)
-	return nil
-}
-
-func movel(cpu *cpu) error {
-	src, err := cpu.ResolveSrcEA(Long)
-	if err != nil {
-		return err
-	}
-	value, err := src.read()
-	if err != nil {
-		return err
-	}
-
-	dst, err := cpu.ResolveDstEA(Long)
-	if err != nil {
-		return err
-	}
-
-	if err := dst.write(value); err != nil {
-		return err
-	}
-
-	updateNZClearVC(cpu, value, Long)
+	updateNZClearVC(cpu, value, size)
 	return nil
 }
 
@@ -161,68 +116,41 @@ func moveal(cpu *cpu) error {
 	return nil
 }
 
-func moveCycles(ir uint16, size Size) uint32 {
-	srcMode := (ir >> 3) & 0x7
-	srcReg := ir & 0x7
-	dstMode := (ir >> 6) & 0x7
-	dstReg := (ir >> 9) & 0x7
-
-	return 4 + eaAccessCycles(srcMode, srcReg, size) + moveDestinationCycles(dstMode, dstReg, size)
-}
-
-func moveAddressCycles(ir uint16, size Size) uint32 {
-	srcMode := (ir >> 3) & 0x7
-	srcReg := ir & 0x7
-	return 4 + eaAccessCycles(srcMode, srcReg, size)
-}
-
+// moveCycleCalculator times MOVE (tables 8-2, 8-3).
 func moveCycleCalculator(size Size) cycleCalculator {
 	return func(opcode uint16) uint32 {
-		return moveCycles(opcode, size)
+		srcMode, srcReg := eaFields(opcode)
+		dstMode, dstReg := (opcode>>6)&0x7, (opcode>>9)&0x7
+		return 4 + eaAccessCycles(srcMode, srcReg, size) + moveDestinationCycles(dstMode, dstReg, size)
 	}
 }
 
+// moveAddressCycleCalculator times MOVEA (tables 8-2, 8-3).
 func moveAddressCycleCalculator(size Size) cycleCalculator {
 	return func(opcode uint16) uint32 {
-		return moveAddressCycles(opcode, size)
+		mode, reg := eaFields(opcode)
+		return 4 + eaAccessCycles(mode, reg, size)
 	}
 }
 
 // MOVEM: move multiple registers to/from memory
 func registerMovem(b *tableBuilder) {
 	// Register-to-memory: MOVEM.<size> <register list>,<ea>
+	// The handlers add the whole time, which depends on the register list.
 	for _, sizeBits := range []uint16{2 << 6, 3 << 6} {
-		registerMovemInstruction(b, 0x4800, sizeBits, movemToMemory, eaMaskIndirect|eaMaskPreDecrement|eaMaskDisplacement|
-			eaMaskIndex|eaMaskAbsoluteShort|eaMaskAbsoluteLong)
-		registerMovemInstruction(b, 0x4c00, sizeBits, movemToRegisters, eaMaskIndirect|eaMaskPostIncrement|
-			eaMaskDisplacement|eaMaskIndex|eaMaskAbsoluteShort|eaMaskAbsoluteLong|eaMaskPCDisplacement|eaMaskPCIndex)
+		b.add(movemToMemory, 0x4800|sizeBits, 0xffc0, eaMaskIndirect|eaMaskPreDecrement|eaMaskDisplacement|
+			eaMaskIndex|eaMaskAbsoluteShort|eaMaskAbsoluteLong, nil)
+		b.add(movemToRegisters, 0x4c00|sizeBits, 0xffc0, eaMaskIndirect|eaMaskPostIncrement|
+			eaMaskDisplacement|eaMaskIndex|eaMaskAbsoluteShort|eaMaskAbsoluteLong|eaMaskPCDisplacement|eaMaskPCIndex, nil)
 	}
 }
 
-func registerMovemInstruction(b *tableBuilder, match, sizeBits uint16, ins instruction, eaMask uint16) {
-	for mode := range uint16(8) {
-		for reg := range uint16(8) {
-			opcode := match | sizeBits | (mode << 3) | reg
-			if !validEA(opcode, eaMask) {
-				continue
-			}
-			if b.set.handlers[opcode] != nil {
-				panic(fmt.Errorf("instruction 0x%04x already registered", opcode))
-			}
-			b.set.handlers[opcode] = ins
-		}
+// movemSize returns the MOVEM operand size from opcode bit 6.
+func movemSize(opcode uint16) Size {
+	if opcode&0x0040 != 0 {
+		return Long
 	}
-}
-
-func movemSize(opcode uint16) (Size, bool) {
-	switch (opcode >> 6) & 0x3 {
-	case 2:
-		return Word, true
-	case 3:
-		return Long, true
-	default:
-		return 0, false
-	}
+	return Word
 }
 
 func movemRegisterOrder(mask uint16, reverse bool) []int {
@@ -250,74 +178,37 @@ func movemRegisterOrder(mask uint16, reverse bool) []int {
 }
 
 func movemReadAddress(cpu *cpu, mode, reg uint16) (uint32, error) {
-	var addr uint32
-
 	switch mode {
-	case 2: // (An)
-		addr = cpu.regs.A[reg]
-	case 3: // (An)+
-		addr = cpu.regs.A[reg]
-	case 4: // -(An)
-		addr = cpu.regs.A[reg]
+	case 2, 3, 4: // (An), (An)+, -(An)
+		return cpu.regs.A[reg], nil
 	case 5: // (d16,An)
 		ext, err := cpu.popPc(Word)
-		if err != nil {
-			return 0, err
-		}
-		addr = uint32(int32(cpu.regs.A[reg]) + int32(int16(ext)))
+		return uint32(int32(cpu.regs.A[reg]) + int32(int16(ext))), err
 	case 6: // (d8,An,Xn)
-		a := cpu.regs.A[reg]
-		extAddr, err := cpu.indexedAddress(a)
-		if err != nil {
-			return 0, err
-		}
-		addr = extAddr
+		return cpu.indexedAddress(cpu.regs.A[reg])
 	case 7:
 		switch reg {
 		case 0: // (xxx).W
 			ext, err := cpu.popPc(Word)
-			if err != nil {
-				return 0, err
-			}
-			addr = uint32(int32(int16(ext)))
+			return uint32(int32(int16(ext))), err
 		case 1: // (xxx).L
-			ext, err := cpu.popPc(Long)
-			if err != nil {
-				return 0, err
-			}
-			addr = ext
+			return cpu.popPc(Long)
 		case 2: // (d16,PC)
 			// The base is the displacement word's own address, not the PC
 			// after it; MOVEM's register mask precedes it.
 			pc := cpu.regs.PC
 			ext, err := cpu.popPc(Word)
-			if err != nil {
-				return 0, err
-			}
-			addr = uint32(int32(pc) + int32(int16(ext)))
+			return uint32(int32(pc) + int32(int16(ext))), err
 		case 3: // (d8,PC,Xn)
-			pc := cpu.regs.PC
-			extAddr, err := cpu.indexedAddress(pc)
-			if err != nil {
-				return 0, err
-			}
-			addr = extAddr
-		default:
-			return 0, cpu.exception(XIllegal)
+			return cpu.indexedAddress(cpu.regs.PC)
 		}
-	default:
-		return 0, cpu.exception(XIllegal)
 	}
-
-	return addr, nil
+	return 0, cpu.exception(XIllegal)
 }
 
 func movemToRegisters(cpu *cpu) error {
 	opcode := cpu.regs.IR
-	size, ok := movemSize(opcode)
-	if !ok {
-		return cpu.exception(XIllegal)
-	}
+	size := movemSize(opcode)
 
 	mask, err := cpu.popPc(Word)
 	if err != nil {
@@ -346,19 +237,10 @@ func movemToRegisters(cpu *cpu) error {
 			return err
 		}
 
-		if r < 8 {
-			if size == Word {
-				cpu.regs.D[r] = int32(int16(value))
-			} else {
-				cpu.regs.D[r] = int32(value)
-			}
-		} else {
-			if size == Word {
-				cpu.regs.A[r-8] = uint32(int32(int16(value)))
-			} else {
-				cpu.regs.A[r-8] = value
-			}
+		if size == Word {
+			value = uint32(int32(int16(value)))
 		}
+		*generalRegister(cpu, uint16(r)) = value
 
 		if mode != 4 { // all memory-to-register modes read sequentially
 			addr += sizeBytes
@@ -377,10 +259,7 @@ func movemToRegisters(cpu *cpu) error {
 
 func movemToMemory(cpu *cpu) error {
 	opcode := cpu.regs.IR
-	size, ok := movemSize(opcode)
-	if !ok {
-		return cpu.exception(XIllegal)
-	}
+	size := movemSize(opcode)
 
 	mask, err := cpu.popPc(Word)
 	if err != nil {
@@ -405,14 +284,7 @@ func movemToMemory(cpu *cpu) error {
 			addr -= sizeBytes
 		}
 
-		var value uint32
-		if r < 8 {
-			value = uint32(cpu.regs.D[r])
-		} else {
-			value = cpu.regs.A[r-8]
-		}
-
-		if err := cpu.write(size, addr, value); err != nil {
+		if err := cpu.write(size, addr, *generalRegister(cpu, uint16(r))); err != nil {
 			return err
 		}
 
@@ -454,58 +326,22 @@ func movep(cpu *cpu) error {
 	reg := (opcode >> 9) & 0x7
 	mask := size.mask()
 
+	// The bytes go to every other address, most significant first.
+	n := uint32(size)
 	var value uint32
 	if toRegister {
-		if size == Word {
-			high, err := cpu.read(Byte, addr)
+		for i := range n {
+			b, err := cpu.read(Byte, addr+2*i)
 			if err != nil {
 				return err
 			}
-			low, err := cpu.read(Byte, addr+2)
-			if err != nil {
-				return err
-			}
-			value = (high << 8) | low
-		} else {
-			b3, err := cpu.read(Byte, addr)
-			if err != nil {
-				return err
-			}
-			b2, err := cpu.read(Byte, addr+2)
-			if err != nil {
-				return err
-			}
-			b1, err := cpu.read(Byte, addr+4)
-			if err != nil {
-				return err
-			}
-			b0, err := cpu.read(Byte, addr+6)
-			if err != nil {
-				return err
-			}
-			value = (b3 << 24) | (b2 << 16) | (b1 << 8) | b0
+			value = value<<8 | b
 		}
 		cpu.regs.D[reg] = (cpu.regs.D[reg] & ^int32(mask)) | int32(value&mask)
 	} else {
 		value = uint32(cpu.regs.D[reg]) & mask
-		if size == Word {
-			if err := cpu.write(Byte, addr, (value>>8)&0xff); err != nil {
-				return err
-			}
-			if err := cpu.write(Byte, addr+2, value&0xff); err != nil {
-				return err
-			}
-		} else {
-			if err := cpu.write(Byte, addr, (value>>24)&0xff); err != nil {
-				return err
-			}
-			if err := cpu.write(Byte, addr+2, (value>>16)&0xff); err != nil {
-				return err
-			}
-			if err := cpu.write(Byte, addr+4, (value>>8)&0xff); err != nil {
-				return err
-			}
-			if err := cpu.write(Byte, addr+6, value&0xff); err != nil {
+		for i := range n {
+			if err := cpu.write(Byte, addr+2*i, (value>>(8*(n-1-i)))&0xff); err != nil {
 				return err
 			}
 		}
@@ -530,12 +366,6 @@ func registerLeaPea(b *tableBuilder) {
 }
 
 func lea(cpu *cpu) error {
-	mode := (cpu.regs.IR >> 3) & 0x7
-	reg := cpu.regs.IR & 0x7
-	if mode < 2 || (mode == 7 && reg == 4) {
-		return fmt.Errorf("invalid addressing mode for LEA")
-	}
-
 	src, err := cpu.ResolveSrcEA(Long)
 	if err != nil {
 		return err
@@ -546,12 +376,6 @@ func lea(cpu *cpu) error {
 }
 
 func pea(cpu *cpu) error {
-	mode := (cpu.regs.IR >> 3) & 0x7
-	reg := cpu.regs.IR & 0x7
-	if mode < 2 || (mode == 7 && reg == 4) {
-		return fmt.Errorf("invalid addressing mode for PEA")
-	}
-
 	src, err := cpu.ResolveSrcEA(Long)
 	if err != nil {
 		return err

@@ -19,6 +19,52 @@ Representative medians from the runs, compared with the previous report (June 13
 | `BenchmarkCycleSchedulerAdvanceBurst` | `2967 ns/op` | `0 B/op, 0 allocs/op` | `3291 ns/op` | -10% |
 | `BenchmarkBusReadMappedRanges` | `15.90 ns/op` | `0 B/op, 0 allocs/op` | `15.53 ns/op` | +2% |
 
+### FFT Across CPU Models
+
+`BenchmarkFFT` (in `fft_benchmark_test.go`) runs a 1024-point complex radix-2
+FFT on every model that can execute each arithmetic variant. All variants share
+the same bit-reversal and stage/group loops; only the butterfly differs.
+`TestFFTPrograms` checks each one against a float64 DFT.
+
+```sh
+go test -run '^$' -bench BenchmarkFFT -count=3 .
+```
+
+October 11, 2026, Apple M1, Go 1.27.1, medians:
+
+| Variant | Machine | ns/op | instrs/fft | cycles/fft | Minstr/s | SNR |
+| --- | --- | --- | --- | --- | --- | --- |
+| Q15 (`MULS.W`) | MC68000 | `4885000` | 181174 | 2179904 | 37.1 | 46 dB |
+| Q15 | MC68010 / 020 / 030 | `~5090000` | 181174 | 2179904 | 35.6 | 46 dB |
+| Q31 (`MULS.L`) | MC68020 / 030 | `~4800000` | 167798 | 2345832 | 35.0 | 141 dB |
+| SFP004 (memory-mapped FPU) | MC68000+MC68881 | `41750000` | 1006327 | 13087348 | 24.1 | 297 dB |
+| SFP004 | MC68010+MC68881 | `42100000` | 1006327 | 13087348 | 23.9 | 297 dB |
+| FPU (F-line) | MC68020+MC68881 / MC68030+MC68882 | `~10580000` | 166646 | 7189096 | 15.8 | 297 dB |
+
+* The 68020's `MULS.L` gives 32-bit precision (+95 dB) with fewer instructions
+  than the 16-bit 68000 code, at about the same cycle count.
+* The FPU runs at the CPU's clock with the typical execution times of
+  `fpu/timing.go` (see [fpu.md](fpu.md)). Double precision costs about 3x the
+  cycles of fixed point: a butterfly takes about 1300 FPU cycles (six loads,
+  four multiplies, six adds, four stores), while the integer code around it
+  overlaps the FPU.
+* On the SFP004 the 68000 polls the response CIR while the FPU is busy, so
+  its instruction count includes the polling loops and depends on the FPU
+  timing. It needs 1.8x the cycles of the native coprocessor interface: every
+  command, operand move and poll is a bus access from 68000 code.
+* The MC68000 is about 4% faster on the host than the other models, which
+  save the registers at every instruction so a bus or address error can
+  restart it.
+* Profiling the first version of these benchmarks led to the current numbers
+  (before: Q15 on the MC68010 to MC68030 5.6 ms, SFP004 86 ms, FPU 11.9 ms):
+  the MC68010 and later had taken the debug-aware execution path at every
+  instruction; a second device on the bus (the CIR) had turned off the direct
+  RAM path, so every fetch went through the bus's device lookup; and every
+  coprocessor instruction decoded its command word four times and allocated
+  its operands.
+* Integer cycle counts from the 68020 on reuse the 68000 tables and are an
+  approximation.
+
 ### Bus Lookup Regression (Fixed)
 
 Commit `731b476` ("Make Device.Contains optional") page-mapped only devices that

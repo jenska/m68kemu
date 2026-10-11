@@ -214,18 +214,10 @@ func valid68000Line4(op uint16) bool {
 	}
 	switch (op >> 8) & 0xF {
 	case 0x0: // NEGX / MOVE from SR
-		if size == 3 {
-			return specIn(op, specDataAlterable)
-		}
 		return specIn(op, specDataAlterable)
 	case 0x2: // CLR (MOVE from CCR is 68010+)
 		return size != 3 && specIn(op, specDataAlterable)
-	case 0x4: // NEG / MOVE to CCR
-		if size == 3 {
-			return specIn(op, specData)
-		}
-		return specIn(op, specDataAlterable)
-	case 0x6: // NOT / MOVE to SR
+	case 0x4, 0x6: // NEG / MOVE to CCR, NOT / MOVE to SR
 		if size == 3 {
 			return specIn(op, specData)
 		}
@@ -249,10 +241,7 @@ func valid68000Line4(op uint16) bool {
 		if op == 0x4AFC {
 			return true // ILLEGAL
 		}
-		if size == 3 {
-			return specIn(op, specDataAlterable) // TAS
-		}
-		return specIn(op, specDataAlterable) // TST
+		return specIn(op, specDataAlterable) // TST, TAS
 	case 0xC:
 		if size >= 2 {
 			return specIn(op, specControl|specPostInc) // MOVEM memory to regs
@@ -264,10 +253,8 @@ func valid68000Line4(op uint16) bool {
 			return true
 		case op == 0x4E70, op == 0x4E71, op == 0x4E72, op == 0x4E73, op == 0x4E75, op == 0x4E76, op == 0x4E77:
 			return true
-		case size == 2:
-			return specIn(op, specControl) // JSR
-		case size == 3:
-			return specIn(op, specControl) // JMP
+		case size >= 2:
+			return specIn(op, specControl) // JSR, JMP
 		}
 	}
 	return false

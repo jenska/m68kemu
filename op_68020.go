@@ -118,7 +118,7 @@ func branchLong(cpu *cpu) error {
 	if err != nil {
 		return err
 	}
-	if cond != 0x0 && cond != 0x1 && !conditionTrue(cpu, cond) {
+	if cond != 0x0 && cond != 0x1 && !conditionTrue(cpu, cond) { // BRA and BSR skip the call
 		cpu.addCycles(4)
 		return nil
 	}
@@ -223,7 +223,7 @@ func mulLong(cpu *cpu) error {
 		}
 	} else {
 		*dl = lo
-		_, flags = nzFlagsOf(lo)
+		flags = nzFlags(lo, Long)
 		if overflow {
 			flags |= srOverflow
 		}
@@ -281,21 +281,8 @@ func divLong(cpu *cpu) error {
 	}
 	*dr = r
 	*dq = q // written last: with Dr = Dq only the quotient remains
-	_, flags := nzFlagsOf(q)
-	replaceStatusFlags(cpu, statusMaskNZVC, flags)
+	updateNZClearVC(cpu, q, Long)
 	return nil
-}
-
-// nzFlagsOf returns the N and Z flags of a long result.
-func nzFlagsOf(v uint32) (uint32, uint16) {
-	var flags uint16
-	if v&0x80000000 != 0 {
-		flags |= srNegative
-	}
-	if v == 0 {
-		flags |= srZero
-	}
-	return v, flags
 }
 
 // trapcc is TRAPcc with no, a word or a long operand, which it skips.
@@ -310,7 +297,7 @@ func trapcc(cpu *cpu) error {
 		return nil
 	}
 	cpu.overrideInstructionCycles(exceptionCyclesTrapV)
-	return cpu.synchronousException(7, cpu.regs.SR|srSupervisor, cpu.regs.PC)
+	return cpu.synchronousException(7, cpu.regs.PC)
 }
 
 // predecrementByte returns the address of a byte operand -(An), decrementing
@@ -424,8 +411,8 @@ func bitField(cpu *cpu) error {
 		address := operand.computedAddress() + uint32(offset>>3)
 		bit := uint32(offset) & 7
 		n := (bit + width + 7) / 8
-		top := 8*n - bit - width // bits right of the field in the bytes read
-		get = func() (uint64, error) {
+		top := 8*n - bit - width         // bits right of the field in the bytes read
+		load := func() (uint64, error) { // the bytes the field occupies
 			var v uint64
 			for i := range n {
 				b, err := cpu.read(Byte, address+i)
@@ -434,16 +421,16 @@ func bitField(cpu *cpu) error {
 				}
 				v = v<<8 | uint64(b)
 			}
-			return v >> top & mask, nil
+			return v, nil
+		}
+		get = func() (uint64, error) {
+			v, err := load()
+			return v >> top & mask, err
 		}
 		put = func(field uint64) error {
-			var v uint64
-			for i := range n {
-				b, err := cpu.read(Byte, address+i)
-				if err != nil {
-					return err
-				}
-				v = v<<8 | uint64(b)
+			v, err := load()
+			if err != nil {
+				return err
 			}
 			v = v&^(mask<<top) | (field&mask)<<top
 			for i := range n {

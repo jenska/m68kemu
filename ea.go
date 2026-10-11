@@ -8,7 +8,6 @@ type (
 	ea interface {
 		init(cpu *cpu, o Size) (modifier, error)
 		computedAddress() uint32
-		// cycles() int
 	}
 
 	modifier interface {
@@ -264,14 +263,6 @@ func (ea *eaPostIncrement) init(cpu *cpu, o Size) (modifier, error) {
 	return ea, nil
 }
 
-func (ea *eaPostIncrement) read() (uint32, error) {
-	return ea.cpu.read(ea.size, ea.address)
-}
-
-func (ea *eaPostIncrement) write(v uint32) error {
-	return ea.cpu.write(ea.size, ea.address, v)
-}
-
 // -------------------------------------------------------------------
 // Pre decrement
 
@@ -283,14 +274,6 @@ func (ea *eaPreDecrement) init(cpu *cpu, o Size) (modifier, error) {
 	*ea.areg(cpu) -= decr
 	ea.cpu, ea.size, ea.address = cpu, o, *ea.areg(cpu)
 	return ea, nil
-}
-
-func (ea *eaPreDecrement) read() (uint32, error) {
-	return ea.cpu.read(ea.size, ea.address)
-}
-
-func (ea *eaPreDecrement) write(v uint32) error {
-	return ea.cpu.write(ea.size, ea.address, v)
 }
 
 // -------------------------------------------------------------------
@@ -306,10 +289,6 @@ func (ea *eaDisplacement) init(cpu *cpu, o Size) (modifier, error) {
 	return ea, nil
 }
 
-func (ea *eaDisplacement) computedAddress() uint32 {
-	return ea.address
-}
-
 func (ea *eaPCDisplacement) init(cpu *cpu, o Size) (modifier, error) {
 	ea.cpu, ea.size = cpu, o
 	basePC := cpu.regs.PC
@@ -319,10 +298,6 @@ func (ea *eaPCDisplacement) init(cpu *cpu, o Size) (modifier, error) {
 	}
 	ea.address = uint32(int32(basePC) + int32(int16(offset)))
 	return ea, nil
-}
-
-func (ea *eaPCDisplacement) computedAddress() uint32 {
-	return ea.address
 }
 
 // -------------------------------------------------------------------
@@ -340,8 +315,7 @@ func (ea *eaIndirectIndex) init(cpu *cpu, o Size) (modifier, error) {
 
 func (ea *eaPCIndirectIndex) init(cpu *cpu, o Size) (modifier, error) {
 	ea.cpu, ea.size = cpu, o
-	basePC := cpu.regs.PC
-	address, err := ea.index(cpu, basePC)
+	address, err := ea.index(cpu, cpu.regs.PC)
 	if err != nil {
 		return nil, err
 	}
@@ -381,6 +355,7 @@ func (ea *eaAbsolute) computedAddress() uint32 {
 // immediate
 
 func (ea *eaImmediate) init(cpu *cpu, o Size) (modifier, error) {
+	// Inlined popImmediate: immediate operands are on the hot path.
 	readSize := o
 	if o == Byte {
 		readSize = Word
@@ -389,10 +364,7 @@ func (ea *eaImmediate) init(cpu *cpu, o Size) (modifier, error) {
 	if err != nil {
 		return nil, err
 	}
-	if o == Byte {
-		value &= 0xff
-	}
-	ea.value = value
+	ea.value = value & o.mask()
 	return ea, nil
 }
 

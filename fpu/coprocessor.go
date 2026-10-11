@@ -10,26 +10,47 @@ import "github.com/jenska/m68kemu"
 // The CPU then executes the F-line instructions with coprocessor ID 1 (FADD,
 // FMOVE, FBcc, FSAVE and the rest) on f.
 func (f *FPU) Coprocessor() m68kemu.Coprocessor {
-	return coprocessor{f}
+	return &coprocessor{FPU: f}
 }
 
 type coprocessor struct {
 	*FPU
+	// The CPU asks Decode, Operands, Execute and Cycles about the same
+	// command word in turn; decode keeps the last result for them.
+	decoded bool
+	op      Operation
+	err     error
 }
 
-func (c coprocessor) Decode(cmd uint16) (int, error) {
-	op, err := Decode(cmd)
+// decode returns Decode(cmd), which depends on cmd alone.
+func (c *coprocessor) decode(cmd uint16) (Operation, error) {
+	if !c.decoded || c.op.Command != cmd {
+		c.op, c.err = Decode(cmd)
+		c.decoded = true
+	}
+	return c.op, c.err
+}
+
+func (c *coprocessor) Decode(cmd uint16) (int, error) {
+	op, err := c.decode(cmd)
 	return op.Register, err
 }
 
-func (c coprocessor) Operands(cmd uint16, dynamic uint32) (int, int) {
-	op, _ := Decode(cmd)
+func (c *coprocessor) Operands(cmd uint16, dynamic uint32) (int, int) {
+	op, _ := c.decode(cmd)
 	op.SetDynamic(dynamic)
 	return op.In, op.Out
 }
 
-func (c coprocessor) Execute(cmd uint16, dynamic uint32, in []byte) ([]byte, error) {
-	op, err := Decode(cmd)
+// Cycles implements m68kemu.CoprocessorTiming, with the FPU clocked like
+// the CPU.
+func (c *coprocessor) Cycles(cmd uint16, dynamic uint32) uint32 {
+	op, _ := c.decode(cmd)
+	return uint32(c.FPU.Cycles(op, dynamic))
+}
+
+func (c *coprocessor) Execute(cmd uint16, dynamic uint32, in []byte) ([]byte, error) {
+	op, err := c.decode(cmd)
 	if err != nil {
 		return nil, err
 	}

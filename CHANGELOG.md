@@ -35,6 +35,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/SemVer
   `StageBAddress`
 - `fpu.FPU.Coprocessor` attaches the FPU to an MC68020 or MC68030, which
   then executes the F-line FPU instructions
+- FPU execution timing: `fpu.FPU.Cycles` with a table of typical
+  MC68881/MC68882 execution times; `m68kemu.CoprocessorTiming`, through
+  which a coprocessor runs concurrently with the 68020/68030 and stalls its
+  next instruction until done; `fpu.CIR.Clock`, which makes the
+  memory-mapped FPU report busy while a command runs. See `doc/fpu.md`
+- `BenchmarkFFT`: a 1024-point FFT in Q15, Q31, SFP004 and native FPU
+  variants across the CPU models. See `doc/benchmark_report.md`
 - Package `fpu`: an MC68881/MC68882 FPU built on `github.com/jenska/float`,
   with all general instructions, operand formats including packed decimal,
   FMOVECR, condition predicates, exceptions and FSAVE/FRESTORE frames, and
@@ -48,6 +55,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/SemVer
   place by the first `NewCPU`. The MC68000 table is unchanged
 - `CPU` has a new method, `Model()`, which breaks code that implements the
   interface outside this package
+- The MC68010 and later run on the same fast execution path as the MC68000
+  while no debug hook is active, about 9% faster
+- The CPU reads and writes a RAM directly also when other devices share the
+  bus, as long as no earlier device overlaps it and no wait states apply.
+  The memory-mapped FPU benchmark (SFP004) runs twice as fast
+- Coprocessor instructions decode the command word once and no longer
+  allocate; the F-line FPU benchmark runs 11% faster
+- `fpu.FPU.Execute` returns a slice that stays valid only until the next
+  call, and `Coprocessor.Execute` may only use its operand slice during the
+  call
 
 ### Fixed
 

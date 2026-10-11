@@ -288,3 +288,53 @@ func TestBusPanicsOnUnlocatableDevice(t *testing.T) {
 	}()
 	NewBus(unlocatableDevice{})
 }
+
+func TestBusFastRAMBesideOtherDevices(t *testing.T) {
+	ram := NewRAM(0, 0x10000)
+	io := newStubMappedDevice(0x10000, 0x1000f)
+	if bus := NewBus(ram, io); bus.fastRAM != ram {
+		t.Fatalf("RAM beside an I/O device: fastRAM = %p, want the RAM", bus.fastRAM)
+	}
+	if bus := NewBus(io, ram); bus.fastRAM != ram {
+		t.Fatalf("RAM after a disjoint device: fastRAM = %p, want the RAM", bus.fastRAM)
+	}
+	overlay := newStubMappedDevice(0x0000, 0x0007)
+	if bus := NewBus(overlay, ram); bus.fastRAM != nil {
+		t.Fatalf("RAM under an earlier overlay: fastRAM = %p, want none", bus.fastRAM)
+	}
+	bus := NewBus(ram, io)
+	bus.SetWaitStates(1)
+	if bus.fastRAM != nil {
+		t.Fatalf("with wait states: fastRAM = %p, want none", bus.fastRAM)
+	}
+}
+
+// TestCPUFastRAMFallsThroughToBus checks that accesses the fast RAM does not
+// wholly hold reach the other devices, or fail, as through the bus.
+func TestCPUFastRAMFallsThroughToBus(t *testing.T) {
+	ram := NewRAM(0, 0x10000)
+	io := newStubMappedDevice(0x10000, 0x1000f)
+	io.data[0x10000] = 0x1234
+	c, err := NewCPU(NewBus(ram, io))
+	if err != nil {
+		t.Fatal(err)
+	}
+	cpu := c.(*cpu)
+	if err := ram.Write(Word, 0xfffe, 0xabcd); err != nil {
+		t.Fatal(err)
+	}
+
+	if got, err := cpu.read(Word, 0x10000); err != nil || got != 0x1234 {
+		t.Fatalf("read of the I/O device = (%04x, %v), want (1234, <nil>)", got, err)
+	}
+	if got, err := cpu.read(Long, 0xfffe); err != nil || got != 0xabcd1234 {
+		t.Fatalf("long read across RAM and I/O = (%08x, %v), want (abcd1234, <nil>)", got, err)
+	}
+	if err := cpu.write(Word, 0x10002, 0x5678); err != nil || io.data[0x10002] != 0x5678 {
+		t.Fatalf("write to the I/O device: err %v, data %04x", err, io.data[0x10002])
+	}
+	var be BusError
+	if _, err := cpu.read(Byte, 0x20000); !errors.As(err, &be) {
+		t.Fatalf("read of an unmapped address: %v, want a bus error", err)
+	}
+}

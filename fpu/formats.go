@@ -74,7 +74,10 @@ func (f *FPU) load(format Format, b []byte) (float.X80, uint8) {
 func (f *FPU) store(format Format, x float.X80, k int) ([]byte, uint8) {
 	e := f.prepare()
 	signaling := x.IsSignalingNaN()
-	b := make([]byte, format.Size())
+	var b []byte
+	if size := format.Size(); size <= len(f.out) {
+		b = f.out[:size] // every format of this size fills all of it
+	}
 	switch format {
 	case FormatByte:
 		b[0] = byte(e.ToInt8(x))

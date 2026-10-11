@@ -19,7 +19,7 @@ type Coprocessor interface {
 	// writes to its effective address, given the value of that register.
 	Operands(cmd uint16, dynamic uint32) (in, out int)
 	// Execute runs the command with its source operand and returns its
-	// result operand.
+	// result operand. in is only valid during the call.
 	Execute(cmd uint16, dynamic uint32, in []byte) ([]byte, error)
 	// Condition evaluates a conditional predicate for cpBcc, cpScc, cpDBcc
 	// and cpTRAPcc.
@@ -37,6 +37,21 @@ type Coprocessor interface {
 	// SetInstructionAddress passes the address of the instruction about to
 	// run.
 	SetInstructionAddress(address uint32)
+}
+
+// CoprocessorTiming is implemented by a Coprocessor that reports how long its
+// commands take. The CPU then models the concurrency of the MC68020
+// coprocessor interface: a general instruction (cpGEN) that returns nothing to
+// the CPU lets the CPU go on with the next instructions while the coprocessor
+// computes, and the next instruction for that coprocessor waits until it has
+// finished. A command that returns an operand, such as FMOVE FPn,<ea>, keeps
+// the CPU waiting for its result. Without CoprocessorTiming every coprocessor
+// instruction costs only its CPU cycles.
+type CoprocessorTiming interface {
+	// Cycles returns the time the general instruction cmd takes once its
+	// operand has arrived, in CPU clock cycles. dynamic is the value of the
+	// data register Decode named.
+	Cycles(cmd uint16, dynamic uint32) uint32
 }
 
 // ErrCoprocessorUnsupported is returned by NewCPU for a coprocessor on a
@@ -60,10 +75,14 @@ type attachedCoprocessor struct {
 // coprocessorInstruction runs an F-line instruction for the coprocessor its
 // bits 11-9 name; without one it raises the line-F exception.
 func coprocessorInstruction(cpu *cpu) error {
-	cp := cpu.coprocessors[(cpu.regs.IR>>9)&7]
+	id := (cpu.regs.IR >> 9) & 7
+	cp := cpu.coprocessors[id]
 	instructionPC := cpu.currentOpcodeAddress(cpu.regs.PC - 2)
 	if cp == nil {
 		return cpu.opcodeException(XLineF, instructionPC)
+	}
+	if busy := cpu.coprocessorBusy[id]; busy > cpu.cycles {
+		cpu.addCycles(uint32(busy - cpu.cycles)) // wait for the previous command
 	}
 	kind := (cpu.regs.IR >> 6) & 7
 	if kind <= 3 { // cpSAVE and cpRESTORE do not take pending exceptions
@@ -78,7 +97,7 @@ func coprocessorInstruction(cpu *cpu) error {
 	var err error
 	switch kind {
 	case 0:
-		err = cpu.cpGeneral(cp)
+		err = cpu.cpGeneral(cp, id)
 	case 1:
 		err = cpu.cpConditional(cp)
 	case 2, 3:
@@ -100,7 +119,7 @@ func coprocessorInstruction(cpu *cpu) error {
 // not implement; the CPU takes the line-F exception.
 var errCoprocessorRejected = errors.New("m68kemu: coprocessor rejected the instruction")
 
-func (cpu *cpu) cpGeneral(cp Coprocessor) error {
+func (cpu *cpu) cpGeneral(cp Coprocessor, id uint16) error {
 	cmd, err := cpu.popPc(Word)
 	if err != nil {
 		return err
@@ -125,13 +144,25 @@ func (cpu *cpu) cpGeneral(cp Coprocessor) error {
 	}
 	var operand []byte
 	if in > 0 {
-		if operand, err = location.read(cpu, in); err != nil {
+		if cap(cpu.cpOperand) < in {
+			cpu.cpOperand = make([]byte, in)
+		}
+		operand = cpu.cpOperand[:in]
+		if err := location.readInto(cpu, operand); err != nil {
 			return err
 		}
 	}
 	result, err := cp.Execute(uint16(cmd), dynamic, operand)
 	if err != nil {
 		return errCoprocessorRejected
+	}
+	if timing := cpu.coprocessorTimings[id]; timing != nil {
+		busy := timing.Cycles(uint16(cmd), dynamic)
+		if out > 0 {
+			cpu.addCycles(busy)
+		} else {
+			cpu.coprocessorBusy[id] = cpu.cycles + uint64(busy)
+		}
 	}
 	if out > 0 {
 		return location.write(cpu, result)
@@ -175,7 +206,7 @@ func (cpu *cpu) cpConditional(cp Coprocessor) error {
 		if !ok {
 			return nil
 		}
-		return cpu.synchronousException(7, cpu.regs.SR|srSupervisor, cpu.regs.PC)
+		return cpu.synchronousException(7, cpu.regs.PC)
 	}
 	dst, err := cpu.ResolveSrcEA(Byte) // cpScc
 	if err != nil {
@@ -303,38 +334,47 @@ func (cpu *cpu) cpOperandLocation(size int) (cpOperand, error) {
 // read returns the next n bytes of the operand.
 func (o *cpOperand) read(cpu *cpu, n int) ([]byte, error) {
 	b := make([]byte, n)
+	if err := o.readInto(cpu, b); err != nil {
+		return nil, err
+	}
+	return b, nil
+}
+
+// readInto fills b with the next len(b) bytes of the operand.
+func (o *cpOperand) readInto(cpu *cpu, b []byte) error {
+	n := len(b)
 	switch o.kind {
 	case cpOperandRegister:
 		var w [4]byte
 		binary.BigEndian.PutUint32(w[:], *o.register)
 		copy(b, w[4-min(n, 4):])
-		return b, nil
+		return nil
 	case cpOperandImmediate:
 		if n == 1 {
 			v, err := cpu.popPc(Word)
 			b[0] = byte(v)
-			return b, err
+			return err
 		}
 		for i := 0; i < n; i += 2 {
 			v, err := cpu.popPc(Word)
 			if err != nil {
-				return nil, err
+				return err
 			}
 			binary.BigEndian.PutUint16(b[i:], uint16(v))
 		}
-		return b, nil
+		return nil
 	}
 	address := o.next(n)
 	for i := 0; i < n; {
 		size := memoryChunk(n - i)
 		v, err := cpu.read(size, address+uint32(i))
 		if err != nil {
-			return nil, err
+			return err
 		}
 		putBigEndian(b[i:], size, v)
 		i += int(size)
 	}
-	return b, nil
+	return nil
 }
 
 // write stores b as the operand.

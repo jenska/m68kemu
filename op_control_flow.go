@@ -34,6 +34,7 @@ func branch(cpu *cpu) error {
 		displacement = int32(int16(ext))
 	}
 
+	// BRA and BSR are tested first so they skip the call to conditionTrue.
 	taken := cond == 0x0 || cond == 0x1 || conditionTrue(cpu, cond)
 
 	switch {
@@ -130,7 +131,7 @@ func scc(cpu *cpu) error {
 		return err
 	}
 
-	if cond == 0 || conditionTrue(cpu, cond) {
+	if cond == 0 || conditionTrue(cpu, cond) { // ST skips the call
 		if (cpu.regs.IR>>3)&0x7 == 0 {
 			cpu.addCycles(2) // Scc Dn, condition true: 6
 		}
@@ -142,8 +143,7 @@ func scc(cpu *cpu) error {
 
 func sccCycleCalculator() cycleCalculator {
 	return func(opcode uint16) uint32 {
-		mode := (opcode >> 3) & 0x7
-		reg := opcode & 0x7
+		mode, reg := eaFields(opcode)
 		if mode == 0 {
 			return 4 // condition false; scc adds 2 when it is true
 		}
@@ -280,15 +280,13 @@ func chkInstruction(cpu *cpu) error {
 
 func chkCycleCalculator() cycleCalculator {
 	return func(opcode uint16) uint32 {
-		mode := (opcode >> 3) & 0x7
-		reg := opcode & 0x7
+		mode, reg := eaFields(opcode)
 		return 10 + eaAccessCycles(mode, reg, Word)
 	}
 }
 
 func chkExceptionCycles(opcode uint16) uint32 {
-	mode := (opcode >> 3) & 0x7
-	reg := opcode & 0x7
+	mode, reg := eaFields(opcode)
 	return exceptionCyclesCHK + eaAccessCycles(mode, reg, Word)
 }
 
@@ -306,8 +304,7 @@ func jsr(cpu *cpu) error {
 		return err
 	}
 
-	returnAddr := cpu.regs.PC
-	if err := cpu.push(Long, returnAddr); err != nil {
+	if err := cpu.push(Long, cpu.regs.PC); err != nil {
 		return err
 	}
 

@@ -1,7 +1,5 @@
 package m68kemu
 
-import "fmt"
-
 func registerLogical(b *tableBuilder) {
 	logicalSourceMask := eaMaskDataRegister | eaMaskIndirect | eaMaskPostIncrement |
 		eaMaskPreDecrement | eaMaskDisplacement | eaMaskIndex |
@@ -14,25 +12,25 @@ func registerLogical(b *tableBuilder) {
 	// AND <ea>,Dn
 	for opmode := uint16(0); opmode <= 2; opmode++ {
 		match := uint16(0xc000) | (opmode << 6)
-		registerLogicalInstruction(b, andInstruction, match, 0xf1c0, logicalSourceMask, logicalCycleCalculator(opmode, false))
+		registerLogicalInstruction(b, andOr, match, 0xf1c0, logicalSourceMask, logicalCycleCalculator(opmode, false))
 	}
 
 	// AND Dn,<ea>
 	for opmode := uint16(4); opmode <= 6; opmode++ {
 		match := uint16(0xc000) | (opmode << 6)
-		registerLogicalInstruction(b, andInstruction, match, 0xf1c0, logicalDestinationMask, logicalCycleCalculator(opmode, true))
+		registerLogicalInstruction(b, andOr, match, 0xf1c0, logicalDestinationMask, logicalCycleCalculator(opmode, true))
 	}
 
 	// OR <ea>,Dn
 	for opmode := uint16(0); opmode <= 2; opmode++ {
 		match := uint16(0x8000) | (opmode << 6)
-		registerLogicalInstruction(b, orInstruction, match, 0xf1c0, logicalSourceMask, logicalCycleCalculator(opmode, false))
+		registerLogicalInstruction(b, andOr, match, 0xf1c0, logicalSourceMask, logicalCycleCalculator(opmode, false))
 	}
 
 	// OR Dn,<ea>
 	for opmode := uint16(4); opmode <= 6; opmode++ {
 		match := uint16(0x8000) | (opmode << 6)
-		registerLogicalInstruction(b, orInstruction, match, 0xf1c0, logicalDestinationMask, logicalCycleCalculator(opmode, true))
+		registerLogicalInstruction(b, andOr, match, 0xf1c0, logicalDestinationMask, logicalCycleCalculator(opmode, true))
 	}
 
 	// EOR Dn,<ea>
@@ -65,20 +63,11 @@ func registerLogical(b *tableBuilder) {
 func registerLogicalInstruction(b *tableBuilder, ins instruction, match, mask uint16, eaMask uint16, calc cycleCalculator) {
 	for value := uint16(0); ; {
 		index := match | value
-		if (index & 0xf1f8) == 0xc100 { // Reserved for ABCD.
-			value = ((value | mask) + 1) & ^mask
-			if value == 0 {
-				break
-			}
-			continue
-		}
-
-		if validEA(index, eaMask) {
-			if b.set.handlers[index] == nil {
-				b.set.handlers[index] = ins
-				if calc != nil {
-					b.set.cycles[index] = calc(index)
-				}
+		// Skip the slots reserved for ABCD and those already taken.
+		if index&0xf1f8 != 0xc100 && validEA(index, eaMask) && b.set.handlers[index] == nil {
+			b.set.handlers[index] = ins
+			if calc != nil {
+				b.set.cycles[index] = calc(index)
 			}
 		}
 
@@ -110,82 +99,33 @@ func logicalImmediateCycleCalculator() cycleCalculator {
 	}
 }
 
-func andInstruction(cpu *cpu) error {
+// andOr is AND (line $C) or OR (line 8), <ea>,Dn (opmode 0-2) or Dn,<ea>
+// (opmode 4-6).
+func andOr(cpu *cpu) error {
 	opmode := (cpu.regs.IR >> 6) & 0x7
 	size := operandSizeFromOpmode(opmode)
 
+	operand, err := cpu.ResolveSrcEA(size)
+	if err != nil {
+		return err
+	}
+	value, err := operand.read()
+	if err != nil {
+		return err
+	}
+
+	dn := udx(cpu)
+	result := (value | *dn) & size.mask()
+	if cpu.regs.IR&0x4000 != 0 {
+		result = value & *dn & size.mask()
+	}
 	if opmode >= 4 {
-		dst, err := cpu.ResolveSrcEA(size)
-		if err != nil {
+		if err := operand.write(result); err != nil {
 			return err
 		}
-		dstVal, err := dst.read()
-		if err != nil {
-			return err
-		}
-
-		src := *udx(cpu) & size.mask()
-		result := (src & dstVal) & size.mask()
-		if err := dst.write(result); err != nil {
-			return err
-		}
-		updateNZClearVC(cpu, result, size)
-		return nil
+	} else {
+		*dn = (*dn & ^size.mask()) | result
 	}
-
-	src, err := cpu.ResolveSrcEA(size)
-	if err != nil {
-		return err
-	}
-	srcVal, err := src.read()
-	if err != nil {
-		return err
-	}
-
-	dst := udx(cpu)
-	result := (srcVal & (*dst & size.mask())) & size.mask()
-	*dst = (*dst & ^size.mask()) | result
-
-	updateNZClearVC(cpu, result, size)
-	return nil
-}
-
-func orInstruction(cpu *cpu) error {
-	opmode := (cpu.regs.IR >> 6) & 0x7
-	size := operandSizeFromOpmode(opmode)
-
-	if opmode >= 4 {
-		dst, err := cpu.ResolveSrcEA(size)
-		if err != nil {
-			return err
-		}
-		dstVal, err := dst.read()
-		if err != nil {
-			return err
-		}
-
-		src := *udx(cpu) & size.mask()
-		result := (src | dstVal) & size.mask()
-		if err := dst.write(result); err != nil {
-			return err
-		}
-		updateNZClearVC(cpu, result, size)
-		return nil
-	}
-
-	src, err := cpu.ResolveSrcEA(size)
-	if err != nil {
-		return err
-	}
-	srcVal, err := src.read()
-	if err != nil {
-		return err
-	}
-
-	dst := udx(cpu)
-	result := (srcVal | (*dst & size.mask())) & size.mask()
-	*dst = (*dst & ^size.mask()) | result
-
 	updateNZClearVC(cpu, result, size)
 	return nil
 }
@@ -214,16 +154,10 @@ func eorInstruction(cpu *cpu) error {
 
 func logicalImmediate(cpu *cpu, op func(uint32, uint32) uint32) error {
 	size := operandSizeFromOpcode(cpu.regs.IR)
-	immSize := size
-	if size == Byte {
-		immSize = Word
-	}
-
-	srcVal, err := cpu.popPc(immSize)
+	srcVal, err := cpu.popImmediate(size)
 	if err != nil {
 		return err
 	}
-	srcVal &= size.mask()
 
 	dst, err := cpu.ResolveSrcEA(size)
 	if err != nil {
@@ -305,115 +239,64 @@ func registerBitOps(b *tableBuilder) {
 func bitCycleCalculator(immediate bool, op uint16) cycleCalculator {
 	return func(opcode uint16) uint32 {
 		mode, reg := eaFields(opcode)
-		if mode == 0 {
-			var cycles uint32
-			switch op {
-			case 0: // BTST
-				cycles = 6
-			case 2: // BCLR
-				cycles = 8
-			default: // BCHG, BSET
-				cycles = 6
-			}
-			if immediate {
-				cycles += 4
-			}
-			return cycles
-		}
-
-		cycles := uint32(4) // BTST
-		if op != 0 {
-			cycles = 8 // BCHG, BCLR, BSET write the byte back
+		var cycles uint32
+		switch {
+		case mode == 0 && op == 2: // BCLR Dn
+			cycles = 8
+		case mode == 0: // BTST, BCHG, BSET Dn
+			cycles = 6
+		case op == 0: // BTST <ea>
+			cycles = 4 + eaAccessCycles(mode, reg, Byte)
+		default: // BCHG, BCLR, BSET write the byte back
+			cycles = 8 + eaAccessCycles(mode, reg, Byte)
 		}
 		if immediate {
 			cycles += 4
 		}
-		return cycles + eaAccessCycles(mode, reg, Byte)
+		return cycles
 	}
 }
 
 func bitDynamic(cpu *cpu) error {
-	index := (cpu.regs.IR >> 9) & 0x7
-	bitNumber := uint32(cpu.regs.D[index])
-	mode := (cpu.regs.IR >> 3) & 0x7
-
-	var dst modifier
-	if mode != 0 {
-		var err error
-		dst, err = cpu.ResolveSrcEA(Byte)
-		if err != nil {
-			return err
-		}
-	}
-
-	return bitOperation(cpu, bitNumber, mode, dst)
+	return bitOperation(cpu, uint32(*dx(cpu)))
 }
 
 func bitImmediate(cpu *cpu) error {
-	mode := (cpu.regs.IR >> 3) & 0x7
-
 	imm, err := cpu.popPc(Word)
 	if err != nil {
 		return err
 	}
-
-	var dst modifier
-	if mode != 0 {
-		var err error
-		dst, err = cpu.ResolveSrcEA(Byte)
-		if err != nil {
-			return err
-		}
-	}
-
-	return bitOperation(cpu, imm, mode, dst)
+	return bitOperation(cpu, imm)
 }
 
-func bitOperation(cpu *cpu, bitNumber uint32, mode uint16, dst modifier) error {
-	op := (cpu.regs.IR >> 6) & 0x7
-	opType := op & 0x3 // 0=BTST, 1=BCHG, 2=BCLR, 3=BSET
+// bitOperation runs BTST, BCHG, BCLR or BSET on bit bitNumber of a data
+// register (modulo 32) or of a byte in memory (modulo 8).
+func bitOperation(cpu *cpu, bitNumber uint32) error {
+	opType := (cpu.regs.IR >> 6) & 0x3 // 0=BTST, 1=BCHG, 2=BCLR, 3=BSET
 
-	cpu.regs.SR &^= srZero
-
-	if mode == 0 { // data register destination (long size)
-		if opType != 0 && bitNumber&31 >= 16 {
-			cpu.addCycles(2) // modifying the upper word takes 2 cycles more
+	var operand modifier
+	bitNumber &= 31
+	if (cpu.regs.IR>>3)&0x7 != 0 {
+		var err error
+		if operand, err = cpu.ResolveSrcEA(Byte); err != nil {
+			return err
 		}
-		dst := dy(cpu)
-		mask := uint32(1) << (bitNumber & 31)
-		previousSet := (*dst & mask) != 0
-
-		switch opType {
-		case 1: // BCHG
-			*dst ^= mask
-		case 2: // BCLR
-			*dst &^= mask
-		case 3: // BSET
-			*dst |= mask
-		}
-
-		if !previousSet {
-			cpu.regs.SR |= srZero
-		}
-		return nil
+		bitNumber &= 7
+	} else if opType != 0 && bitNumber >= 16 {
+		cpu.addCycles(2) // modifying the upper word takes 2 cycles more
 	}
 
-	if dst == nil {
+	cpu.regs.SR &^= srZero
+	value := *dy(cpu)
+	if operand != nil {
 		var err error
-		dst, err = cpu.ResolveSrcEA(Byte)
-		if err != nil {
+		if value, err = operand.read(); err != nil {
 			return err
 		}
 	}
 
-	value, err := dst.read()
-	if err != nil {
-		return err
-	}
-
-	mask := uint32(1) << (bitNumber & 7)
-	previousSet := (value & mask) != 0
-
+	mask := uint32(1) << bitNumber
+	previousSet := value&mask != 0
 	switch opType {
 	case 1: // BCHG
 		value ^= mask
@@ -424,11 +307,12 @@ func bitOperation(cpu *cpu, bitNumber uint32, mode uint16, dst modifier) error {
 	}
 
 	if opType != 0 {
-		if err := dst.write(value); err != nil {
+		if operand == nil {
+			*dy(cpu) = value
+		} else if err := operand.write(value); err != nil {
 			return err
 		}
 	}
-
 	if !previousSet {
 		cpu.regs.SR |= srZero
 	}
@@ -454,50 +338,24 @@ func shiftRotate(cpu *cpu) error {
 		return shiftRotateMemory(cpu)
 	}
 
-	countField := int((opcode >> 9) & 0x7)
 	left := (opcode>>8)&0x1 == 1
-	sizeField := (opcode >> 6) & 0x3
-	operation := (opcode >> 3) & 0x7
-	register := int(opcode & 0x7)
+	operation := (opcode >> 3) & 0x3
 
-	registerCount := false
-	if operation >= 4 {
-		operation -= 4
-		registerCount = true
-	}
-
-	var count int
-	if registerCount {
-		count = int(cpu.regs.D[countField] & 0x3f)
-	} else {
-		count = countField
-		if count == 0 {
-			count = 8
-		}
-	}
-
-	if registerCount {
+	count := int((opcode >> 9) & 0x7)
+	if opcode&0x0020 != 0 { // count in a data register
+		count = int(*dx(cpu) & 0x3f)
 		cpu.addCycles(uint32(count * 2))
+	} else if count == 0 {
+		count = 8
 	}
 
-	var size Size
-	var mask uint32
-	switch sizeField {
-	case 0:
-		size, mask = Byte, 0xff
-	case 1:
-		size, mask = Word, 0xffff
-	case 2:
-		size, mask = Long, 0xffffffff
-	default:
-		return fmt.Errorf("illegal instruction %04x", opcode)
-	}
+	size := operandSizeFromOpcode(opcode)
+	width := int(size) * 8
+	dst := dy(cpu)
+	result, flags := doShiftRotate(*dst, count, width, operation, left, cpu.regs.SR&srExtend != 0)
 
-	value := cpu.regs.D[register] & int32(mask)
-	result, flags := doShiftRotate(uint32(value), count, int(size)*8, operation, left, cpu.regs.SR&srExtend != 0)
-
-	cpu.regs.D[register] = (cpu.regs.D[register] & ^int32(mask)) | int32(result)
-	updateShiftRotateFlags(cpu, result, int(size)*8, flags)
+	*dst = (*dst & ^size.mask()) | result
+	updateShiftRotateFlags(cpu, result, width, flags)
 	return nil
 }
 
@@ -718,12 +576,6 @@ func b2i(v bool) uint32 {
 	return 0
 }
 
-func shiftMemoryCycles(ir uint16) uint32 {
-	mode := (ir >> 3) & 0x7
-	reg := ir & 0x7
-	return 8 + eaAccessCycles(mode, reg, Word)
-}
-
 // shiftRegisterCycleCalculator times a register shift or rotate (table 8-7):
 // 6 (byte/word) or 8 (long) plus 2 per bit shifted. A count taken from a
 // register is added by shiftRotate.
@@ -742,8 +594,11 @@ func shiftRegisterCycleCalculator(opcode uint16) uint32 {
 	return cycles + 2*count
 }
 
+// shiftMemoryCycleCalculator times a memory shift or rotate by one bit
+// (table 8-7).
 func shiftMemoryCycleCalculator(opcode uint16) uint32 {
-	return shiftMemoryCycles(opcode)
+	mode, reg := eaFields(opcode)
+	return 8 + eaAccessCycles(mode, reg, Word)
 }
 
 func shiftRotateCycleCalculator(opcode uint16) uint32 {

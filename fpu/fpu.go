@@ -8,11 +8,7 @@
 // An FPU must not be used from several goroutines at once.
 package fpu
 
-import (
-	"math/bits"
-
-	"github.com/jenska/float"
-)
+import "github.com/jenska/float"
 
 // Model selects the coprocessor. The models differ only in the size of the
 // FSAVE idle frame.
@@ -91,6 +87,9 @@ type FPU struct {
 	// null is true from reset until the first instruction, while FSAVE
 	// produces a null frame.
 	null bool
+	// out holds the result of an FMOVE to an integer, single or double
+	// format, so storing does not allocate.
+	out [8]byte
 }
 
 // New returns an FPU of model m in its reset state.
@@ -334,5 +333,3 @@ func constant(e *float.Env, offset uint16) float.X80 {
 	}
 	return float.X80Zero
 }
-
-func popcount(list uint8) int { return bits.OnesCount8(list) }

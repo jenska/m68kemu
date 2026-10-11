@@ -62,14 +62,18 @@ func (f faultInfo) specialStatusWord() uint16 {
 	}
 	if !f.write {
 		word |= 1 << 8
-		fc := f.functionCode & 7
-		if !f.notInstruction && (fc == functionCodeUserProgram || fc == functionCodeSupervisorProg) {
+		if f.instructionFetch() {
 			word |= 1 << 13
 		} else {
 			word |= 1 << 12
 		}
 	}
 	return word
+}
+
+// instructionFetch reports whether the fault was an instruction fetch.
+func (f faultInfo) instructionFetch() bool {
+	return accessContext{functionCode: f.functionCode, notInstruction: f.notInstruction, write: f.write}.instructionFetch()
 }
 
 // dataOutputBuffer returns the word the faulted write cycle was driving: the
@@ -90,8 +94,7 @@ func (f faultInfo) dataOutputBuffer() uint16 {
 // long 00) and the function code in bits 2-0.
 func (f faultInfo) specialStatusWord020() uint16 {
 	word := f.functionCode & 7
-	fc := f.functionCode & 7
-	if !f.write && !f.notInstruction && (fc == functionCodeUserProgram || fc == functionCodeSupervisorProg) {
+	if f.instructionFetch() {
 		word |= 1<<14 | 1<<12
 	} else {
 		word |= 1 << 8

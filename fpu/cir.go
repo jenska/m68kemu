@@ -56,17 +56,30 @@ const (
 // STE use base $FFFA40.
 //
 // Software writes a command word to the command CIR, reads the response CIR
-// and moves operands through the operand CIR. Every command finishes at
-// once, so the response is never busy.
+// and moves operands through the operand CIR. Without a Clock every command
+// finishes at once, so the response is never busy.
 type CIR struct {
 	FPU  *FPU
 	Base uint32
+	// Clock, if set, returns the elapsed FPU clock cycles, for example the
+	// Cycles method of the CPU when both run at the same clock. A command
+	// then takes the time FPU.Cycles gives, and while it runs the response
+	// CIR reads $8900, the busy primitive software polls on. Commands queue
+	// behind each other; the CPU runs concurrently. A clock that goes
+	// backwards, as a CPU's does at reset, makes the FPU idle.
+	Clock func() uint64
+
+	busyUntil uint64 // clock at which the last command finishes
+	lastClock uint64
 
 	response uint16
 	phase    int
 	op       Operation
 	dynamic  uint32
 	data     []byte // operand bytes received or still to send
+	// in backs data while operand bytes come in, so they need no
+	// allocation: up to 96 for FMOVEM of all eight registers.
+	in [96]byte
 	header   uint32 // FRESTORE frame header
 
 	restoreStatus  uint16
@@ -90,19 +103,67 @@ func (c *CIR) AddressRange() (uint32, uint32) { return c.Base, c.Base + cirSize 
 func (c *CIR) Reset() {
 	c.FPU.Reset()
 	c.idle()
+	c.busyUntil = 0
+}
+
+// now returns the clock, or 0 without one.
+func (c *CIR) now() uint64 {
+	if c.Clock == nil {
+		return 0
+	}
+	now := c.Clock()
+	if now < c.lastClock {
+		c.busyUntil = 0
+	}
+	c.lastClock = now
+	return now
+}
+
+// busy reports whether the FPU is still executing a command.
+func (c *CIR) busy() bool {
+	return c.now() < c.busyUntil
+}
+
+// occupy makes the FPU busy for the time op takes, after the commands
+// before it.
+func (c *CIR) occupy(op Operation) {
+	if c.Clock == nil {
+		return
+	}
+	c.busyUntil = max(c.now(), c.busyUntil) + uint64(c.FPU.Cycles(op, c.dynamic))
 }
 
 func (c *CIR) idle() {
 	c.phase, c.data, c.response = phaseIdle, nil, responseIdle
 }
 
+// exception ends the current command and asks the CPU to take vector.
+func (c *CIR) exception(vector uint16) {
+	c.phase, c.data, c.response = phaseIdle, nil, responseException|vector
+}
+
+// isOperand reports whether an access of size s at offset hits the operand
+// CIR: a word or long at either of its words, or any of its bytes.
+func isOperand(s m68kemu.Size, offset uint32) bool {
+	return offset == cirOperand || offset == cirOperand+2 || (s == m68kemu.Byte && offset >= cirOperand && offset < cirOperand+4)
+}
+
+// multiple reports whether the current command is an FMOVEM of data
+// registers, which transfers 12 bytes per register.
+func (c *CIR) multiple() bool {
+	return c.op.Command>>13 >= classLoadRegisters
+}
+
 // Read implements m68kemu.Device.
 func (c *CIR) Read(s m68kemu.Size, address uint32) (uint32, error) {
 	offset := (address & 0xffffff) - c.Base
 	switch {
-	case offset == cirOperand || offset == cirOperand+2 || (s == m68kemu.Byte && offset < cirOperand+4 && offset >= cirOperand):
+	case isOperand(s, offset):
 		return c.readOperand(int(s)), nil
 	case offset == cirResponse:
+		if c.busy() {
+			return responseBusy, nil
+		}
 		return uint32(c.response), nil
 	case offset == cirSave:
 		return uint32(c.save()), nil
@@ -123,7 +184,7 @@ func (c *CIR) Write(s m68kemu.Size, address uint32, value uint32) error {
 	offset := (address & 0xffffff) - c.Base
 	v := uint16(value)
 	switch {
-	case offset == cirOperand || offset == cirOperand+2 || (s == m68kemu.Byte && offset < cirOperand+4 && offset >= cirOperand):
+	case isOperand(s, offset):
 		c.writeOperand(int(s), value)
 	case offset == cirCommand:
 		c.command(v)
@@ -157,14 +218,12 @@ func (c *CIR) Write(s m68kemu.Size, address uint32, value uint32) error {
 // earlier instruction is reported first, and the command is not executed.
 func (c *CIR) command(cmd uint16) {
 	if vector, ok := c.FPU.PendingException(); ok {
-		c.phase, c.data = phaseIdle, nil
-		c.response = responseException | uint16(vector)
+		c.exception(uint16(vector))
 		return
 	}
 	op, err := Decode(cmd)
 	if err != nil {
-		c.phase, c.data = phaseIdle, nil
-		c.response = responseException | fLineVector
+		c.exception(fLineVector)
 		return
 	}
 	c.op, c.dynamic, c.data = op, 0, nil
@@ -179,13 +238,12 @@ func (c *CIR) command(cmd uint16) {
 // start runs the command once the dynamic register value, if any, is known.
 func (c *CIR) start() {
 	c.op.SetDynamic(c.dynamic)
-	multiple := c.op.Command>>13 >= classLoadRegisters
-	if multiple {
+	if c.multiple() {
 		c.registerSelect = uint16(c.op.registerList(c.dynamic)) << 8
 	}
 	if c.op.In > 0 {
 		c.phase, c.data = phaseInput, nil
-		c.response = comeAgain | transferPrimitive(multiple, c.op.In)
+		c.response = comeAgain | transferPrimitive(c.multiple(), c.op.In)
 		return
 	}
 	c.execute(nil)
@@ -201,17 +259,16 @@ func transferPrimitive(multiple bool, length int) uint16 {
 func (c *CIR) execute(in []byte) {
 	out, err := c.FPU.Execute(c.op, c.dynamic, in)
 	if err != nil {
-		c.phase, c.data = phaseIdle, nil
-		c.response = responseException | fLineVector
+		c.exception(fLineVector)
 		return
 	}
+	c.occupy(c.op)
 	if len(out) == 0 {
 		c.idle()
 		return
 	}
-	multiple := c.op.Command>>13 >= classLoadRegisters
 	c.phase, c.data = phaseOutput, out
-	c.response = comeAgain | toCPU | transferPrimitive(multiple, len(out))
+	c.response = comeAgain | toCPU | transferPrimitive(c.multiple(), len(out))
 }
 
 func (c *CIR) condition(pred uint16) {
@@ -236,6 +293,9 @@ func (c *CIR) condition(pred uint16) {
 func (c *CIR) writeOperand(size int, value uint32) {
 	var b [4]byte
 	binary.BigEndian.PutUint32(b[:], value<<(32-8*size))
+	if c.data == nil {
+		c.data = c.in[:0]
+	}
 	c.data = append(c.data, b[:size]...)
 	switch c.phase {
 	case phaseRegister:

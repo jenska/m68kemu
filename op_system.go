@@ -1,5 +1,7 @@
 package m68kemu
 
+import "math/bits"
+
 func registerSystem(b *tableBuilder) {
 
 	b.add(swapInstruction, 0x4840, 0xfff8, 0, constantCycles(4))
@@ -164,8 +166,7 @@ func moveFromSrCycleCalculator() cycleCalculator {
 // moveControlCycleCalculator times MOVE <ea>,SR and MOVE <ea>,CCR (table 8-12).
 func moveControlCycleCalculator(size Size) cycleCalculator {
 	return func(opcode uint16) uint32 {
-		mode := (opcode >> 3) & 0x7
-		reg := opcode & 0x7
+		mode, reg := eaFields(opcode)
 		return 12 + eaAccessCycles(mode, reg, size)
 	}
 }
@@ -253,8 +254,7 @@ func nop(cpu *cpu) error {
 
 func swapInstruction(cpu *cpu) error {
 	reg := dy(cpu)
-	value := *reg
-	result := (value << 16) | ((value >> 16) & 0xffff)
+	result := bits.RotateLeft32(*reg, 16)
 	*reg = result
 
 	updateNZClearVC(cpu, result, Long)
@@ -262,24 +262,11 @@ func swapInstruction(cpu *cpu) error {
 }
 
 func extInstruction(cpu *cpu) error {
-	opcode := cpu.regs.IR
-	sizeBits := (opcode >> 6) & 0x3
+	// EXT.W extends a byte to a word, EXT.L (bit 6 set) a word to a long.
 	dst := dy(cpu)
-
-	var (
-		result uint32
-		size   Size
-	)
-
-	switch sizeBits {
-	case 0x2: // EXT.W: byte to word
-		size = Word
-		result = uint32(int16(int8(*dst)))
-	case 0x3: // EXT.L: word to long
-		size = Long
-		result = uint32(int32(int16(*dst)))
-	default:
-		return nil
+	size, result := Word, uint32(int16(int8(*dst)))
+	if cpu.regs.IR&0x0040 != 0 {
+		size, result = Long, uint32(int32(int16(*dst)))
 	}
 
 	mask := size.mask()
@@ -290,33 +277,17 @@ func extInstruction(cpu *cpu) error {
 }
 
 func exgInstruction(cpu *cpu) error {
-	opcode := cpu.regs.IR
-	rx := y(cpu.regs.IR)
-	ry := x(cpu.regs.IR)
-
-	switch opcode & 0x01c0 {
-	case 0x0140: // Dx,Dy or Ax,Ay
-		if opcode&0x0008 == 0 { // Dx,Dy
-			dxReg := &cpu.regs.D[ry]
-			dyReg := &cpu.regs.D[rx]
-			*dxReg, *dyReg = *dyReg, *dxReg
-			return nil
-		}
-
-		axReg := &cpu.regs.A[ry]
-		ayReg := &cpu.regs.A[rx]
-		*axReg, *ayReg = *ayReg, *axReg
-		return nil
-
-	case 0x0180: // Dx,Ay
-		dxReg := &cpu.regs.D[ry]
-		ayReg := &cpu.regs.A[rx]
-		temp := uint32(*dxReg)
-		*dxReg = int32(*ayReg)
-		*ayReg = temp
-		return nil
+	// Rx is in bits 11-9, Ry in bits 2-0; opmode $08 and $09 exchange two
+	// data or two address registers, $11 Dx with Ay.
+	rx, ry := x(cpu.regs.IR), y(cpu.regs.IR)
+	switch cpu.regs.IR & 0x01f8 {
+	case 0x0140:
+		cpu.regs.D[rx], cpu.regs.D[ry] = cpu.regs.D[ry], cpu.regs.D[rx]
+	case 0x0148:
+		cpu.regs.A[rx], cpu.regs.A[ry] = cpu.regs.A[ry], cpu.regs.A[rx]
+	case 0x0188:
+		cpu.regs.D[rx], cpu.regs.A[ry] = int32(cpu.regs.A[ry]), uint32(cpu.regs.D[rx])
 	}
-
 	return nil
 }
 

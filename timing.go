@@ -1,5 +1,7 @@
 package m68kemu
 
+import "math/bits"
+
 // Instruction execution times of the MC68000 with a zero-wait bus, from the
 // M68000 Family Programmer's Reference / M68000 User's Manual, section 8.
 // Every figure includes the instruction's own bus cycles (opcode and extension
@@ -127,24 +129,14 @@ func movemRegisterCycles(size Size, count int) uint32 {
 // muluCycles is MULU's time without the source EA: 38 + 2 per set bit of the
 // multiplier.
 func muluCycles(multiplier uint16) uint32 {
-	n := uint32(0)
-	for v := multiplier; v != 0; v &= v - 1 {
-		n++
-	}
-	return 38 + 2*n
+	return 38 + 2*uint32(bits.OnesCount16(multiplier))
 }
 
 // mulsCycles is MULS's time without the source EA: 38 + 2 per 01 or 10 bit
 // pair in the multiplier with a zero appended on the right.
 func mulsCycles(multiplier uint16) uint32 {
 	v := uint32(multiplier) << 1
-	n := uint32(0)
-	for i := 0; i < 16; i++ {
-		if (v>>i)&3 == 1 || (v>>i)&3 == 2 {
-			n++
-		}
-	}
-	return 38 + 2*n
+	return 38 + 2*uint32(bits.OnesCount32((v^v>>1)&0xffff))
 }
 
 // divuCycles is DIVU's time without the source EA, for a non-zero divisor.

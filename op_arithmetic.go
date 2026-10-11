@@ -11,33 +11,33 @@ func registerArithmetic(b *tableBuilder) {
 		eaMaskAbsoluteShort | eaMaskAbsoluteLong
 
 	// ADD.B <ea>,Dn
-	b.add(add, 0xd000, 0xf1c0, addSubEAMask, addCycleCalculator(0, false))
+	b.add(addSub, 0xd000, 0xf1c0, addSubEAMask, addCycleCalculator(0, false))
 
 	// ADD.W/L <ea>,Dn
 	for opmode := uint16(1); opmode <= 2; opmode++ {
 		match := uint16(0xd000) | (opmode << 6)
-		b.add(add, match, 0xf1c0, addSubWordLongEAMask, addCycleCalculator(opmode, false))
+		b.add(addSub, match, 0xf1c0, addSubWordLongEAMask, addCycleCalculator(opmode, false))
 	}
 
 	// ADD Dn,<ea>
 	for opmode := uint16(4); opmode <= 6; opmode++ {
 		match := uint16(0xd000) | (opmode << 6)
-		b.add(add, match, 0xf1c0, addSubAlterableMask, addCycleCalculator(opmode, true))
+		b.add(addSub, match, 0xf1c0, addSubAlterableMask, addCycleCalculator(opmode, true))
 	}
 
 	// SUB.B <ea>,Dn
-	b.add(sub, 0x9000, 0xf1c0, addSubEAMask, addCycleCalculator(0, false))
+	b.add(addSub, 0x9000, 0xf1c0, addSubEAMask, addCycleCalculator(0, false))
 
 	// SUB.W/L <ea>,Dn
 	for opmode := uint16(1); opmode <= 2; opmode++ {
 		match := uint16(0x9000) | (opmode << 6)
-		b.add(sub, match, 0xf1c0, addSubWordLongEAMask, addCycleCalculator(opmode, false))
+		b.add(addSub, match, 0xf1c0, addSubWordLongEAMask, addCycleCalculator(opmode, false))
 	}
 
 	// SUB Dn,<ea>
 	for opmode := uint16(4); opmode <= 6; opmode++ {
 		match := uint16(0x9000) | (opmode << 6)
-		b.add(sub, match, 0xf1c0, addSubAlterableMask, addCycleCalculator(opmode, true))
+		b.add(addSub, match, 0xf1c0, addSubAlterableMask, addCycleCalculator(opmode, true))
 	}
 
 	addaSubaMask := eaMaskDataRegister | eaMaskAddressRegister | eaMaskIndirect | eaMaskPostIncrement |
@@ -86,100 +86,58 @@ func registerArithmetic(b *tableBuilder) {
 	}
 }
 
-func add(cpu *cpu) error {
+// flagOperation computes dst op src at size and returns the result and its
+// condition codes.
+type flagOperation func(src, dst uint32, size Size) (uint32, uint16)
+
+// addSub is ADD (line $D) or SUB (line 9), <ea>,Dn (opmode 0-2) or
+// Dn,<ea> (opmode 4-6).
+func addSub(cpu *cpu) error {
 	opmode := (cpu.regs.IR >> 6) & 0x7
 	size := operandSizeFromOpmode(opmode)
 
+	operand, err := cpu.ResolveSrcEA(size)
+	if err != nil {
+		return err
+	}
+	value, err := operand.read()
+	if err != nil {
+		return err
+	}
+
+	dn := udx(cpu)
+	src, dst := value, *dn&size.mask()
 	if opmode >= 4 {
-		// Destination comes from the lower six bits.
-		dst, err := cpu.ResolveSrcEA(size)
-		if err != nil {
-			return err
-		}
-		dstVal, err := dst.read()
-		if err != nil {
-			return err
-		}
-
-		src := *udx(cpu) & size.mask()
-		result, flags := addWithFlags(src, dstVal, size)
-		if err := dst.write(result); err != nil {
-			return err
-		}
-		replaceStatusFlags(cpu, statusMaskNZVCX, flags)
-		return nil
+		src, dst = dst, src
+	}
+	var result uint32
+	var flags uint16
+	if cpu.regs.IR&0x4000 != 0 {
+		result, flags = addWithFlags(src, dst, size)
+	} else {
+		result, flags = subWithFlags(src, dst, size)
 	}
 
-	src, err := cpu.ResolveSrcEA(size)
-	if err != nil {
-		return err
+	if opmode >= 4 {
+		if err := operand.write(result); err != nil {
+			return err
+		}
+	} else {
+		*dn = (*dn & ^size.mask()) | result
 	}
-	srcVal, err := src.read()
-	if err != nil {
-		return err
-	}
-
-	dst := udx(cpu)
-	result, flags := addWithFlags(srcVal, *dst&size.mask(), size)
-	*dst = (*dst & ^size.mask()) | result
-
 	replaceStatusFlags(cpu, statusMaskNZVCX, flags)
 	return nil
 }
 
-func sub(cpu *cpu) error {
-	opmode := (cpu.regs.IR >> 6) & 0x7
-	size := operandSizeFromOpmode(opmode)
-
-	if opmode >= 4 {
-		dst, err := cpu.ResolveSrcEA(size)
-		if err != nil {
-			return err
-		}
-		dstVal, err := dst.read()
-		if err != nil {
-			return err
-		}
-
-		src := *udx(cpu) & size.mask()
-		result, flags := subWithFlags(src, dstVal, size)
-		if err := dst.write(result); err != nil {
-			return err
-		}
-		replaceStatusFlags(cpu, statusMaskNZVCX, flags)
-		return nil
-	}
-
-	src, err := cpu.ResolveSrcEA(size)
-	if err != nil {
-		return err
-	}
-	srcVal, err := src.read()
-	if err != nil {
-		return err
-	}
-
-	dst := udx(cpu)
-	result, flags := subWithFlags(srcVal, *dst&size.mask(), size)
-	*dst = (*dst & ^size.mask()) | result
-
-	replaceStatusFlags(cpu, statusMaskNZVCX, flags)
-	return nil
-}
-
+// addq and subq stay separate: they run in nearly every loop, and a merged
+// handler measurably slows them down. An address register destination takes
+// the whole register and leaves the condition codes alone.
 func addq(cpu *cpu) error {
 	size := operandSizeFromOpcode(cpu.regs.IR)
-	quick := uint32((cpu.regs.IR >> 9) & 0x7)
-	if quick == 0 {
-		quick = 8
-	}
+	quick := quickData(cpu.regs.IR)
 
-	mode := (cpu.regs.IR >> 3) & 0x7
-	reg := cpu.regs.IR & 0x7
-
-	if mode == 1 { // address register direct
-		value := cpu.regs.A[reg]
-		cpu.regs.A[reg] = value + quick
+	if (cpu.regs.IR>>3)&0x7 == 1 { // address register direct
+		cpu.regs.A[cpu.regs.IR&0x7] += quick
 		return nil
 	}
 
@@ -202,17 +160,10 @@ func addq(cpu *cpu) error {
 
 func subq(cpu *cpu) error {
 	size := operandSizeFromOpcode(cpu.regs.IR)
-	quick := uint32((cpu.regs.IR >> 9) & 0x7)
-	if quick == 0 {
-		quick = 8
-	}
+	quick := quickData(cpu.regs.IR)
 
-	mode := (cpu.regs.IR >> 3) & 0x7
-	reg := cpu.regs.IR & 0x7
-
-	if mode == 1 { // address register direct
-		value := cpu.regs.A[reg]
-		cpu.regs.A[reg] = value - quick
+	if (cpu.regs.IR>>3)&0x7 == 1 { // address register direct
+		cpu.regs.A[cpu.regs.IR&0x7] -= quick
 		return nil
 	}
 
@@ -233,6 +184,14 @@ func subq(cpu *cpu) error {
 	return nil
 }
 
+// quickData returns the 1-8 of ADDQ and SUBQ, from bits 11-9 (0 means 8).
+func quickData(ir uint16) uint32 {
+	if q := uint32((ir >> 9) & 0x7); q != 0 {
+		return q
+	}
+	return 8
+}
+
 func addi(cpu *cpu) error {
 	return arithmeticImmediate(cpu, addWithFlags)
 }
@@ -241,19 +200,13 @@ func subi(cpu *cpu) error {
 	return arithmeticImmediate(cpu, subWithFlags)
 }
 
-func arithmeticImmediate(cpu *cpu, op func(src, dst uint32, size Size) (uint32, uint16)) error {
+func arithmeticImmediate(cpu *cpu, op flagOperation) error {
 	size := operandSizeFromOpcode(cpu.regs.IR)
 
-	immSize := size
-	if size == Byte {
-		immSize = Word
-	}
-
-	srcVal, err := cpu.popPc(immSize)
+	srcVal, err := cpu.popImmediate(size)
 	if err != nil {
 		return err
 	}
-	srcVal &= size.mask()
 
 	dst, err := cpu.ResolveSrcEA(size)
 	if err != nil {
@@ -319,8 +272,7 @@ func subWithFlags(src, dst uint32, size Size) (uint32, uint16) {
 }
 
 func divExceptionCycles(opcode uint16) uint32 {
-	mode := (opcode >> 3) & 0x7
-	reg := opcode & 0x7
+	mode, reg := eaFields(opcode)
 	return exceptionCyclesDivByZero + eaAccessCycles(mode, reg, Word)
 }
 
@@ -398,17 +350,8 @@ func divu(cpu *cpu) error {
 		return nil
 	}
 	remainder := dividend % divisor
-	result := (remainder << 16) | (quotient & 0xffff)
-	*dx(cpu) = int32(result)
-
-	var flags uint16
-	if quotient == 0 {
-		flags |= srZero
-	}
-	if quotient&0x8000 != 0 {
-		flags |= srNegative
-	}
-	replaceStatusFlags(cpu, statusMaskNZVC, flags)
+	*dx(cpu) = int32(remainder<<16 | quotient)
+	updateNZClearVC(cpu, quotient, Word)
 	return nil
 }
 
@@ -434,17 +377,8 @@ func divs(cpu *cpu) error {
 		return nil
 	}
 	remainder := dividend % divisor
-	result := (uint32(uint16(remainder)) << 16) | (uint32(uint16(quotient)) & 0xffff)
-	*dx(cpu) = int32(result)
-
-	var flags uint16
-	if quotient == 0 {
-		flags |= srZero
-	}
-	if quotient&0x8000 != 0 {
-		flags |= srNegative
-	}
-	replaceStatusFlags(cpu, statusMaskNZVC, flags)
+	*dx(cpu) = int32(uint32(uint16(remainder))<<16 | uint32(uint16(quotient)))
+	updateNZClearVC(cpu, uint32(quotient), Word)
 	return nil
 }
 
@@ -461,15 +395,7 @@ func mulu(cpu *cpu) error {
 	cpu.addCycles(muluCycles(uint16(op)))
 	result := uint32(uint16(op)) * uint32(uint16(*dx(cpu)))
 	*dx(cpu) = int32(result)
-
-	var flags uint16
-	if result == 0 {
-		flags |= srZero
-	}
-	if uint32(result)&0x80000000 != 0 {
-		flags |= srNegative
-	}
-	replaceStatusFlags(cpu, statusMaskNZVC, flags)
+	updateNZClearVC(cpu, result, Long)
 	return nil
 }
 
@@ -486,23 +412,16 @@ func muls(cpu *cpu) error {
 	cpu.addCycles(mulsCycles(uint16(opRaw)))
 	result := int32(int16(opRaw)) * int32(int16(*dx(cpu)))
 	*dx(cpu) = result
-
-	var flags uint16
-	if result == 0 {
-		flags |= srZero
-	}
-	if uint32(result)&0x80000000 != 0 {
-		flags |= srNegative
-	}
-	replaceStatusFlags(cpu, statusMaskNZVC, flags)
+	updateNZClearVC(cpu, uint32(result), Long)
 	return nil
 }
 
-func adda(cpu *cpu) error {
-	size := Word
-	if (cpu.regs.IR>>6)&0x7 == 7 {
-		size = Long
-	}
+func adda(cpu *cpu) error { return addaSuba(cpu, false) }
+func suba(cpu *cpu) error { return addaSuba(cpu, true) }
+
+// addaSuba adds the sign-extended source to An, or subtracts it.
+func addaSuba(cpu *cpu, subtract bool) error {
+	size := cmpaOperandSize(cpu.regs.IR)
 
 	src, err := cpu.ResolveSrcEA(size)
 	if err != nil {
@@ -516,32 +435,11 @@ func adda(cpu *cpu) error {
 	if size == Word {
 		value = uint32(int32(int16(value)))
 	}
-
-	*ax(cpu) += value
-	return nil
-}
-
-func suba(cpu *cpu) error {
-	size := Word
-	if (cpu.regs.IR>>6)&0x7 == 7 {
-		size = Long
+	if subtract {
+		*ax(cpu) -= value
+	} else {
+		*ax(cpu) += value
 	}
-
-	src, err := cpu.ResolveSrcEA(size)
-	if err != nil {
-		return err
-	}
-
-	value, err := src.read()
-	if err != nil {
-		return err
-	}
-
-	if size == Word {
-		value = uint32(int32(int16(value)))
-	}
-
-	*ax(cpu) -= value
 	return nil
 }
 
@@ -649,16 +547,10 @@ func cmpa(cpu *cpu) error {
 func cmpi(cpu *cpu) error {
 	size := operandSizeFromOpcode(cpu.regs.IR)
 
-	immSize := size
-	if size == Byte {
-		immSize = Word
-	}
-
-	srcVal, err := cpu.popPc(immSize)
+	srcVal, err := cpu.popImmediate(size)
 	if err != nil {
 		return err
 	}
-	srcVal &= size.mask()
 
 	dst, err := cpu.ResolveSrcEA(size)
 	if err != nil {
@@ -759,7 +651,12 @@ func registerAddxSubxNegx(b *tableBuilder) {
 	}
 }
 
-func addx(cpu *cpu) error {
+func addx(cpu *cpu) error { return addxSubx(cpu, addWithExtend) }
+func subx(cpu *cpu) error { return addxSubx(cpu, subWithExtend) }
+
+// addxSubx is ADDX or SUBX, Dy,Dx or -(Ay),-(Ax). Z is only ever cleared,
+// so it stays set across a multi-precision chain whose parts are all zero.
+func addxSubx(cpu *cpu, op func(src, dst uint32, size Size, extend bool) (uint32, uint16)) error {
 	size := operandSizeFromOpcode(cpu.regs.IR)
 
 	src, dst, err := extendOperands(cpu, size)
@@ -768,27 +665,7 @@ func addx(cpu *cpu) error {
 	}
 
 	prevZero := cpu.regs.SR&srZero != 0
-	result, flags := addWithExtend(src.value, dst.value, size, cpu.regs.SR&srExtend != 0)
-
-	if err := dst.write(result); err != nil {
-		return err
-	}
-
-	flags = updateExtendZeroFlag(flags, size, result, prevZero)
-	replaceStatusFlags(cpu, statusMaskNZVCX, flags)
-	return nil
-}
-
-func subx(cpu *cpu) error {
-	size := operandSizeFromOpcode(cpu.regs.IR)
-
-	src, dst, err := extendOperands(cpu, size)
-	if err != nil {
-		return err
-	}
-
-	prevZero := cpu.regs.SR&srZero != 0
-	result, flags := subWithExtend(src.value, dst.value, size, cpu.regs.SR&srExtend != 0)
+	result, flags := op(src.value, dst.value, size, cpu.regs.SR&srExtend != 0)
 
 	if err := dst.write(result); err != nil {
 		return err
@@ -881,7 +758,7 @@ func registerExtendInstruction(b *tableBuilder, op instruction, base uint16, cal
 }
 
 func addWithExtend(src, dst uint32, size Size, extend bool) (uint32, uint16) {
-	operand2 := (src & size.mask()) + boolToUint32(extend)
+	operand2 := (src & size.mask()) + b2i(extend)
 	result := (dst & size.mask()) + operand2
 	masked := result & size.mask()
 
@@ -903,7 +780,7 @@ func addWithExtend(src, dst uint32, size Size, extend bool) (uint32, uint16) {
 }
 
 func subWithExtend(src, dst uint32, size Size, extend bool) (uint32, uint16) {
-	operand2 := (src & size.mask()) + boolToUint32(extend)
+	operand2 := (src & size.mask()) + b2i(extend)
 	result := (dst & size.mask()) - operand2
 	masked := result & size.mask()
 
@@ -932,13 +809,6 @@ func updateExtendZeroFlag(flags uint16, size Size, result uint32, prevZero bool)
 	return flags
 }
 
-func boolToUint32(v bool) uint32 {
-	if v {
-		return 1
-	}
-	return 0
-}
-
 // addxSubxCycleCalculator times ADDX/SUBX (table 8-11).
 func addxSubxCycleCalculator(opcode uint16) uint32 {
 	long := operandSizeFromOpcode(opcode) == Long
@@ -955,46 +825,32 @@ func addxSubxCycleCalculator(opcode uint16) uint32 {
 }
 
 func registerBCD(b *tableBuilder) {
-	b.add(abcd, 0xc100, 0xf1f8, 0, abcdCycleCalculator)
-	b.add(abcd, 0xc108, 0xf1f8, 0, abcdCycleCalculator)
-	b.add(sbcd, 0x8100, 0xf1f8, 0, sbcdCycleCalculator)
-	b.add(sbcd, 0x8108, 0xf1f8, 0, sbcdCycleCalculator)
+	b.add(abcd, 0xc100, 0xf1f8, 0, bcdCycleCalculator)
+	b.add(abcd, 0xc108, 0xf1f8, 0, bcdCycleCalculator)
+	b.add(sbcd, 0x8100, 0xf1f8, 0, bcdCycleCalculator)
+	b.add(sbcd, 0x8108, 0xf1f8, 0, bcdCycleCalculator)
 	b.add(nbcd, 0x4800, 0xffc0, eaMaskDataRegister|eaMaskIndirect|eaMaskPostIncrement|
 		eaMaskPreDecrement|eaMaskDisplacement|eaMaskIndex|eaMaskAbsoluteShort|eaMaskAbsoluteLong,
 		nbcdCycleCalculator)
 }
 
-func abcd(cpu *cpu) error {
+func abcd(cpu *cpu) error { return abcdSbcd(cpu, bcdAdd) }
+func sbcd(cpu *cpu) error { return abcdSbcd(cpu, bcdSub) }
+
+// abcdSbcd is ABCD or SBCD, Dy,Dx or -(Ay),-(Ax).
+func abcdSbcd(cpu *cpu, op func(src, dst byte, extend bool) (byte, bool)) error {
 	src, dst, err := bcdOperands(cpu)
 	if err != nil {
 		return err
 	}
 
 	prevZero := cpu.regs.SR&srZero != 0
-	result, carry := bcdAdd(src.value, dst.value, cpu.regs.SR&srExtend != 0)
+	result, carry := op(src.value, dst.value, cpu.regs.SR&srExtend != 0)
 	if err := dst.write(result); err != nil {
 		return err
 	}
 
 	updateBCDFlags(cpu, result, carry, prevZero, true)
-
-	return nil
-}
-
-func sbcd(cpu *cpu) error {
-	src, dst, err := bcdOperands(cpu)
-	if err != nil {
-		return err
-	}
-
-	prevZero := cpu.regs.SR&srZero != 0
-	result, borrow := bcdSub(src.value, dst.value, cpu.regs.SR&srExtend != 0)
-	if err := dst.write(result); err != nil {
-		return err
-	}
-
-	updateBCDFlags(cpu, result, borrow, prevZero, true)
-
 	return nil
 }
 
@@ -1040,8 +896,9 @@ func updateBCDFlags(cpu *cpu, result byte, carry bool, prevZero bool, propagateZ
 
 func bcdAdd(src, dst byte, extend bool) (byte, bool) {
 	// Calculate binary sum of low nibbles to detect half-carry
-	lo := (int(src) & 0x0F) + (int(dst) & 0x0F) + int(boolToUint32(extend))
-	sum := int(src) + int(dst) + int(boolToUint32(extend))
+	x := int(b2i(extend))
+	lo := (int(src) & 0x0F) + (int(dst) & 0x0F) + x
+	sum := int(src) + int(dst) + x
 
 	// Adjust if low nibble overflowed (>9) or half-carry occurred
 	if lo > 9 {
@@ -1057,11 +914,7 @@ func bcdAdd(src, dst byte, extend bool) (byte, bool) {
 }
 
 func bcdSub(src, dst byte, extend bool) (byte, bool) {
-	e := 0
-	if extend {
-		e = 1
-	}
-
+	e := int(b2i(extend))
 	low := (int(dst) & 0x0f) - (int(src) & 0x0f) - e
 	diff := int(dst) - int(src) - e
 
@@ -1119,14 +972,8 @@ func bcdOperands(cpu *cpu) (bcdOperand, bcdOperand, error) {
 	}, nil
 }
 
-func abcdCycleCalculator(opcode uint16) uint32 {
-	if (opcode>>3)&0x1 == 0 {
-		return 6
-	}
-	return 18
-}
-
-func sbcdCycleCalculator(opcode uint16) uint32 {
+// bcdCycleCalculator times ABCD/SBCD (table 8-11).
+func bcdCycleCalculator(opcode uint16) uint32 {
 	if (opcode>>3)&0x1 == 0 {
 		return 6
 	}
