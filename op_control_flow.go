@@ -20,7 +20,7 @@ func registerBranches(b *tableBuilder) {
 		eaMaskAbsoluteShort|eaMaskAbsoluteLong, sccCycleCalculator())
 }
 
-func branch(cpu *cpu) error {
+func branch(cpu *CPU) error {
 	cond := (cpu.regs.IR >> 8) & 0xf
 	displacement := int32(int8(cpu.regs.IR))
 	basePC := cpu.regs.PC
@@ -57,7 +57,7 @@ func branch(cpu *cpu) error {
 	return nil
 }
 
-func dbcc(cpu *cpu) error {
+func dbcc(cpu *CPU) error {
 	cond := (cpu.regs.IR >> 8) & 0xf
 	basePC := cpu.regs.PC
 
@@ -73,7 +73,7 @@ func dbcc(cpu *cpu) error {
 
 	reg := cpu.regs.IR & 0x7
 	counter := uint16(cpu.regs.D[reg]) - 1
-	cpu.regs.D[reg] = (cpu.regs.D[reg] &^ 0xffff) | int32(counter)
+	cpu.regs.D[reg] = (cpu.regs.D[reg] &^ 0xffff) | uint32(counter)
 
 	if counter != 0xffff {
 		cpu.regs.PC = uint32(int32(basePC) + int32(int16(displacement)))
@@ -84,7 +84,7 @@ func dbcc(cpu *cpu) error {
 	return nil
 }
 
-func conditionTrue(cpu *cpu, cond uint16) bool {
+func conditionTrue(cpu *CPU, cond uint16) bool {
 	switch cond {
 	case 0x0: // True (BRA/BSR)
 		return true
@@ -123,10 +123,10 @@ func conditionTrue(cpu *cpu, cond uint16) bool {
 	return false
 }
 
-func scc(cpu *cpu) error {
+func scc(cpu *CPU) error {
 	cond := (cpu.regs.IR >> 8) & 0xf
 
-	dst, err := cpu.ResolveSrcEA(Byte)
+	dst, err := cpu.resolveSrcEA(Byte)
 	if err != nil {
 		return err
 	}
@@ -162,8 +162,8 @@ func registerJumpLink(b *tableBuilder) {
 	b.add(chkInstruction, 0x4180, 0xf1c0, chkEAMask, chkCycleCalculator())
 }
 
-func jmp(cpu *cpu) error {
-	target, err := cpu.ResolveSrcEA(Long)
+func jmp(cpu *CPU) error {
+	target, err := cpu.resolveSrcEA(Long)
 	if err != nil {
 		return err
 	}
@@ -190,7 +190,7 @@ func registerMoveUsp(b *tableBuilder) {
 	}
 }
 
-func moveToUsp(cpu *cpu) error {
+func moveToUsp(cpu *CPU) error {
 	if ok, err := cpu.requireSupervisor(); err != nil || !ok {
 		return err
 	}
@@ -199,7 +199,7 @@ func moveToUsp(cpu *cpu) error {
 	return nil
 }
 
-func moveFromUsp(cpu *cpu) error {
+func moveFromUsp(cpu *CPU) error {
 	if ok, err := cpu.requireSupervisor(); err != nil || !ok {
 		return err
 	}
@@ -208,7 +208,7 @@ func moveFromUsp(cpu *cpu) error {
 	return nil
 }
 
-func linkInstruction(cpu *cpu) error {
+func linkInstruction(cpu *CPU) error {
 	reg := cpu.regs.IR & 0x7
 	displacement, err := cpu.popPc(Word)
 	if err != nil {
@@ -224,7 +224,7 @@ func linkInstruction(cpu *cpu) error {
 	return nil
 }
 
-func unlkInstruction(cpu *cpu) error {
+func unlkInstruction(cpu *CPU) error {
 	reg := cpu.regs.IR & 0x7
 	cpu.regs.A[7] = cpu.regs.A[reg]
 	value, err := cpu.pop(Long)
@@ -246,8 +246,8 @@ const chkEAMask = eaMaskDataRegister | eaMaskImmediate |
 	eaMaskPCDisplacement |
 	eaMaskPCIndex
 
-func chkInstruction(cpu *cpu) error {
-	src, err := cpu.ResolveSrcEA(Word)
+func chkInstruction(cpu *CPU) error {
+	src, err := cpu.resolveSrcEA(Word)
 	if err != nil {
 		return err
 	}
@@ -256,7 +256,7 @@ func chkInstruction(cpu *cpu) error {
 		return err
 	}
 
-	reg := udx(cpu)
+	reg := dx(cpu)
 	value := int32(int16(*reg))
 	upper := int32(int16(bound))
 
@@ -298,8 +298,8 @@ func registerSubroutine(b *tableBuilder) {
 	b.add(rts, 0x4e75, 0xffff, 0, constantCycles(16))
 }
 
-func jsr(cpu *cpu) error {
-	target, err := cpu.ResolveSrcEA(Long)
+func jsr(cpu *CPU) error {
+	target, err := cpu.resolveSrcEA(Long)
 	if err != nil {
 		return err
 	}
@@ -312,7 +312,7 @@ func jsr(cpu *cpu) error {
 	return nil
 }
 
-func rts(cpu *cpu) error {
+func rts(cpu *CPU) error {
 	addr, err := cpu.pop(Long)
 	if err != nil {
 		return err

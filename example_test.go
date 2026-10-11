@@ -22,26 +22,19 @@ func Example_quicksort() {
 	}
 
 	ram := m68kemu.NewRAM(0, 0x10000)
-	bus := m68kemu.NewBus(ram)
-
-	if err := ram.Write(m68kemu.Long, 0, stackPointer); err != nil {
-		log.Fatalf("failed to write stack pointer: %v", err)
-	}
-	if err := ram.Write(m68kemu.Long, 4, startAddress); err != nil {
-		log.Fatalf("failed to write start address: %v", err)
+	if err := ram.Load(startAddress, program); err != nil {
+		log.Fatalf("failed to load program: %v", err)
 	}
 
-	for i, b := range program {
-		address := startAddress + uint32(i)
-		if err := ram.Write(m68kemu.Byte, address, uint32(b)); err != nil {
-			log.Fatalf("failed to write program byte at %04x: %v", address, err)
-		}
-	}
-
-	cpu, err := m68kemu.NewCPU(bus)
+	cpu, err := m68kemu.NewCPU(m68kemu.NewBus(ram), m68kemu.WithDeferredReset())
 	if err != nil {
 		log.Fatalf("failed to create CPU: %v", err)
 	}
+	regs := cpu.Registers()
+	regs.SR = 0x2700 // supervisor mode, interrupts masked
+	regs.A[7] = stackPointer
+	regs.PC = startAddress
+	cpu.SetRegisters(regs)
 
 	var lastPC uint32
 	var steps int

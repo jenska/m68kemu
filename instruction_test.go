@@ -4,7 +4,7 @@ import (
 	"testing"
 )
 
-func newEnvironment(tb testing.TB) (*cpu, *RAM) {
+func newEnvironment(tb testing.TB) (*CPU, *RAM) {
 	tb.Helper()
 
 	memory := NewRAM(0, 1024*64)
@@ -15,10 +15,7 @@ func newEnvironment(tb testing.TB) (*cpu, *RAM) {
 	if err != nil {
 		tb.Fatalf("Failed to create CPU: %v", err)
 	}
-	impl, ok := processor.(*cpu)
-	if !ok {
-		tb.Fatalf("CPU implementation has unexpected type %T", processor)
-	}
+	impl := processor
 	return impl, memory
 }
 
@@ -31,31 +28,31 @@ func TestInstructions(t *testing.T) {
 	tests := []struct {
 		name string
 		src  string
-		prec func(cpu *cpu) bool
+		prec func(cpu *CPU) bool
 	}{
 		{"MoveAddressMnemonicWord", "MOVEA.W #1,A0\n",
-			func(c *cpu) bool {
+			func(c *CPU) bool {
 				return int16(c.Registers().A[0]) == 1
 			}},
 		{"MoveAddressAbsLong", "MOVEA.L $100,A0\n",
-			func(c *cpu) bool {
+			func(c *CPU) bool {
 				return int16(c.Registers().A[1]) == 0
 			}},
 		{"MoveAddressAbsWord", "MOVEA.L $100.w,A0\n",
-			func(c *cpu) bool {
+			func(c *CPU) bool {
 				return c.Registers().A[1] == uint32(0)
 			}},
 		{"MoveAddressAbsWord", "MOVEA.L $10(PC),A0\n",
-			func(c *cpu) bool {
+			func(c *CPU) bool {
 				return int16(c.Registers().A[1]) == 0
 			}},
 
 		{"MoveAddressMnemonicLong", "MOVEA.L #1,A1\n",
-			func(c *cpu) bool {
+			func(c *CPU) bool {
 				return int32(c.Registers().A[1]) == 1
 			}},
 		{"MoveAddressMnemonicLongFullWidth", "MOVEA.L #$12345678,A2\n",
-			func(c *cpu) bool {
+			func(c *CPU) bool {
 				return c.Registers().A[2] == 0x12345678
 			}},
 	}

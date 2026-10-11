@@ -101,11 +101,11 @@ func logicalImmediateCycleCalculator() cycleCalculator {
 
 // andOr is AND (line $C) or OR (line 8), <ea>,Dn (opmode 0-2) or Dn,<ea>
 // (opmode 4-6).
-func andOr(cpu *cpu) error {
+func andOr(cpu *CPU) error {
 	opmode := (cpu.regs.IR >> 6) & 0x7
 	size := operandSizeFromOpmode(opmode)
 
-	operand, err := cpu.ResolveSrcEA(size)
+	operand, err := cpu.resolveSrcEA(size)
 	if err != nil {
 		return err
 	}
@@ -114,7 +114,7 @@ func andOr(cpu *cpu) error {
 		return err
 	}
 
-	dn := udx(cpu)
+	dn := dx(cpu)
 	result := (value | *dn) & size.mask()
 	if cpu.regs.IR&0x4000 != 0 {
 		result = value & *dn & size.mask()
@@ -130,10 +130,10 @@ func andOr(cpu *cpu) error {
 	return nil
 }
 
-func eorInstruction(cpu *cpu) error {
+func eorInstruction(cpu *CPU) error {
 	size := operandSizeFromOpcode(cpu.regs.IR)
 
-	dst, err := cpu.ResolveSrcEA(size)
+	dst, err := cpu.resolveSrcEA(size)
 	if err != nil {
 		return err
 	}
@@ -142,7 +142,7 @@ func eorInstruction(cpu *cpu) error {
 		return err
 	}
 
-	src := *udx(cpu) & size.mask()
+	src := *dx(cpu) & size.mask()
 	result := (src ^ dstVal) & size.mask()
 	if err := dst.write(result); err != nil {
 		return err
@@ -152,14 +152,14 @@ func eorInstruction(cpu *cpu) error {
 	return nil
 }
 
-func logicalImmediate(cpu *cpu, op func(uint32, uint32) uint32) error {
+func logicalImmediate(cpu *CPU, op func(uint32, uint32) uint32) error {
 	size := operandSizeFromOpcode(cpu.regs.IR)
 	srcVal, err := cpu.popImmediate(size)
 	if err != nil {
 		return err
 	}
 
-	dst, err := cpu.ResolveSrcEA(size)
+	dst, err := cpu.resolveSrcEA(size)
 	if err != nil {
 		return err
 	}
@@ -177,22 +177,22 @@ func logicalImmediate(cpu *cpu, op func(uint32, uint32) uint32) error {
 	return nil
 }
 
-func oriImmediate(cpu *cpu) error {
+func oriImmediate(cpu *CPU) error {
 	return logicalImmediate(cpu, func(a, b uint32) uint32 { return a | b })
 }
 
-func andiImmediate(cpu *cpu) error {
+func andiImmediate(cpu *CPU) error {
 	return logicalImmediate(cpu, func(a, b uint32) uint32 { return a & b })
 }
 
-func eoriImmediate(cpu *cpu) error {
+func eoriImmediate(cpu *CPU) error {
 	return logicalImmediate(cpu, func(a, b uint32) uint32 { return a ^ b })
 }
 
-func notInstruction(cpu *cpu) error {
+func notInstruction(cpu *CPU) error {
 	size := operandSizeFromOpcode(cpu.regs.IR)
 
-	dst, err := cpu.ResolveSrcEA(size)
+	dst, err := cpu.resolveSrcEA(size)
 	if err != nil {
 		return err
 	}
@@ -257,11 +257,11 @@ func bitCycleCalculator(immediate bool, op uint16) cycleCalculator {
 	}
 }
 
-func bitDynamic(cpu *cpu) error {
+func bitDynamic(cpu *CPU) error {
 	return bitOperation(cpu, uint32(*dx(cpu)))
 }
 
-func bitImmediate(cpu *cpu) error {
+func bitImmediate(cpu *CPU) error {
 	imm, err := cpu.popPc(Word)
 	if err != nil {
 		return err
@@ -271,14 +271,14 @@ func bitImmediate(cpu *cpu) error {
 
 // bitOperation runs BTST, BCHG, BCLR or BSET on bit bitNumber of a data
 // register (modulo 32) or of a byte in memory (modulo 8).
-func bitOperation(cpu *cpu, bitNumber uint32) error {
+func bitOperation(cpu *CPU, bitNumber uint32) error {
 	opType := (cpu.regs.IR >> 6) & 0x3 // 0=BTST, 1=BCHG, 2=BCLR, 3=BSET
 
 	var operand modifier
 	bitNumber &= 31
 	if (cpu.regs.IR>>3)&0x7 != 0 {
 		var err error
-		if operand, err = cpu.ResolveSrcEA(Byte); err != nil {
+		if operand, err = cpu.resolveSrcEA(Byte); err != nil {
 			return err
 		}
 		bitNumber &= 7
@@ -331,7 +331,7 @@ func registerShiftRotate(b *tableBuilder) {
 	b.add(shiftRotate, 0xe0c0, 0xf8c0, memoryAlterable, shiftRotateCycleCalculator)
 }
 
-func shiftRotate(cpu *cpu) error {
+func shiftRotate(cpu *CPU) error {
 	opcode := cpu.regs.IR
 
 	if (opcode>>6)&0x3 == 0x3 {
@@ -359,12 +359,12 @@ func shiftRotate(cpu *cpu) error {
 	return nil
 }
 
-func shiftRotateMemory(cpu *cpu) error {
+func shiftRotateMemory(cpu *CPU) error {
 	opcode := cpu.regs.IR
 	operation := (opcode >> 9) & 0x3
 	left := ((opcode >> 8) & 0x1) != 0
 
-	ea, err := cpu.ResolveSrcEA(Word)
+	ea, err := cpu.resolveSrcEA(Word)
 	if err != nil {
 		return err
 	}
@@ -540,7 +540,7 @@ func ror(value uint32, count, width int) (uint32, shiftRotateFlags) {
 	return result, shiftRotateFlags{carryOut: carry, changeCarry: true}
 }
 
-func updateShiftRotateFlags(cpu *cpu, result uint32, width int, flags shiftRotateFlags) {
+func updateShiftRotateFlags(cpu *CPU, result uint32, width int, flags shiftRotateFlags) {
 	mask := uint32((1 << width) - 1)
 	result &= mask
 

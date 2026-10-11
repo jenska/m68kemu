@@ -1,6 +1,6 @@
-# Roadmap: MC68010 to MC68060
+# Roadmap: MC68010 to MC68040
 
-m68kemu emulates the MC68000, MC68010, MC68020 and MC68030 and the MC68881/MC68882 FPU today. The aim is to grow it into an emulator for the whole family, up to the MC68060, including the paged memory management unit (PMMU) and floating-point unit (FPU).
+m68kemu emulates the MC68000, MC68010, MC68020 and MC68030 and the MC68881/MC68882 FPU today. The aim is to grow it into an emulator for the whole family, up to the MC68040, including the paged memory management unit (PMMU) and floating-point unit (FPU).
 
 ## Repository Layout
 
@@ -17,7 +17,7 @@ The coprocessors get their own packages inside the module:
 
 m68kemu/        core: CPU, bus, EA, scheduler, integer instruction set of all models
 m68kemu/fpu/    MC68881/MC68882 and the reduced 68040 FPU, built on github.com/jenska/float
-m68kemu/mmu/    MC68851, 68030, 68040 and 68060 PMMUs
+m68kemu/mmu/    MC68851, 68030, 68040 PMMUs
 ```
 
 The core talks to them through small interfaces:
@@ -109,19 +109,15 @@ MC68881/MC68882 times, with the FPU running concurrently with the CPU.
 * table walk, address translation cache (ATC), bus errors from the MMU with
   restartable frames
 * MC68851 as an external coprocessor variant for the 68020
-* MC68040/MC68060 MMU afterwards; it works differently (fixed page sizes,
+* MC68040 MMU afterwards; it works differently (fixed page sizes,
   separate instruction and data ATCs, `PTEST`/`PFLUSH` variants)
 
-### 6. MC68040 / MC68060
+### 6. MC68040
 
 * `MOVE16`, `CINV`, `CPUSH`
-* removed instructions trap and leave their emulation to software:
-  the 68060 drops `MOVEP`, `CAS2`, `CHK2`/`CMP2`, 64-bit `MULx`/`DIVx`, and
-  others
 * the reduced FPUs: unimplemented FPU instructions raise exceptions for the
   operating system's floating-point library to handle
 * stack frame formats $3, $4 and $7
-* 68060: the PCR register and superscalar timing (approximate)
 
 ## Testing Across Models
 

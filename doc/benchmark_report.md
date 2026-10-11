@@ -19,9 +19,34 @@ Representative medians from the runs, compared with the previous report (June 13
 | `BenchmarkCycleSchedulerAdvanceBurst` | `2967 ns/op` | `0 B/op, 0 allocs/op` | `3291 ns/op` | -10% |
 | `BenchmarkBusReadMappedRanges` | `15.90 ns/op` | `0 B/op, 0 allocs/op` | `15.53 ns/op` | +2% |
 
+### API Rework (October 11, 2026)
+
+The scheduler, the fast memory paths and `Step` were reworked together with
+the API (see the changelog). Interleaved A/B runs against the previous commit,
+through the public API, on the same machine:
+
+| Workload | Before | After | Change |
+| --- | --- | --- | --- |
+| Bubble sort, single RAM | `2.66 ms` | `2.57 ms` | -3% |
+| Recursive Fibonacci | `19.3 ms` | `18.6 ms` | -4% |
+| FFT Q15, MC68000 | `4.95 ms` | `4.87 ms` | -2% |
+| Bubble sort with an attached scheduler and a 512-cycle timer event | `3.70 ms` | `2.53 ms` | -32% |
+| Bubble sort on a machine bus (two RAMs, an I/O device, 1 wait state) | `5.95 ms` | `2.52 ms` | -58% |
+| `Step()` in a loop, per instruction | `19.2 ns` | `16.2 ns` | -16% |
+
+* The CPU calls into the scheduler only when its next event is due. It used
+  to call `Advance` on every cycle charge, and `Advance` called every
+  `CycleListener`.
+* Every `MemoryDevice` on the bus, not only a single RAM, is read, written
+  and fetched from directly, also with wait states. The CPU caches the direct
+  memory of the page of its last instruction fetch and of its last data
+  access, so the single-RAM case stays as fast as the old dedicated path.
+* `Step` no longer rebuilds the run modes on every call, and one flag replaces
+  the four checks for step-local debug state before every instruction.
+
 ### FFT Across CPU Models
 
-`BenchmarkFFT` (in `fft_benchmark_test.go`) runs a 1024-point complex radix-2
+`BenchmarkFFT` (in `bench_fft_test.go`) runs a 1024-point complex radix-2
 FFT on every model that can execute each arithmetic variant. All variants share
 the same bit-reversal and stage/group loops; only the butterfly differs.
 `TestFFTPrograms` checks each one against a float64 DFT.
@@ -155,7 +180,7 @@ remaining win for this kind of loop.
 If performance becomes the main focus again, the highest-value next steps are:
 
 1. Avoid the per-instruction `checkInterrupts` call when no interrupt state has changed.
-2. Trim hot-loop instruction fetch overhead in `fetchOpcode`, `readProgramFastWord`, and related bookkeeping.
+2. Trim hot-loop instruction fetch overhead in `fetchOpcode`, `readProgramFastWord`, and related bookkeeping. `readProgramFastWord` and `dataIndex` are just above Go's inlining budget.
 3. Push opcode predecode further so more handlers can avoid repeated mode / register extraction.
 4. Reduce EA setup overhead on common register, displacement, and simple memory forms.
 5. Keep debug hooks behind cached mode flags so new observability features do not drift back into the hot path.

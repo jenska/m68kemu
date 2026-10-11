@@ -32,7 +32,7 @@ Still missing for a complete Atari ST:
 
 * Prefetch-sensitive behavior and any remaining compatibility gaps found by larger TOS / software workloads.
 
-The MC68010, MC68020 and MC68030 are supported (see [CPU Models](#cpu-models)), and so is the MC68881/MC68882 FPU, memory-mapped on a 68000 or as the coprocessor of a 68020/030 (see [FPU](#fpu-mc68881mc68882)). The 68030 MMU (next, phase 5) and the MC68040/MC68060 are planned. See [doc/roadmap.md](doc/roadmap.md).
+The MC68010, MC68020 and MC68030 are supported (see [CPU Models](#cpu-models)), and so is the MC68881/MC68882 FPU, memory-mapped on a 68000 or as the coprocessor of a 68020/030 (see [FPU](#fpu-mc68881mc68882)). The 68030 MMU (next, phase 5) and the MC68040 is planned. See [doc/roadmap.md](doc/roadmap.md).
 
 ## Getting Started
 
@@ -68,28 +68,19 @@ func main() {
  // Create a 64KB RAM device at address 0.
  ram := m68kemu.NewRAM(0, 64*1024)
 
- // Create a bus and attach the RAM.
- bus := m68kemu.NewBus(ram)
-
- // Set up the initial stack pointer and program counter.
- // SSP at 0x1000, PC at 0x2000.
+ // The reset vectors: SSP at 0x1000, PC at 0x2000.
  ram.Write(m68kemu.Long, 0, 0x1000)
  ram.Write(m68kemu.Long, 4, 0x2000)
 
- // Create the CPU.
- cpu, err := m68kemu.NewCPU(bus)
- if err != nil {
-  log.Fatalf("Failed to create CPU: %v", err)
+ // Load a simple program: MOVEQ #5, D0 (opcode 0x7005).
+ if err := ram.Load(0x2000, []byte{0x70, 0x05}); err != nil {
+  log.Fatalf("Failed to load program: %v", err)
  }
 
- // Assemble a simple program: MOVEQ #5, D0 (opcode 0x7005)
- program := []byte{0x70, 0x05}
- startPC, _ := ram.Read(m68kemu.Long, 4)
-
- for i, b := range program {
-  if err := ram.Write(m68kemu.Byte, startPC+uint32(i), uint32(b)); err != nil {
-   log.Fatalf("Failed to write program: %v", err)
-  }
+ // Create the CPU on a bus with the RAM. NewCPU resets it from the vectors.
+ cpu, err := m68kemu.NewCPU(m68kemu.NewBus(ram))
+ if err != nil {
+  log.Fatalf("Failed to create CPU: %v", err)
  }
 
  // Step one instruction.
@@ -125,20 +116,19 @@ The MC68020 and MC68030 add 32-bit addresses, the scaled-index and memory
 indirect addressing modes, the master and interrupt stack pointers, CACR and
 CAAR, the 68020 instructions (32-bit branches, MULx.L/DIVx.L, bit fields,
 CAS/CAS2, CHK2/CMP2, PACK/UNPK, TRAPcc and others), misaligned operands, the
-format $1, $2 and $B stack frames, and the coprocessor interface. Give such a
-CPU a bus that decodes 32 address bits:
+format $1, $2 and $B stack frames, and the coprocessor interface. `NewCPU`
+sets the bus to decode 32 address bits for them (and 24 for the MC68000 and
+MC68010):
 
 ```go
-bus := m68kemu.NewBus(ram)
-bus.SetAddressWidth(32)
-cpu, err := m68kemu.NewCPU(bus, m68kemu.WithModel(m68kemu.M68030))
+cpu, err := m68kemu.NewCPU(m68kemu.NewBus(ram), m68kemu.WithModel(m68kemu.M68030))
 ```
 
 Their timing is approximate, CALLM/RTM are not implemented, the caches are
 not emulated, and the 68030 has no MMU yet. [doc/mc68020.md](doc/mc68020.md)
 has the details.
 
-The constants `M68040` and `M68060` exist for the models on the
+The constant `M68040` exist for the model on the
 [roadmap](doc/roadmap.md). Until a model is implemented, `NewCPU` returns
 an error that matches `m68kemu.ErrModelUnsupported` with `errors.Is`.
 
@@ -184,6 +174,27 @@ cir.Clock = cpu.Cycles
 
 [doc/fpu.md](doc/fpu.md) has the details and the simplifications.
 
+### Memory and Devices
+
+A `Bus` routes every access to the device whose address range holds it.
+`RAM` and `ROM` are plain memory; any other peripheral implements `Device`
+plus `AddressRangeDevice` (or `ContainsDevice` for a sparse decode):
+
+```go
+ram := m68kemu.NewRAM(0, 4*1024*1024)
+rom := m68kemu.NewROM(0xfc0000, tosImage) // writes to it are bus errors
+bus := m68kemu.NewBus(ram, rom, mfp, glue)
+bus.SetWaitStates(1)
+```
+
+The CPU reads, writes and fetches instructions from a `MemoryDevice`, such
+as `RAM` and `ROM`, directly instead of calling the device, and charges the
+bus wait states as the bus would. Implement `MemoryDevice` for your own
+side-effect-free memory to get the same speed, and call `bus.Remap()` after
+such a device switches banks or changes its range. Devices listed earlier on
+the bus win where ranges overlap, so a ROM overlay at address 0 in front of
+RAM works as on the Atari ST.
+
 ### Cycle Scheduler
 
 Machine devices can follow CPU time by attaching a scheduler:
@@ -193,11 +204,17 @@ scheduler := m68kemu.NewCycleScheduler()
 cpu.SetScheduler(scheduler)
 
 scheduler.ScheduleAfter(512, func(now uint64) {
- // Run a timer tick, trigger an interrupt, advance video state, etc.
+ // Run a timer tick, trigger an interrupt, etc.
 })
 ```
 
-The scheduler is intentionally small at this stage. It is meant as a foundation for ST components rather than a finished machine-timing framework.
+The CPU compares its cycle counter with the time of the next event and only
+calls into the scheduler when an event is due, so an attached scheduler costs
+next to nothing between events. `Now()` is exact at any point, also in the
+middle of an instruction, so a device whose state changes continuously (a
+video counter, a free-running timer) computes it from `Now()` when it is
+read. `SetClockRatio` makes scheduler time run at a device clock instead of
+the CPU clock.
 
 ### Verbose Logging And Range Disassembly
 
@@ -211,7 +228,7 @@ logger := m68kemu.NewVerboseLogger(cpu, bus, os.Stdout, m68kemu.VerboseLoggerOpt
     {Start: 0x2000, Length: 0x10, Label: "program"},
   },
 })
-cpu.SetTracer(logger.Trace)
+cpu.SetHooks(m68kemu.Hooks{Trace: logger.Trace})
 
 lines, err := m68kemu.DisassembleMemoryRange(bus, 0x2000, 0x10)
 if err != nil {
@@ -232,31 +249,35 @@ These helpers use the bus `Peek` path when available so debug output does not tr
 
 ### Debug Hooks
 
-For emulator bring-up and TOS failure analysis, the CPU exposes several debugger-oriented callbacks:
+For emulator bring-up and TOS failure analysis, the CPU exposes several
+debugger-oriented callbacks. `SetHooks` installs them all at once; a nil
+field means no callback:
 
 ```go
-cpu.SetPreTracer(func(info m68kemu.PreTraceInfo) {
- // Inspect registers before the instruction executes.
-})
-
-cpu.SetTracer(func(info m68kemu.TraceInfo) {
- // Instruction address, opcode bytes, mnemonic, before/after registers,
- // per-instruction cycle delta, and total cycle count.
-})
-
-cpu.SetExceptionTracer(func(info m68kemu.ExceptionInfo) {
- // Vector, trapping opcode address, stacked/reported PC, SR before/after,
- // new handler PC, and decoded stack-frame details.
-})
-
-cpu.SetBusTracer(func(info m68kemu.BusAccessInfo) {
- // Address, size, read/write, value, instruction-fetch flag, and current instruction PC.
-})
-
-cpu.SetInterruptTracer(func(info m68kemu.InterruptInfo) {
- // Accepted IRQ level, vector, autovector/explicit, and PC/SR at acceptance.
+cpu.SetHooks(m68kemu.Hooks{
+ PreTrace: func(info m68kemu.PreTraceInfo) {
+  // Inspect registers before the instruction executes.
+ },
+ Trace: func(info m68kemu.TraceInfo) {
+  // Instruction address, opcode bytes, mnemonic, before/after registers,
+  // per-instruction cycle delta, and total cycle count.
+ },
+ Exception: func(info m68kemu.ExceptionInfo) {
+  // Vector, trapping opcode address, stacked/reported PC, SR before/after,
+  // new handler PC, and decoded stack-frame details.
+ },
+ Bus: func(info m68kemu.BusAccessInfo) {
+  // Address, size, read/write, value, instruction-fetch flag, and current instruction PC.
+ },
+ Interrupt: func(info m68kemu.InterruptInfo) {
+  // Accepted IRQ level, vector, autovector/explicit, and PC/SR at acceptance.
+ },
 })
 ```
+
+To change one callback and keep the others, start from `cpu.Hooks()`.
+`SetRegisters` and `SetPC` set the CPU's state directly, for example to start
+a loaded program without a reset vector.
 
 `RunUntil` can also stop on richer conditions:
 
@@ -281,8 +302,7 @@ If you want a rolling "what just happened?" buffer without always logging, call 
 Separate CPUs can run in parallel goroutines, including CPUs of different
 models. A CPU, its `Bus`, the devices on that bus and its scheduler belong
 together: drive them from one goroutine at a time, and give every CPU its own
-`Bus`. `NewCPU` installs a wait-state hook on the bus, so a second CPU on the
-same bus would replace the first one's. The methods of a single CPU are not
+`Bus`: `NewCPU` returns `ErrBusInUse` for a bus that already serves a CPU. The methods of a single CPU are not
 safe to call from several goroutines at once, with one exception:
 `RequestInterrupt` may be called from any goroutine, also while the CPU runs,
 so a device in its own goroutine can raise interrupts and wake a CPU waiting

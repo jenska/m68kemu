@@ -98,6 +98,6 @@ return: RTS
 		t.Fatalf("read fib result: %v", err)
 	}
 	if result != 5 {
-		t.Fatalf("fib(5) = %d, want 5 (pc=%04x sp=%04x d0=%08x)", result, cpu.regs.PC, cpu.regs.A[7], uint32(cpu.regs.D[0]))
+		t.Fatalf("fib(5) = %d, want 5 (pc=%04x sp=%04x d0=%08x)", result, cpu.regs.PC, cpu.regs.A[7], cpu.regs.D[0])
 	}
 }

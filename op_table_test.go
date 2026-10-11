@@ -84,14 +84,14 @@ func TestCPUsOfOneModelShareOpcodeSet(t *testing.T) {
 }
 
 // TestOpcodesForConcurrentBuild runs under -race: concurrent first calls must
-// build the table once and all return it. It uses M68060 because no other
+// build the table once and all return it. It uses M68040 because no other
 // test builds that table.
 func TestOpcodesForConcurrentBuild(t *testing.T) {
 	const n = 8
 	sets := make([]*opcodeSet, n)
 	var wg sync.WaitGroup
 	for i := range n {
-		wg.Go(func() { sets[i] = opcodesFor(M68060) })
+		wg.Go(func() { sets[i] = opcodesFor(M68040) })
 	}
 	wg.Wait()
 	for i, s := range sets {

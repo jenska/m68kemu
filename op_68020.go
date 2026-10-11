@@ -111,7 +111,7 @@ func valid68020Addition(op uint16) bool {
 // branchLong is Bcc, BRA and BSR with a 32-bit displacement. It has its own
 // handler so that branch, run by every other branch on every model, does not
 // test for it.
-func branchLong(cpu *cpu) error {
+func branchLong(cpu *CPU) error {
 	cond := (cpu.regs.IR >> 8) & 0xf
 	basePC := cpu.regs.PC
 	displacement, err := cpu.popPc(Long)
@@ -138,7 +138,7 @@ func bitFieldReadOnly(op uint16) bool {
 	return op == 0 || op == 1 || op == 3 || op == 5
 }
 
-func linkLong(cpu *cpu) error {
+func linkLong(cpu *CPU) error {
 	reg := cpu.regs.IR & 7
 	displacement, err := cpu.popPc(Long)
 	if err != nil {
@@ -152,15 +152,15 @@ func linkLong(cpu *cpu) error {
 	return nil
 }
 
-func extb(cpu *cpu) error {
+func extb(cpu *CPU) error {
 	d := &cpu.regs.D[cpu.regs.IR&7]
-	*d = int32(int8(*d))
-	updateNZClearVC(cpu, uint32(*d), Long)
+	*d = uint32(int32(int8(*d)))
+	updateNZClearVC(cpu, *d, Long)
 	return nil
 }
 
-func chkLong(cpu *cpu) error {
-	src, err := cpu.ResolveSrcEA(Long)
+func chkLong(cpu *CPU) error {
+	src, err := cpu.resolveSrcEA(Long)
 	if err != nil {
 		return err
 	}
@@ -168,7 +168,7 @@ func chkLong(cpu *cpu) error {
 	if err != nil {
 		return err
 	}
-	value := int32(*udx(cpu))
+	value := int32(*dx(cpu))
 	replaceStatusFlags(cpu, statusMaskNZVC, 0)
 	switch {
 	case value < 0:
@@ -184,12 +184,12 @@ func chkLong(cpu *cpu) error {
 
 // mulLong is MULU.L and MULS.L: Dl * <ea> into Dl (32-bit result, V on
 // overflow) or Dh:Dl (64-bit result).
-func mulLong(cpu *cpu) error {
+func mulLong(cpu *CPU) error {
 	ext, err := cpu.popPc(Word)
 	if err != nil {
 		return err
 	}
-	src, err := cpu.ResolveSrcEA(Long)
+	src, err := cpu.resolveSrcEA(Long)
 	if err != nil {
 		return err
 	}
@@ -234,12 +234,12 @@ func mulLong(cpu *cpu) error {
 
 // divLong is DIVU.L, DIVS.L, DIVUL.L and DIVSL.L: Dq (or Dr:Dq) / <ea> into
 // Dq, with the remainder in Dr unless Dr is Dq.
-func divLong(cpu *cpu) error {
+func divLong(cpu *CPU) error {
 	ext, err := cpu.popPc(Word)
 	if err != nil {
 		return err
 	}
-	src, err := cpu.ResolveSrcEA(Long)
+	src, err := cpu.resolveSrcEA(Long)
 	if err != nil {
 		return err
 	}
@@ -286,7 +286,7 @@ func divLong(cpu *cpu) error {
 }
 
 // trapcc is TRAPcc with no, a word or a long operand, which it skips.
-func trapcc(cpu *cpu) error {
+func trapcc(cpu *CPU) error {
 	switch cpu.regs.IR & 7 {
 	case 2:
 		cpu.regs.PC += 2
@@ -302,7 +302,7 @@ func trapcc(cpu *cpu) error {
 
 // predecrementByte returns the address of a byte operand -(An), decrementing
 // An by 1, or by 2 for A7 so the stack stays word-aligned.
-func predecrementByte(cpu *cpu, reg uint16) uint32 {
+func predecrementByte(cpu *CPU, reg uint16) uint32 {
 	if reg == 7 {
 		cpu.regs.A[7] -= 2
 	} else {
@@ -313,14 +313,14 @@ func predecrementByte(cpu *cpu, reg uint16) uint32 {
 
 // pack converts two unpacked BCD digits (a word: digit, digit) plus the
 // adjustment into one packed byte.
-func pack(cpu *cpu) error {
+func pack(cpu *CPU) error {
 	adj, err := cpu.popPc(Word)
 	if err != nil {
 		return err
 	}
 	ry, rx := (cpu.regs.IR>>9)&7, cpu.regs.IR&7
 	if cpu.regs.IR&8 == 0 {
-		v := (uint32(cpu.regs.D[rx]) + adj) & 0xffff
+		v := (cpu.regs.D[rx] + adj) & 0xffff
 		d := generalRegister(cpu, ry)
 		*d = *d&^0xff | (v>>4)&0xf0 | v&0x0f
 		return nil
@@ -339,7 +339,7 @@ func pack(cpu *cpu) error {
 
 // unpk converts a packed BCD byte into two unpacked digits (a word) plus the
 // adjustment.
-func unpk(cpu *cpu) error {
+func unpk(cpu *CPU) error {
 	adj, err := cpu.popPc(Word)
 	if err != nil {
 		return err
@@ -347,7 +347,7 @@ func unpk(cpu *cpu) error {
 	ry, rx := (cpu.regs.IR>>9)&7, cpu.regs.IR&7
 	unpack := func(b uint32) uint32 { return ((b&0xf0)<<4 | b&0x0f) + adj }
 	if cpu.regs.IR&8 == 0 {
-		v := unpack(uint32(cpu.regs.D[rx]) & 0xff)
+		v := unpack(cpu.regs.D[rx] & 0xff)
 		d := generalRegister(cpu, ry)
 		*d = *d&^0xffff | v&0xffff
 		return nil
@@ -367,7 +367,7 @@ func unpk(cpu *cpu) error {
 // The field starts offset bits from the most significant bit of a data
 // register (modulo 32) or of the byte at the effective address (offset may
 // be negative there) and is 1 to 32 bits wide.
-func bitField(cpu *cpu) error {
+func bitField(cpu *CPU) error {
 	ext, err := cpu.popPc(Word)
 	if err != nil {
 		return err
@@ -375,11 +375,11 @@ func bitField(cpu *cpu) error {
 	op := (cpu.regs.IR >> 8) & 7
 	offset := int32((ext >> 6) & 31)
 	if ext&0x0800 != 0 {
-		offset = cpu.regs.D[(ext>>6)&7]
+		offset = int32(cpu.regs.D[(ext>>6)&7])
 	}
 	width := ext & 31
 	if ext&0x0020 != 0 {
-		width = uint32(cpu.regs.D[ext&7]) & 31
+		width = cpu.regs.D[ext&7] & 31
 	}
 	if width == 0 {
 		width = 32
@@ -404,7 +404,7 @@ func bitField(cpu *cpu) error {
 			return nil
 		}
 	} else {
-		operand, err := cpu.ResolveSrcEA(Byte)
+		operand, err := cpu.resolveSrcEA(Byte)
 		if err != nil {
 			return err
 		}
@@ -486,13 +486,13 @@ func casSize(ir uint16) Size {
 
 // cas compares Dc with the operand; if they are equal it writes Du to the
 // operand, otherwise it loads the operand into Dc.
-func cas(cpu *cpu) error {
+func cas(cpu *CPU) error {
 	ext, err := cpu.popPc(Word)
 	if err != nil {
 		return err
 	}
 	size := casSize(cpu.regs.IR)
-	operand, err := cpu.ResolveSrcEA(size)
+	operand, err := cpu.resolveSrcEA(size)
 	if err != nil {
 		return err
 	}
@@ -513,7 +513,7 @@ func cas(cpu *cpu) error {
 
 // cas2 is CAS with two operands addressed by registers: both are compared,
 // and only if both match are both updated.
-func cas2(cpu *cpu) error {
+func cas2(cpu *CPU) error {
 	ext1, err := cpu.popPc(Word)
 	if err != nil {
 		return err
@@ -560,13 +560,13 @@ func cas2(cpu *cpu) error {
 // value outside them; CHK2 then takes the CHK exception. Bounds and data
 // registers are sign-extended, and a lower bound above the upper one wraps,
 // so the same test serves signed and unsigned ranges.
-func chk2(cpu *cpu) error {
+func chk2(cpu *CPU) error {
 	ext, err := cpu.popPc(Word)
 	if err != nil {
 		return err
 	}
 	size := [...]Size{Byte, Word, Long}[(cpu.regs.IR>>9)&3]
-	operand, err := cpu.ResolveSrcEA(size)
+	operand, err := cpu.resolveSrcEA(size)
 	if err != nil {
 		return err
 	}

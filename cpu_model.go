@@ -15,7 +15,6 @@ const (
 	M68020
 	M68030
 	M68040
-	M68060
 	modelCount
 )
 
@@ -23,7 +22,12 @@ const (
 // implemented yet. The MC68000 to MC68030 are implemented so far.
 var ErrModelUnsupported = errors.New("m68kemu: CPU model not supported")
 
-var modelNames = [modelCount]string{"MC68000", "MC68010", "MC68020", "MC68030", "MC68040", "MC68060"}
+// ErrBusInUse is returned by NewCPU for a bus that already serves another
+// CPU. Every CPU needs its own Bus: the bus charges its wait states to the
+// CPU and tells it when its memory map changes.
+var ErrBusInUse = errors.New("m68kemu: bus already serves a CPU")
+
+var modelNames = [modelCount]string{"MC68000", "MC68010", "MC68020", "MC68030", "MC68040"}
 
 func (m Model) String() string {
 	if m < 0 || m >= modelCount {
@@ -53,6 +57,6 @@ func WithModel(m Model) Option {
 }
 
 // Model returns the model the CPU emulates.
-func (cpu *cpu) Model() Model {
+func (cpu *CPU) Model() Model {
 	return cpu.model
 }

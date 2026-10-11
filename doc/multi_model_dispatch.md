@@ -33,7 +33,6 @@ const (
 	M68020
 	M68030
 	M68040
-	M68060
 )
 
 // opcodeSet is the immutable dispatch table for one model, shared by every

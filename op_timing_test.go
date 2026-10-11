@@ -11,15 +11,15 @@ type timingCase struct {
 	asm   string
 	code  []byte // hand-encoded instruction, for forms m68kasm rejects
 	want  uint64
-	setup func(*cpu, *RAM)
+	setup func(*CPU, *RAM)
 }
 
-func withSR(sr uint16) func(*cpu, *RAM) {
-	return func(c *cpu, _ *RAM) { c.regs.SR = sr }
+func withSR(sr uint16) func(*CPU, *RAM) {
+	return func(c *CPU, _ *RAM) { c.regs.SR = sr }
 }
 
-func withD(reg int, value uint32) func(*cpu, *RAM) {
-	return func(c *cpu, _ *RAM) { c.regs.D[reg] = int32(value) }
+func withD(reg int, value uint32) func(*CPU, *RAM) {
+	return func(c *CPU, _ *RAM) { c.regs.D[reg] = uint32(value) }
 }
 
 const (
@@ -242,7 +242,7 @@ var timingReference = []timingCase{
 	{asm: "MULU.W (A0),D1", want: 42},
 	{asm: "MULS.W D0,D1", want: 38},
 	{asm: "MULS.W D0,D1", want: 70, setup: withD(0, 0x5555)},
-	{asm: "DIVU.W D0,D1", want: 10, setup: func(c *cpu, _ *RAM) { c.regs.D[0], c.regs.D[1] = 1, 0x10000 }},
+	{asm: "DIVU.W D0,D1", want: 10, setup: func(c *CPU, _ *RAM) { c.regs.D[0], c.regs.D[1] = 1, 0x10000 }},
 	{asm: "TAS D1", want: 4},
 	{asm: "TAS (A0)", want: 18},
 	{asm: "SEQ D1", want: 6, setup: withSR(srZ)},
@@ -321,7 +321,7 @@ func TestCycleRoundingPadsEachInstruction(t *testing.T) {
 	for i, b := range code {
 		_ = ram.Write(Byte, 0x2000+uint32(i), uint32(b))
 	}
-	processor.(*cpu).regs.D[1] = 1                // EXG moves it into D0: DBRA branches once, then expires
+	processor.regs.D[1] = 1                       // EXG moves it into D0: DBRA branches once, then expires
 	for i, want := range []uint64{4, 8, 12, 16} { // NOP 4, EXG 6, DBRA taken 10, DBRA expired 14
 		start := processor.Cycles()
 		if err := processor.Step(); err != nil {

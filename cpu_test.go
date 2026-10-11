@@ -58,10 +58,7 @@ func TestCPUStringUsesPeekInsteadOfLiveReads(t *testing.T) {
 		t.Fatalf("create CPU: %v", err)
 	}
 
-	impl, ok := processor.(*cpu)
-	if !ok {
-		t.Fatalf("unexpected CPU implementation %T", processor)
-	}
+	impl := processor
 
 	readsAfterReset := mem.readCount
 	text := impl.String()

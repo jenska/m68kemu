@@ -27,11 +27,11 @@ func TestExceptionTracerReportsIllegalInstruction(t *testing.T) {
 		got    ExceptionInfo
 		state  DebugState
 	)
-	cpu.SetExceptionTracer(func(info ExceptionInfo) {
+	cpu.SetHooks(Hooks{Exception: func(info ExceptionInfo) {
 		called = true
 		got = info
 		state = cpu.DebugState()
-	})
+	}})
 
 	if err := cpu.Step(); err != nil {
 		t.Fatalf("step failed: %v", err)
@@ -82,9 +82,9 @@ func TestExceptionTracerReportsBusFaultDetails(t *testing.T) {
 	cpu.regs.A[0] = faultAddress
 
 	var got ExceptionInfo
-	cpu.SetExceptionTracer(func(info ExceptionInfo) {
+	cpu.SetHooks(Hooks{Exception: func(info ExceptionInfo) {
 		got = info
-	})
+	}})
 
 	if err := cpu.Step(); err != nil {
 		t.Fatalf("step failed: %v", err)
@@ -130,9 +130,9 @@ func TestBusTracerDistinguishesInstructionFetchAndDataAccess(t *testing.T) {
 	}
 
 	var accesses []BusAccessInfo
-	cpu.SetBusTracer(func(info BusAccessInfo) {
+	cpu.SetHooks(Hooks{Bus: func(info BusAccessInfo) {
 		accesses = append(accesses, info)
-	})
+	}})
 
 	if _, err := cpu.fetchOpcode(); err != nil {
 		t.Fatalf("fetch opcode failed: %v", err)
@@ -164,9 +164,9 @@ func TestTraceInfoIncludesOpcodeBytesAndCycleDelta(t *testing.T) {
 	line1 := program.EntryForLine(t, 1)
 
 	var trace TraceInfo
-	helper.cpu.SetTracer(func(info TraceInfo) {
+	helper.cpu.SetHooks(Hooks{Trace: func(info TraceInfo) {
 		trace = info
-	})
+	}})
 
 	helper.RunInstructions(1)
 
@@ -192,9 +192,9 @@ func TestTraceInfoIncludesMnemonicAndBeforeRegisters(t *testing.T) {
 	helper.LoadAssembly("MOVEQ #5,D0\nMOVEQ #6,D0\n")
 
 	var traces []TraceInfo
-	helper.cpu.SetTracer(func(info TraceInfo) {
+	helper.cpu.SetHooks(Hooks{Trace: func(info TraceInfo) {
 		traces = append(traces, info)
-	})
+	}})
 
 	helper.RunInstructions(2)
 
@@ -387,9 +387,9 @@ func TestExceptionTracingExposesOpcodeAddressAndFrame(t *testing.T) {
 	}
 
 	var got ExceptionInfo
-	cpu.SetExceptionTracer(func(info ExceptionInfo) {
+	cpu.SetHooks(Hooks{Exception: func(info ExceptionInfo) {
 		got = info
-	})
+	}})
 
 	if err := cpu.Step(); err != nil {
 		t.Fatalf("step failed: %v", err)
@@ -441,9 +441,9 @@ func TestBusTracerIncludesCurrentInstructionPC(t *testing.T) {
 	}
 
 	var accesses []BusAccessInfo
-	cpu.SetBusTracer(func(info BusAccessInfo) {
+	cpu.SetHooks(Hooks{Bus: func(info BusAccessInfo) {
 		accesses = append(accesses, info)
-	})
+	}})
 
 	if err := cpu.Step(); err != nil {
 		t.Fatalf("step failed: %v", err)
@@ -612,7 +612,7 @@ func TestStepTestHelperSupportsSmallRegressionScenarios(t *testing.T) {
 	})
 
 	helper.RunInstructions(2)
-	helper.AssertState(func(t *testing.T, cpu *cpu, _ *RAM) {
+	helper.AssertState(func(t *testing.T, cpu *CPU, _ *RAM) {
 		if cpu.regs.D[0] != 6 {
 			t.Fatalf("D0 = %d, want 6", cpu.regs.D[0])
 		}

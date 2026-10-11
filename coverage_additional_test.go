@@ -129,7 +129,6 @@ func TestBusPeekLongAcrossAdjacentDevices(t *testing.T) {
 func TestSchedulerNilAndCompactionPaths(t *testing.T) {
 	var nilScheduler *CycleScheduler
 	nilScheduler.Reset(12)
-	nilScheduler.AddListener(nil)
 	nilScheduler.Schedule(5, nil)
 	nilScheduler.ScheduleAfter(2, nil)
 	nilScheduler.Advance(0)

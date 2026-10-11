@@ -200,8 +200,8 @@ func TestNegExtSwapExg(t *testing.T) {
 	cpu.regs.D[0] = 1
 	cpu.regs.D[1] = 0x00000080
 	cpu.regs.D[2] = 0x12345678
-	cpu.regs.D[3] = -0x55555556
-	cpu.regs.D[4] = -0x44444445
+	cpu.regs.D[3] = 0xaaaaaaaa
+	cpu.regs.D[4] = 0xbbbbbbbb
 	cpu.regs.A[0] = 0x11111111
 
 	// Program: NEG.B D0; EXT.W D1; EXT.L D1; SWAP D2; EXG D3,D4; EXG D0,A0
@@ -248,7 +248,7 @@ func TestNegExtSwapExg(t *testing.T) {
 	}
 
 	step()
-	if cpu.regs.D[1] != -0x80 {
+	if cpu.regs.D[1] != 0xffffff80 {
 		t.Fatalf("EXT.L did not sign-extend word, got %08x", cpu.regs.D[1])
 	}
 
@@ -273,7 +273,7 @@ func TestNegExtSwapExg(t *testing.T) {
 	if opcode := step(); opcode != 0xc943 {
 		t.Fatalf("expected EXG Dx,Dy opcode, got %04x", opcode)
 	}
-	if cpu.regs.D[3] != -0x44444445 || cpu.regs.D[4] != -0x55555556 {
+	if cpu.regs.D[3] != 0xbbbbbbbb || cpu.regs.D[4] != 0xaaaaaaaa {
 		t.Fatalf("EXG Dx,Dy failed: D3=%08x D4=%08x", cpu.regs.D[3], cpu.regs.D[4])
 	}
 

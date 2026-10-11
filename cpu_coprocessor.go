@@ -74,7 +74,7 @@ type attachedCoprocessor struct {
 
 // coprocessorInstruction runs an F-line instruction for the coprocessor its
 // bits 11-9 name; without one it raises the line-F exception.
-func coprocessorInstruction(cpu *cpu) error {
+func coprocessorInstruction(cpu *CPU) error {
 	id := (cpu.regs.IR >> 9) & 7
 	cp := cpu.coprocessors[id]
 	instructionPC := cpu.currentOpcodeAddress(cpu.regs.PC - 2)
@@ -119,7 +119,7 @@ func coprocessorInstruction(cpu *cpu) error {
 // not implement; the CPU takes the line-F exception.
 var errCoprocessorRejected = errors.New("m68kemu: coprocessor rejected the instruction")
 
-func (cpu *cpu) cpGeneral(cp Coprocessor, id uint16) error {
+func (cpu *CPU) cpGeneral(cp Coprocessor, id uint16) error {
 	cmd, err := cpu.popPc(Word)
 	if err != nil {
 		return err
@@ -130,7 +130,7 @@ func (cpu *cpu) cpGeneral(cp Coprocessor, id uint16) error {
 	}
 	var dynamic uint32
 	if register >= 0 {
-		dynamic = uint32(cpu.regs.D[register&7])
+		dynamic = cpu.regs.D[register&7]
 	}
 	in, out := cp.Operands(uint16(cmd), dynamic)
 	var location cpOperand
@@ -171,7 +171,7 @@ func (cpu *cpu) cpGeneral(cp Coprocessor, id uint16) error {
 }
 
 // cpConditional runs cpScc, cpDBcc and cpTRAPcc.
-func (cpu *cpu) cpConditional(cp Coprocessor) error {
+func (cpu *CPU) cpConditional(cp Coprocessor) error {
 	condition, err := cpu.popPc(Word)
 	if err != nil {
 		return err
@@ -192,7 +192,7 @@ func (cpu *cpu) cpConditional(cp Coprocessor) error {
 			return nil
 		}
 		counter := uint16(cpu.regs.D[reg]) - 1
-		cpu.regs.D[reg] = cpu.regs.D[reg]&^0xffff | int32(counter)
+		cpu.regs.D[reg] = cpu.regs.D[reg]&^0xffff | uint32(counter)
 		if counter != 0xffff {
 			cpu.regs.PC = uint32(int32(basePC) + int32(int16(displacement)))
 		}
@@ -208,7 +208,7 @@ func (cpu *cpu) cpConditional(cp Coprocessor) error {
 		}
 		return cpu.synchronousException(7, cpu.regs.PC)
 	}
-	dst, err := cpu.ResolveSrcEA(Byte) // cpScc
+	dst, err := cpu.resolveSrcEA(Byte) // cpScc
 	if err != nil {
 		return err
 	}
@@ -223,7 +223,7 @@ func (cpu *cpu) cpConditional(cp Coprocessor) error {
 }
 
 // cpBranch runs cpBcc with a word or long displacement.
-func (cpu *cpu) cpBranch(cp Coprocessor, long bool) error {
+func (cpu *CPU) cpBranch(cp Coprocessor, long bool) error {
 	basePC := cpu.regs.PC
 	size := Word
 	if long {
@@ -248,7 +248,7 @@ func (cpu *cpu) cpBranch(cp Coprocessor, long bool) error {
 
 // cpSave writes the coprocessor's state frame to the effective address, a
 // control alterable mode or -(An).
-func (cpu *cpu) cpSave(cp Coprocessor) error {
+func (cpu *CPU) cpSave(cp Coprocessor) error {
 	if ok, err := cpu.requireSupervisor(); err != nil || !ok {
 		return err
 	}
@@ -263,7 +263,7 @@ func (cpu *cpu) cpSave(cp Coprocessor) error {
 // cpRestore reads a state frame from the effective address, a control mode
 // or (An)+: its first long, then as many bytes as that long gives. A frame
 // the coprocessor rejects raises the format-error exception.
-func (cpu *cpu) cpRestore(cp Coprocessor) error {
+func (cpu *CPU) cpRestore(cp Coprocessor) error {
 	if ok, err := cpu.requireSupervisor(); err != nil || !ok {
 		return err
 	}
@@ -305,7 +305,7 @@ const (
 // cpOperandLocation evaluates the instruction's effective address for an
 // operand of size bytes. (An)+ and -(An) step by the whole operand; a
 // cpRESTORE through (An)+ passes size 0 and steps as it reads.
-func (cpu *cpu) cpOperandLocation(size int) (cpOperand, error) {
+func (cpu *CPU) cpOperandLocation(size int) (cpOperand, error) {
 	mode, reg := (cpu.regs.IR>>3)&7, cpu.regs.IR&7
 	switch {
 	case mode == 0:
@@ -324,7 +324,7 @@ func (cpu *cpu) cpOperandLocation(size int) (cpOperand, error) {
 		cpu.regs.A[reg] -= step
 		return cpOperand{address: cpu.regs.A[reg]}, nil
 	}
-	operand, err := cpu.ResolveSrcEA(Long)
+	operand, err := cpu.resolveSrcEA(Long)
 	if err != nil {
 		return cpOperand{}, err
 	}
@@ -332,7 +332,7 @@ func (cpu *cpu) cpOperandLocation(size int) (cpOperand, error) {
 }
 
 // read returns the next n bytes of the operand.
-func (o *cpOperand) read(cpu *cpu, n int) ([]byte, error) {
+func (o *cpOperand) read(cpu *CPU, n int) ([]byte, error) {
 	b := make([]byte, n)
 	if err := o.readInto(cpu, b); err != nil {
 		return nil, err
@@ -341,7 +341,7 @@ func (o *cpOperand) read(cpu *cpu, n int) ([]byte, error) {
 }
 
 // readInto fills b with the next len(b) bytes of the operand.
-func (o *cpOperand) readInto(cpu *cpu, b []byte) error {
+func (o *cpOperand) readInto(cpu *CPU, b []byte) error {
 	n := len(b)
 	switch o.kind {
 	case cpOperandRegister:
@@ -378,7 +378,7 @@ func (o *cpOperand) readInto(cpu *cpu, b []byte) error {
 }
 
 // write stores b as the operand.
-func (o *cpOperand) write(cpu *cpu, b []byte) error {
+func (o *cpOperand) write(cpu *CPU, b []byte) error {
 	switch o.kind {
 	case cpOperandRegister:
 		var w [4]byte

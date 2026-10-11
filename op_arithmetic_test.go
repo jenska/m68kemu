@@ -2,7 +2,7 @@ package m68kemu
 
 import "testing"
 
-func runSingleInstruction(t *testing.T, cpu *cpu, ram *RAM, asmSrc string) {
+func runSingleInstruction(t *testing.T, cpu *CPU, ram *RAM, asmSrc string) {
 	t.Helper()
 
 	code := assemble(t, asmSrc)
@@ -140,12 +140,12 @@ func TestBCDZeroPropagation(t *testing.T) {
 			cpu, ram := newEnvironment(t)
 			cpu.regs.SR &^= srCarry | srExtend | srZero
 			cpu.regs.SR |= tt.setupSR
-			cpu.regs.D[0] = int32(tt.src)
-			cpu.regs.D[1] = int32(tt.dst)
+			cpu.regs.D[0] = uint32(tt.src)
+			cpu.regs.D[1] = uint32(tt.dst)
 
 			runSingleInstruction(t, cpu, ram, tt.asm)
 
-			if got := cpu.regs.D[1] & 0xff; got != int32(tt.wantDst) {
+			if got := cpu.regs.D[1] & 0xff; got != uint32(tt.wantDst) {
 				t.Fatalf("expected %02x in destination, got %02x", tt.wantDst, got)
 			}
 			if zSet := cpu.regs.SR&srZero != 0; zSet != tt.wantSRZ {
@@ -679,7 +679,7 @@ func TestAddiByteToDataRegister(t *testing.T) {
 		t.Fatalf("exec: %v", err)
 	}
 
-	if got := uint32(cpu.regs.D[0]); got != 0x00123400 {
+	if got := cpu.regs.D[0]; got != 0x00123400 {
 		t.Fatalf("expected D0=0x00123400 got %08x", got)
 	}
 	expected := uint16(srZero | srCarry | srExtend)
@@ -707,7 +707,7 @@ func TestSubiWordToDataRegister(t *testing.T) {
 		t.Fatalf("exec: %v", err)
 	}
 
-	if got := uint32(cpu.regs.D[1]); got != 0x1234ffff {
+	if got := cpu.regs.D[1]; got != 0x1234ffff {
 		t.Fatalf("expected D1=0x1234ffff got %08x", got)
 	}
 	expected := uint16(srNegative | srCarry | srExtend)
@@ -751,7 +751,7 @@ func TestMulDivInstructions(t *testing.T) {
 	cpu.regs.D[1] = 2
 	cpu.regs.D[2] = 4
 	cpu.regs.D[3] = 3
-	cpu.regs.D[4] = -2
+	cpu.regs.D[4] = 0xfffffffe
 
 	code := assemble(t, "DIVU D1,D0\nMULU D2,D0\nDIVS D3,D0\nMULS D4,D0\n")
 	for i, b := range code {
@@ -769,7 +769,7 @@ func TestMulDivInstructions(t *testing.T) {
 		if err := cpu.executeInstruction(opcode); err != nil {
 			t.Fatalf("exec: %v", err)
 		}
-		if cpu.regs.D[0] != expect {
+		if cpu.regs.D[0] != uint32(expect) {
 			t.Fatalf("expected %08x got %08x", expect, cpu.regs.D[0])
 		}
 	}
@@ -835,7 +835,7 @@ func TestDivByZeroTriggersExceptionVector(t *testing.T) {
 func TestMulDivImmediateInstructions(t *testing.T) {
 	cpu, ram := newEnvironment(t)
 	cpu.regs.D[0] = 3
-	cpu.regs.D[1] = -7
+	cpu.regs.D[1] = 0xfffffff9
 
 	code := []byte{
 		0xC0, 0xFC, 0x00, 0x05, // MULU #5,D0
@@ -856,7 +856,7 @@ func TestMulDivImmediateInstructions(t *testing.T) {
 		if err := cpu.executeInstruction(opcode); err != nil {
 			t.Fatalf("exec: %v", err)
 		}
-		if cpu.regs.D[reg] != expect {
+		if cpu.regs.D[reg] != uint32(expect) {
 			t.Fatalf("expected D%d=%08x got %08x", reg, expect, cpu.regs.D[reg])
 		}
 	}
@@ -1014,7 +1014,7 @@ func TestAddSubAddressRegisterSource(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			cpu, ram := newEnvironment(t)
 			cpu.regs.A[3] = tt.a3
-			cpu.regs.D[0] = tt.d0
+			cpu.regs.D[0] = uint32(tt.d0)
 			cpu.regs.SR = tt.sr
 
 			code := assemble(t, tt.asm)
@@ -1032,8 +1032,8 @@ func TestAddSubAddressRegisterSource(t *testing.T) {
 				t.Fatalf("execute %s: %v", tt.name, err)
 			}
 
-			if cpu.regs.D[0] != tt.wantD0 {
-				t.Fatalf("D0 = %08x, want %08x", uint32(cpu.regs.D[0]), uint32(tt.wantD0))
+			if cpu.regs.D[0] != uint32(tt.wantD0) {
+				t.Fatalf("D0 = %08x, want %08x", cpu.regs.D[0], uint32(tt.wantD0))
 			}
 		})
 	}

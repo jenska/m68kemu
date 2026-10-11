@@ -11,9 +11,9 @@ func TestTraceCallbackReceivesSnapshot(t *testing.T) {
 	program := helper.LoadAssembly("MOVEA.L #1,A1\n")
 
 	var traces []TraceInfo
-	helper.cpu.SetTracer(func(info TraceInfo) {
+	helper.cpu.SetHooks(Hooks{Trace: func(info TraceInfo) {
 		traces = append(traces, info)
-	})
+	}})
 
 	helper.RunInstructions(1)
 

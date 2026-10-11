@@ -62,17 +62,18 @@ type PeekDevice interface {
 type Bus struct {
 	// mask selects the address bits the bus decodes: 24 (the default) or
 	// 32.
-	mask         uint32
-	devices      []Device
-	waitStates   uint32
-	waitHook     func(states uint32)
+	mask       uint32
+	devices    []Device
+	waitStates uint32
+	waitHook   func(states uint32)
+	// cpu is the CPU the bus serves; NewCPU sets it.
+	cpu          *CPU
 	singleDevice Device
 	singleRAM    *RAM
-	// primaryRAM is the first RAM that no earlier device overlaps, so the
-	// bus would always pick it for its addresses. fastRAM is primaryRAM
-	// while no wait states apply; the CPU then reads and writes it directly.
-	primaryRAM          *RAM
-	fastRAM             *RAM
+	// fastLow and fastHigh hold the memory the CPU reads and writes
+	// directly, per 64 KB page, laid out like low and high (see bus_fastmem.go).
+	fastLow             fastTable
+	fastHigh            [256]*fastTable
 	hasWaitStateDevices bool
 	hasPageMap          bool
 	// low holds the device ranges of the 64 KB pages of the first 16 MB,
@@ -125,22 +126,18 @@ func NewBus(devices ...Device) *Bus {
 	return b
 }
 
-// SetAddressWidth sets the number of address bits the bus decodes: 24, the
-// default and the width of the MC68000 and MC68010, or 32, for the MC68020
-// and later with a full 32-bit address bus. It panics for other widths.
-func (b *Bus) SetAddressWidth(bits int) {
-	switch bits {
-	case 24:
-		b.mask = 0xffffff
-	case 32:
-		b.mask = 0xffffffff
-	default:
-		panic(fmt.Sprintf("m68kemu: unsupported bus address width %d", bits))
+// setAddressMask sets the address bits the bus decodes: 0xffffff on the
+// 24-bit bus of the MC68000 and MC68010, 0xffffffff from the MC68020 on.
+// NewCPU sets the mask of its model.
+func (b *Bus) setAddressMask(mask uint32) {
+	if b.mask != mask {
+		b.mask = mask
+		b.refreshTopology()
 	}
-	b.refreshTopology()
 }
 
-// AddressMask returns the address bits the bus decodes.
+// AddressMask returns the address bits the bus decodes: 24 until NewCPU
+// attaches an MC68020 or later, 32 after that.
 func (b *Bus) AddressMask() uint32 {
 	return b.mask
 }
@@ -155,7 +152,7 @@ func (b *Bus) AddDevice(device Device) {
 // transaction. A device may add to it by implementing WaitStateDevice.
 func (b *Bus) SetWaitStates(states uint32) {
 	b.waitStates = states
-	b.refreshFastRAM()
+	b.refreshTopology()
 }
 
 // Reset propagates a reset to all attached devices.
@@ -281,8 +278,6 @@ func (b *Bus) writeCycle(s Size, address uint32, value uint32) error {
 func (b *Bus) refreshTopology() {
 	b.singleDevice = nil
 	b.singleRAM = nil
-	b.primaryRAM = nil
-	b.fastRAM = nil
 	b.hasWaitStateDevices = false
 	b.hasPageMap = false
 	b.low = pageTable{}
@@ -290,6 +285,7 @@ func (b *Bus) refreshTopology() {
 	b.scanList = b.scanList[:0]
 	b.rangedCount = 0
 	var unranged []scanEntry
+	spans := make(map[Device]memorySpan)
 
 	if len(b.devices) == 1 {
 		b.singleDevice = b.devices[0]
@@ -307,7 +303,9 @@ func (b *Bus) refreshTopology() {
 		}
 
 		var contains func(uint32) bool
-		if c, ok := dev.(ContainsDevice); ok {
+		if span, ok := b.memorySpanOf(dev); ok {
+			spans[dev] = span // its range decides; Contains is not asked
+		} else if c, ok := dev.(ContainsDevice); ok {
 			contains = c.Contains
 		}
 		ranged, hasRange := dev.(AddressRangeDevice)
@@ -342,9 +340,11 @@ func (b *Bus) refreshTopology() {
 
 	b.rangedCount = len(b.scanList)
 	b.scanList = append(b.scanList, unranged...)
-	b.primaryRAM = b.findPrimaryRAM()
-
-	b.refreshFastRAM()
+	b.buildFastTables(spans)
+	if b.cpu != nil {
+		// The CPU's caches may hold memory the new map no longer has.
+		b.cpu.code, b.cpu.data = fastPage{}, fastPage{}
+	}
 }
 
 // boundedContains returns a check for a device whose AddressRange bounds its
@@ -364,45 +364,6 @@ func rangeContains(start, end, mask uint32) func(uint32) bool {
 		a := address & mask
 		return a >= start && a <= end
 	}
-}
-
-func (b *Bus) refreshFastRAM() {
-	b.fastRAM = nil
-	if b.waitStates != 0 || b.hasWaitStateDevices {
-		return
-	}
-	b.fastRAM = b.primaryRAM
-}
-
-// findPrimaryRAM returns the first RAM whose range no earlier device with an
-// address range overlaps. Devices without one are only asked for addresses
-// that no ranged device answers, so they never take the RAM's addresses.
-func (b *Bus) findPrimaryRAM() *RAM {
-	for i, dev := range b.devices {
-		ram, ok := dev.(*RAM)
-		if !ok || len(ram.mem) == 0 {
-			continue
-		}
-		start, end := ram.AddressRange()
-		if start&b.mask != start || end&b.mask != end || end < start {
-			continue // the range wraps or exceeds the bus width
-		}
-		overlapped := false
-		for _, earlier := range b.devices[:i] {
-			if r, ok := earlier.(AddressRangeDevice); ok {
-				s, e := r.AddressRange()
-				s, e = s&b.mask, e&b.mask
-				if s <= e && s <= end && e >= start {
-					overlapped = true
-					break
-				}
-			}
-		}
-		if !overlapped {
-			return ram
-		}
-	}
-	return nil
 }
 
 func (b *Bus) findDevice(address uint32) Device {

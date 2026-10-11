@@ -109,7 +109,7 @@ w4:     CMPI.W  #$8900,-16(A0)
 done:   BRA.S   done
 `, map[uint32]uint32{0x3000: ahi, 0x3004: alo, 0x3008: bhi, 0x300c: blo})
 
-	sum := math.Float64frombits(uint64(uint32(regs.D[0]))<<32 | uint64(uint32(regs.D[1])))
+	sum := math.Float64frombits(uint64(regs.D[0])<<32 | uint64(regs.D[1]))
 	if sum != 3.75 {
 		t.Fatalf("1.5 + 2.25 = %v, want 3.75", sum)
 	}
@@ -149,11 +149,11 @@ done:   BRA.S   done
 		return map[uint32]uint32{0x3000: math.Float32bits(2), 0x3004: math.Float32bits(16), 0x3008: hi, 0x300c: lo}
 	}())
 
-	if got := math.Float32frombits(uint32(regs.D[0])); got != 4 {
+	if got := math.Float32frombits(regs.D[0]); got != 4 {
 		t.Fatalf("sqrt(16) = %v, want 4", got)
 	}
-	if regs.D[1] != -7 {
-		t.Fatalf("FINTRZ(-7.9) as long = %d, want -7", regs.D[1])
+	if int32(regs.D[1]) != -7 {
+		t.Fatalf("FINTRZ(-7.9) as long = %d, want -7", int32(regs.D[1]))
 	}
 }
 
@@ -187,7 +187,7 @@ done:   BRA.S   done
 	if got := regs.D[0] & 0xffff; got != 0x1c00|fpu.VectorDZ {
 		t.Fatalf("response to a command with DZ pending = %04x, want take pre-instruction exception %04x", got, 0x1c00|fpu.VectorDZ)
 	}
-	if fpsr := uint32(regs.D[1]); fpsr&fpu.CCI == 0 || fpsr>>8&0xff != uint32(fpu.DZ) || fpsr&0x10 == 0 {
+	if fpsr := regs.D[1]; fpsr&fpu.CCI == 0 || fpsr>>8&0xff != uint32(fpu.DZ) || fpsr&0x10 == 0 {
 		t.Fatalf("FPSR = %08x, want I, the DZ exception and accrued DZ", fpsr)
 	}
 	if regs.D[2]&1 != 0 || regs.D[3]&1 != 1 {
@@ -228,8 +228,8 @@ done:   BRA.S   done
 		t.Fatalf("register select = %04x, want 4000 (FP1)", regs.D[1]&0xffff)
 	}
 	// 42 = $4004 0000 A8000000 00000000 in the 96-bit extended format.
-	if uint32(regs.D[2]) != 0x40040000 || uint32(regs.D[3]) != 0xa8000000 || regs.D[4] != 0 {
-		t.Fatalf("FMOVEM FP1 = %08x %08x %08x, want 40040000 a8000000 00000000", uint32(regs.D[2]), uint32(regs.D[3]), uint32(regs.D[4]))
+	if regs.D[2] != 0x40040000 || regs.D[3] != 0xa8000000 || regs.D[4] != 0 {
+		t.Fatalf("FMOVEM FP1 = %08x %08x %08x, want 40040000 a8000000 00000000", regs.D[2], regs.D[3], regs.D[4])
 	}
 	if regs.D[5]&0xffff != 0x1f38 {
 		t.Fatalf("save CIR = %04x, want the MC68882 idle frame 1f38", regs.D[5]&0xffff)

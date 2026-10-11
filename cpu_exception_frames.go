@@ -10,7 +10,7 @@ package m68kemu
 
 // frameSize returns the size in bytes of a frame of the given format on the
 // CPU's model, or 0 if the model does not have the format.
-func (cpu *cpu) frameSize(format uint16) uint32 {
+func (cpu *CPU) frameSize(format uint16) uint32 {
 	switch {
 	case format == 0:
 		return 8
@@ -123,7 +123,7 @@ type frameField struct {
 // real CPU does, it restores the registers saved when the instruction started
 // and stacks the instruction's address, so RTE runs the whole instruction
 // again. The MC68010 pushes a format $8 frame, later models format $B.
-func (cpu *cpu) raiseBusFault(vector uint32) error {
+func (cpu *CPU) raiseBusFault(vector uint32) error {
 	fault := cpu.fault
 	pc := cpu.currentOpcodeAddress(fault.pc)
 	cpu.regs = cpu.restartRegs
@@ -211,7 +211,7 @@ func (cpu *cpu) raiseBusFault(vector uint32) error {
 // Returning from a bus fault frame reruns the instruction that faulted (see
 // raiseBusFault). A throwaway frame (format $1) is popped, its SR selects the
 // stack, and RTE continues with the frame there.
-func rteFormatted(cpu *cpu) error {
+func rteFormatted(cpu *CPU) error {
 	if ok, err := cpu.requireSupervisor(); err != nil || !ok {
 		return err
 	}
@@ -225,7 +225,7 @@ func rteFormatted(cpu *cpu) error {
 
 // popFrame pops one exception frame for RTE and reports whether it was a
 // throwaway frame, after which RTE continues.
-func (cpu *cpu) popFrame() (bool, error) {
+func (cpu *CPU) popFrame() (bool, error) {
 	sp := cpu.regs.A[7]
 	sr, err := cpu.read(Word, sp)
 	if err != nil {

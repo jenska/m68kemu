@@ -126,7 +126,7 @@ func TestVerboseLoggerIncludesDisassemblyAndRanges(t *testing.T) {
 			{Start: cpu.regs.PC, Length: uint32(len(code)), Label: "program"},
 		},
 	})
-	cpu.SetTracer(logger.Trace)
+	cpu.SetHooks(Hooks{Trace: logger.Trace})
 
 	if err := cpu.Step(); err != nil {
 		t.Fatalf("step failed: %v", err)

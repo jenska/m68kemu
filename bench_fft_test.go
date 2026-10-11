@@ -419,7 +419,7 @@ func referenceFFT(x []complex128) []complex128 {
 
 // fftRun is a CPU with a variant's program loaded.
 type fftRun struct {
-	cpu      m68kemu.CPU
+	cpu      *m68kemu.CPU
 	ram      *m68kemu.RAM
 	v        fftVariant
 	n        int

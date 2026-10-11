@@ -92,11 +92,11 @@ type flagOperation func(src, dst uint32, size Size) (uint32, uint16)
 
 // addSub is ADD (line $D) or SUB (line 9), <ea>,Dn (opmode 0-2) or
 // Dn,<ea> (opmode 4-6).
-func addSub(cpu *cpu) error {
+func addSub(cpu *CPU) error {
 	opmode := (cpu.regs.IR >> 6) & 0x7
 	size := operandSizeFromOpmode(opmode)
 
-	operand, err := cpu.ResolveSrcEA(size)
+	operand, err := cpu.resolveSrcEA(size)
 	if err != nil {
 		return err
 	}
@@ -105,7 +105,7 @@ func addSub(cpu *cpu) error {
 		return err
 	}
 
-	dn := udx(cpu)
+	dn := dx(cpu)
 	src, dst := value, *dn&size.mask()
 	if opmode >= 4 {
 		src, dst = dst, src
@@ -132,7 +132,7 @@ func addSub(cpu *cpu) error {
 // addq and subq stay separate: they run in nearly every loop, and a merged
 // handler measurably slows them down. An address register destination takes
 // the whole register and leaves the condition codes alone.
-func addq(cpu *cpu) error {
+func addq(cpu *CPU) error {
 	size := operandSizeFromOpcode(cpu.regs.IR)
 	quick := quickData(cpu.regs.IR)
 
@@ -141,7 +141,7 @@ func addq(cpu *cpu) error {
 		return nil
 	}
 
-	dst, err := cpu.ResolveSrcEA(size)
+	dst, err := cpu.resolveSrcEA(size)
 	if err != nil {
 		return err
 	}
@@ -158,7 +158,7 @@ func addq(cpu *cpu) error {
 	return nil
 }
 
-func subq(cpu *cpu) error {
+func subq(cpu *CPU) error {
 	size := operandSizeFromOpcode(cpu.regs.IR)
 	quick := quickData(cpu.regs.IR)
 
@@ -167,7 +167,7 @@ func subq(cpu *cpu) error {
 		return nil
 	}
 
-	dst, err := cpu.ResolveSrcEA(size)
+	dst, err := cpu.resolveSrcEA(size)
 	if err != nil {
 		return err
 	}
@@ -192,15 +192,15 @@ func quickData(ir uint16) uint32 {
 	return 8
 }
 
-func addi(cpu *cpu) error {
+func addi(cpu *CPU) error {
 	return arithmeticImmediate(cpu, addWithFlags)
 }
 
-func subi(cpu *cpu) error {
+func subi(cpu *CPU) error {
 	return arithmeticImmediate(cpu, subWithFlags)
 }
 
-func arithmeticImmediate(cpu *cpu, op flagOperation) error {
+func arithmeticImmediate(cpu *CPU, op flagOperation) error {
 	size := operandSizeFromOpcode(cpu.regs.IR)
 
 	srcVal, err := cpu.popImmediate(size)
@@ -208,7 +208,7 @@ func arithmeticImmediate(cpu *cpu, op flagOperation) error {
 		return err
 	}
 
-	dst, err := cpu.ResolveSrcEA(size)
+	dst, err := cpu.resolveSrcEA(size)
 	if err != nil {
 		return err
 	}
@@ -329,8 +329,8 @@ func arithmeticImmediateCycleCalculator() cycleCalculator {
 	}
 }
 
-func divu(cpu *cpu) error {
-	src, err := cpu.ResolveSrcEA(Word)
+func divu(cpu *CPU) error {
+	src, err := cpu.resolveSrcEA(Word)
 	if err != nil {
 		return err
 	}
@@ -342,7 +342,7 @@ func divu(cpu *cpu) error {
 		return cpu.exceptionWithCycles(XDivByZero, divExceptionCycles(cpu.regs.IR))
 	}
 
-	dividend := uint32(*dx(cpu))
+	dividend := *dx(cpu)
 	cpu.addCycles(divuCycles(dividend, uint16(divisor)))
 	quotient := dividend / divisor
 	if quotient > 0xffff {
@@ -350,13 +350,13 @@ func divu(cpu *cpu) error {
 		return nil
 	}
 	remainder := dividend % divisor
-	*dx(cpu) = int32(remainder<<16 | quotient)
+	*dx(cpu) = remainder<<16 | quotient
 	updateNZClearVC(cpu, quotient, Word)
 	return nil
 }
 
-func divs(cpu *cpu) error {
-	src, err := cpu.ResolveSrcEA(Word)
+func divs(cpu *CPU) error {
+	src, err := cpu.resolveSrcEA(Word)
 	if err != nil {
 		return err
 	}
@@ -369,7 +369,7 @@ func divs(cpu *cpu) error {
 		return cpu.exceptionWithCycles(XDivByZero, divExceptionCycles(cpu.regs.IR))
 	}
 
-	dividend := *dx(cpu)
+	dividend := int32(*dx(cpu))
 	cpu.addCycles(divsCycles(dividend, int16(divisor)))
 	quotient := dividend / divisor
 	if quotient > 0x7fff || quotient < -0x8000 {
@@ -377,13 +377,13 @@ func divs(cpu *cpu) error {
 		return nil
 	}
 	remainder := dividend % divisor
-	*dx(cpu) = int32(uint32(uint16(remainder))<<16 | uint32(uint16(quotient)))
+	*dx(cpu) = uint32(uint16(remainder))<<16 | uint32(uint16(quotient))
 	updateNZClearVC(cpu, uint32(quotient), Word)
 	return nil
 }
 
-func mulu(cpu *cpu) error {
-	src, err := cpu.ResolveSrcEA(Word)
+func mulu(cpu *CPU) error {
+	src, err := cpu.resolveSrcEA(Word)
 	if err != nil {
 		return err
 	}
@@ -394,13 +394,13 @@ func mulu(cpu *cpu) error {
 
 	cpu.addCycles(muluCycles(uint16(op)))
 	result := uint32(uint16(op)) * uint32(uint16(*dx(cpu)))
-	*dx(cpu) = int32(result)
+	*dx(cpu) = result
 	updateNZClearVC(cpu, result, Long)
 	return nil
 }
 
-func muls(cpu *cpu) error {
-	src, err := cpu.ResolveSrcEA(Word)
+func muls(cpu *CPU) error {
+	src, err := cpu.resolveSrcEA(Word)
 	if err != nil {
 		return err
 	}
@@ -411,19 +411,19 @@ func muls(cpu *cpu) error {
 
 	cpu.addCycles(mulsCycles(uint16(opRaw)))
 	result := int32(int16(opRaw)) * int32(int16(*dx(cpu)))
-	*dx(cpu) = result
+	*dx(cpu) = uint32(result)
 	updateNZClearVC(cpu, uint32(result), Long)
 	return nil
 }
 
-func adda(cpu *cpu) error { return addaSuba(cpu, false) }
-func suba(cpu *cpu) error { return addaSuba(cpu, true) }
+func adda(cpu *CPU) error { return addaSuba(cpu, false) }
+func suba(cpu *CPU) error { return addaSuba(cpu, true) }
 
 // addaSuba adds the sign-extended source to An, or subtracts it.
-func addaSuba(cpu *cpu, subtract bool) error {
+func addaSuba(cpu *CPU, subtract bool) error {
 	size := cmpaOperandSize(cpu.regs.IR)
 
-	src, err := cpu.ResolveSrcEA(size)
+	src, err := cpu.resolveSrcEA(size)
 	if err != nil {
 		return err
 	}
@@ -455,10 +455,10 @@ func addaSubaCycleCalculator() cycleCalculator {
 	}
 }
 
-func negInstruction(cpu *cpu) error {
+func negInstruction(cpu *CPU) error {
 	size := operandSizeFromOpcode(cpu.regs.IR)
 
-	dst, err := cpu.ResolveSrcEA(size)
+	dst, err := cpu.resolveSrcEA(size)
 	if err != nil {
 		return err
 	}
@@ -505,10 +505,10 @@ func registerCompare(b *tableBuilder) {
 	}
 }
 
-func cmpInstruction(cpu *cpu) error {
+func cmpInstruction(cpu *CPU) error {
 	size := operandSizeFromOpcode(cpu.regs.IR)
 
-	src, err := cpu.ResolveSrcEA(size)
+	src, err := cpu.resolveSrcEA(size)
 	if err != nil {
 		return err
 	}
@@ -517,16 +517,16 @@ func cmpInstruction(cpu *cpu) error {
 		return err
 	}
 
-	dst := udx(cpu)
+	dst := dx(cpu)
 	_, flags := subWithFlags(srcVal, *dst&size.mask(), size)
 	replaceStatusFlags(cpu, statusMaskNZVC, flags)
 	return nil
 }
 
-func cmpa(cpu *cpu) error {
+func cmpa(cpu *CPU) error {
 	size := cmpaOperandSize(cpu.regs.IR)
 
-	src, err := cpu.ResolveSrcEA(size)
+	src, err := cpu.resolveSrcEA(size)
 	if err != nil {
 		return err
 	}
@@ -544,7 +544,7 @@ func cmpa(cpu *cpu) error {
 	return nil
 }
 
-func cmpi(cpu *cpu) error {
+func cmpi(cpu *CPU) error {
 	size := operandSizeFromOpcode(cpu.regs.IR)
 
 	srcVal, err := cpu.popImmediate(size)
@@ -552,7 +552,7 @@ func cmpi(cpu *cpu) error {
 		return err
 	}
 
-	dst, err := cpu.ResolveSrcEA(size)
+	dst, err := cpu.resolveSrcEA(size)
 	if err != nil {
 		return err
 	}
@@ -566,7 +566,7 @@ func cmpi(cpu *cpu) error {
 	return nil
 }
 
-func cmpm(cpu *cpu) error {
+func cmpm(cpu *CPU) error {
 	size := operandSizeFromOpcode(cpu.regs.IR)
 	srcReg := cpu.regs.IR & 0x7
 	dstReg := (cpu.regs.IR >> 9) & 0x7
@@ -651,12 +651,12 @@ func registerAddxSubxNegx(b *tableBuilder) {
 	}
 }
 
-func addx(cpu *cpu) error { return addxSubx(cpu, addWithExtend) }
-func subx(cpu *cpu) error { return addxSubx(cpu, subWithExtend) }
+func addx(cpu *CPU) error { return addxSubx(cpu, addWithExtend) }
+func subx(cpu *CPU) error { return addxSubx(cpu, subWithExtend) }
 
 // addxSubx is ADDX or SUBX, Dy,Dx or -(Ay),-(Ax). Z is only ever cleared,
 // so it stays set across a multi-precision chain whose parts are all zero.
-func addxSubx(cpu *cpu, op func(src, dst uint32, size Size, extend bool) (uint32, uint16)) error {
+func addxSubx(cpu *CPU, op func(src, dst uint32, size Size, extend bool) (uint32, uint16)) error {
 	size := operandSizeFromOpcode(cpu.regs.IR)
 
 	src, dst, err := extendOperands(cpu, size)
@@ -676,10 +676,10 @@ func addxSubx(cpu *cpu, op func(src, dst uint32, size Size, extend bool) (uint32
 	return nil
 }
 
-func negx(cpu *cpu) error {
+func negx(cpu *CPU) error {
 	size := operandSizeFromOpcode(cpu.regs.IR)
 
-	operand, err := cpu.ResolveSrcEA(size)
+	operand, err := cpu.resolveSrcEA(size)
 	if err != nil {
 		return err
 	}
@@ -705,10 +705,10 @@ type extendOperand struct {
 	write func(uint32) error
 }
 
-func extendOperands(cpu *cpu, size Size) (extendOperand, extendOperand, error) {
+func extendOperands(cpu *CPU, size Size) (extendOperand, extendOperand, error) {
 	if (cpu.regs.IR>>3)&0x1 == 0 {
 		src := dy(cpu)
-		dst := udx(cpu)
+		dst := dx(cpu)
 		return extendOperand{value: *src}, extendOperand{
 			value: *dst,
 			write: func(v uint32) error {
@@ -834,11 +834,11 @@ func registerBCD(b *tableBuilder) {
 		nbcdCycleCalculator)
 }
 
-func abcd(cpu *cpu) error { return abcdSbcd(cpu, bcdAdd) }
-func sbcd(cpu *cpu) error { return abcdSbcd(cpu, bcdSub) }
+func abcd(cpu *CPU) error { return abcdSbcd(cpu, bcdAdd) }
+func sbcd(cpu *CPU) error { return abcdSbcd(cpu, bcdSub) }
 
 // abcdSbcd is ABCD or SBCD, Dy,Dx or -(Ay),-(Ax).
-func abcdSbcd(cpu *cpu, op func(src, dst byte, extend bool) (byte, bool)) error {
+func abcdSbcd(cpu *CPU, op func(src, dst byte, extend bool) (byte, bool)) error {
 	src, dst, err := bcdOperands(cpu)
 	if err != nil {
 		return err
@@ -854,8 +854,8 @@ func abcdSbcd(cpu *cpu, op func(src, dst byte, extend bool) (byte, bool)) error 
 	return nil
 }
 
-func nbcd(cpu *cpu) error {
-	dst, err := cpu.ResolveSrcEA(Byte)
+func nbcd(cpu *CPU) error {
+	dst, err := cpu.resolveSrcEA(Byte)
 	if err != nil {
 		return err
 	}
@@ -875,7 +875,7 @@ func nbcd(cpu *cpu) error {
 	return nil
 }
 
-func updateBCDFlags(cpu *cpu, result byte, carry bool, prevZero bool, propagateZero bool) {
+func updateBCDFlags(cpu *CPU, result byte, carry bool, prevZero bool, propagateZero bool) {
 	cpu.regs.SR &^= srCarry | srOverflow | srNegative
 	if carry {
 		cpu.regs.SR |= srCarry | srExtend
@@ -935,10 +935,10 @@ type bcdOperand struct {
 	write func(byte) error
 }
 
-func bcdOperands(cpu *cpu) (bcdOperand, bcdOperand, error) {
+func bcdOperands(cpu *CPU) (bcdOperand, bcdOperand, error) {
 	if (cpu.regs.IR>>3)&0x1 == 0 {
 		srcReg := dy(cpu)
-		dstReg := udx(cpu)
+		dstReg := dx(cpu)
 		return bcdOperand{value: byte(*srcReg & 0xff)}, bcdOperand{
 			value: byte(*dstReg & 0xff),
 			write: func(v byte) error {
@@ -1003,10 +1003,10 @@ func registerClrTst(b *tableBuilder) {
 	}
 }
 
-func clr(cpu *cpu) error {
+func clr(cpu *CPU) error {
 	size := operandSizeFromOpcode(cpu.regs.IR)
 
-	dst, err := cpu.ResolveSrcEA(size)
+	dst, err := cpu.resolveSrcEA(size)
 	if err != nil {
 		return err
 	}
@@ -1019,10 +1019,10 @@ func clr(cpu *cpu) error {
 	return nil
 }
 
-func tst(cpu *cpu) error {
+func tst(cpu *CPU) error {
 	size := operandSizeFromOpcode(cpu.regs.IR)
 
-	src, err := cpu.ResolveSrcEA(size)
+	src, err := cpu.resolveSrcEA(size)
 	if err != nil {
 		return err
 	}

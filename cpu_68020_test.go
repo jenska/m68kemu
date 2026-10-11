@@ -8,7 +8,7 @@ import (
 
 // newEnvironmentFor returns a CPU of model m, which NewCPU may not accept
 // yet, with 64 KB of RAM and the reset vectors SSP=$1000, PC=$2000.
-func newEnvironmentFor(tb testing.TB, m Model, devices ...Device) (*cpu, *RAM) {
+func newEnvironmentFor(tb testing.TB, m Model, devices ...Device) (*CPU, *RAM) {
 	tb.Helper()
 	ram := NewRAM(0, 0x10000)
 	ram.Write(Long, 0, 0x1000)
@@ -21,7 +21,7 @@ func newEnvironmentFor(tb testing.TB, m Model, devices ...Device) (*cpu, *RAM) {
 }
 
 // load020 assembles source for the MC68020 and stores it at the current PC.
-func load020(tb testing.TB, cpu *cpu, ram *RAM, source string) {
+func load020(tb testing.TB, cpu *CPU, ram *RAM, source string) {
 	tb.Helper()
 	code, err := asm.AssembleStringWithOptions(source, asm.ParseOptions{Target: asm.Target{CPU: asm.CPU68020}})
 	if err != nil {
@@ -54,7 +54,7 @@ func TestMasterAndInterruptStacks(t *testing.T) {
 	for range 4 {
 		step(t, cpu)
 	}
-	if uint32(cpu.regs.D[2]) != isp || cpu.regs.A[7] != 0x0e00 || cpu.regs.MSP != 0x3000 {
+	if cpu.regs.D[2] != isp || cpu.regs.A[7] != 0x0e00 || cpu.regs.MSP != 0x3000 {
 		t.Fatalf("in user mode: D2=%x A7=%x MSP=%x; want %x, e00, 3000", cpu.regs.D[2], cpu.regs.A[7], cpu.regs.MSP, isp)
 	}
 }
@@ -69,8 +69,8 @@ func TestCacheControlRegisters(t *testing.T) {
 		for range 5 {
 			step(t, cpu)
 		}
-		if uint32(cpu.regs.D[1]) != tt.cacr || cpu.regs.D[2] != -1 {
-			t.Fatalf("%v: CACR=%x CAAR=%x; want %x and ffffffff", tt.model, uint32(cpu.regs.D[1]), uint32(cpu.regs.D[2]), tt.cacr)
+		if cpu.regs.D[1] != tt.cacr || cpu.regs.D[2] != 0xffffffff {
+			t.Fatalf("%v: CACR=%x CAAR=%x; want %x and ffffffff", tt.model, cpu.regs.D[1], cpu.regs.D[2], tt.cacr)
 		}
 	}
 
@@ -144,7 +144,7 @@ func TestFormatBBusFault(t *testing.T) {
 	start, ssp := cpu.regs.PC, cpu.regs.A[7]
 
 	var info ExceptionInfo
-	cpu.SetExceptionTracer(func(i ExceptionInfo) { info = i })
+	cpu.SetHooks(Hooks{Exception: func(i ExceptionInfo) { info = i }})
 	step(t, cpu)
 	f := info.Frame
 	if f.Format != ExceptionStackFrameFormatB || f.StackPointer != ssp-92 || f.PC != start {
@@ -183,8 +183,8 @@ func TestMisalignedOperands(t *testing.T) {
 			t.Fatalf("byte at %x = %02x, want %02x", addr, got, want)
 		}
 	}
-	if cpu.regs.D[1]&0xffff != 0x2233 || uint32(cpu.regs.D[2]) != 0x11223344 {
-		t.Fatalf("D1=%x D2=%x, want 2233 and 11223344", cpu.regs.D[1]&0xffff, uint32(cpu.regs.D[2]))
+	if cpu.regs.D[1]&0xffff != 0x2233 || cpu.regs.D[2] != 0x11223344 {
+		t.Fatalf("D1=%x D2=%x, want 2233 and 11223344", cpu.regs.D[1]&0xffff, cpu.regs.D[2])
 	}
 }
 
@@ -227,8 +227,8 @@ func TestIndexedAddressingModes020(t *testing.T) {
 	if cpu.regs.A[1] != 0x3000+8+4 {
 		t.Fatalf("LEA (8,A0,D1.W*2) = %x, want %x", cpu.regs.A[1], 0x3000+8+4)
 	}
-	if uint32(cpu.regs.D[0]) != 0xaaaa0001 || uint32(cpu.regs.D[2]) != 0xbbbb0002 || uint32(cpu.regs.D[3]) != 0xcccc0003 {
-		t.Fatalf("D0=%x D2=%x D3=%x, want aaaa0001, bbbb0002, cccc0003", uint32(cpu.regs.D[0]), uint32(cpu.regs.D[2]), uint32(cpu.regs.D[3]))
+	if cpu.regs.D[0] != 0xaaaa0001 || cpu.regs.D[2] != 0xbbbb0002 || cpu.regs.D[3] != 0xcccc0003 {
+		t.Fatalf("D0=%x D2=%x D3=%x, want aaaa0001, bbbb0002, cccc0003", cpu.regs.D[0], cpu.regs.D[2], cpu.regs.D[3])
 	}
 	lea := start + 4 + 4 + 12 + 12 // address of LEA (6,PC,D1.W*4)
 	if cpu.regs.A[4] != lea+2+6+8 {

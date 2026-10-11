@@ -32,7 +32,7 @@ type VerboseLoggerOptions struct {
 
 // VerboseLogger formats trace callbacks with disassembly and optional state dumps.
 type VerboseLogger struct {
-	cpu     CPU
+	cpu     *CPU
 	bus     AddressBus
 	writer  io.Writer
 	options VerboseLoggerOptions
@@ -48,7 +48,7 @@ func (line DisassemblyLine) String() string {
 }
 
 // NewVerboseLogger builds a trace callback helper that writes detailed execution logs.
-func NewVerboseLogger(cpu CPU, bus AddressBus, writer io.Writer, options VerboseLoggerOptions) *VerboseLogger {
+func NewVerboseLogger(cpu *CPU, bus AddressBus, writer io.Writer, options VerboseLoggerOptions) *VerboseLogger {
 	if writer == nil {
 		writer = io.Discard
 	}
@@ -60,7 +60,7 @@ func NewVerboseLogger(cpu CPU, bus AddressBus, writer io.Writer, options Verbose
 	}
 }
 
-// Trace implements TraceCallback for use with CPU.SetTracer.
+// Trace implements TraceCallback; install it with CPU.SetHooks.
 func (logger *VerboseLogger) Trace(info TraceInfo) {
 	if logger == nil {
 		return

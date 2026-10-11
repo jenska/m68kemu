@@ -289,25 +289,56 @@ func TestBusPanicsOnUnlocatableDevice(t *testing.T) {
 	NewBus(unlocatableDevice{})
 }
 
-func TestBusFastRAMBesideOtherDevices(t *testing.T) {
-	ram := NewRAM(0, 0x10000)
+func TestBusFastTable(t *testing.T) {
+	ram := NewRAM(0, 0x20000)
 	io := newStubMappedDevice(0x10000, 0x1000f)
-	if bus := NewBus(ram, io); bus.fastRAM != ram {
-		t.Fatalf("RAM beside an I/O device: fastRAM = %p, want the RAM", bus.fastRAM)
+	fastBase := func(b *Bus, address uint32) (uint32, int) {
+		p := b.fastPageFor(address)
+		return p.base, len(p.mem)
 	}
-	if bus := NewBus(io, ram); bus.fastRAM != ram {
-		t.Fatalf("RAM after a disjoint device: fastRAM = %p, want the RAM", bus.fastRAM)
+
+	bus := NewBus(io, ram)
+	if base, n := fastBase(bus, 0x8000); base != 0 || n != 0x10000 {
+		t.Fatalf("page 0 = (%x, %x), want the whole RAM page", base, n)
 	}
+	// The I/O device takes the start of page 1; the RAM keeps the rest.
+	if base, n := fastBase(bus, 0x18000); base != 0x10010 || n != 0xfff0 {
+		t.Fatalf("page 1 = (%x, %x), want (10010, fff0)", base, n)
+	}
+
 	overlay := newStubMappedDevice(0x0000, 0x0007)
-	if bus := NewBus(overlay, ram); bus.fastRAM != nil {
-		t.Fatalf("RAM under an earlier overlay: fastRAM = %p, want none", bus.fastRAM)
+	bus = NewBus(overlay, ram)
+	if base, n := fastBase(bus, 0); base != 8 || n != 0xfff8 {
+		t.Fatalf("RAM under an overlay = (%x, %x), want (8, fff8)", base, n)
 	}
-	bus := NewBus(ram, io)
-	bus.SetWaitStates(1)
-	if bus.fastRAM != nil {
-		t.Fatalf("with wait states: fastRAM = %p, want none", bus.fastRAM)
+
+	bus = NewBus(ram)
+	bus.SetWaitStates(2)
+	if p := bus.fastPageFor(0); len(p.mem) == 0 || p.wait != 2 {
+		t.Fatalf("with wait states: page 0 = %d bytes, wait %d; want direct with wait 2", len(p.mem), p.wait)
+	}
+
+	rom := NewROM(0x40000, make([]byte, 0x100))
+	bus = NewBus(rom)
+	if p := bus.fastPageFor(0x40000); len(p.mem) != 0x100 || !p.readOnly {
+		t.Fatalf("ROM page = %d bytes, read-only %v; want 256, true", len(p.mem), p.readOnly)
+	}
+
+	bus = NewBus(waitStateRAM{NewRAM(0, 0x100)})
+	if p := bus.fastPageFor(0); len(p.mem) != 0 {
+		t.Fatalf("a memory device with its own wait states is accessed directly")
+	}
+
+	bus = NewBus(NewRAM(0xff000000, 0x20000))
+	bus.setAddressMask(0xffffffff)
+	if base, n := fastBase(bus, 0xff010000); base != 0xff010000 || n != 0x10000 {
+		t.Fatalf("32-bit page = (%x, %x), want (ff010000, 10000)", base, n)
 	}
 }
+
+type waitStateRAM struct{ *RAM }
+
+func (waitStateRAM) WaitStates(Size, uint32) uint32 { return 1 }
 
 // TestCPUFastRAMFallsThroughToBus checks that accesses the fast RAM does not
 // wholly hold reach the other devices, or fail, as through the bus.
@@ -319,7 +350,7 @@ func TestCPUFastRAMFallsThroughToBus(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	cpu := c.(*cpu)
+	cpu := c
 	if err := ram.Write(Word, 0xfffe, 0xabcd); err != nil {
 		t.Fatal(err)
 	}

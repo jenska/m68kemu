@@ -10,7 +10,7 @@ func TestBus32DecodesFullAddresses(t *testing.T) {
 	io := newStubMappedDevice(0xffff8000, 0xffff80ff)
 	io.data[0xffff8000] = 0x1234
 	bus := NewBus(ram, io)
-	bus.SetAddressWidth(32)
+	bus.setAddressMask(0xffffffff)
 	if bus.AddressMask() != 0xffffffff {
 		t.Fatalf("AddressMask = %x, want ffffffff", bus.AddressMask())
 	}
@@ -44,7 +44,7 @@ func TestBus32MapDevice(t *testing.T) {
 	inner := newStubMappedDevice(0xffff8000, 0xffff80ff)
 	inner.data[0xffff8002] = 0x55
 	bus := NewBus(NewRAM(0, 0x100), MapDevice(0xffff8000, 0xffff80ff, inner))
-	bus.SetAddressWidth(32)
+	bus.setAddressMask(0xffffffff)
 	if v, err := bus.Read(Word, 0xffff8002); err != nil || v != 0x55 {
 		t.Fatalf("read through MapDevice = %x, %v; want 55", v, err)
 	}
@@ -57,7 +57,7 @@ func TestBus32DeviceAcrossTopLevelTables(t *testing.T) {
 	ram := NewRAM(0x00ff0000, 0x20000) // $00FF0000-$0100FFFF
 	other := newStubMappedDevice(0x40000000, 0x4000ffff)
 	bus := NewBus(ram, other)
-	bus.SetAddressWidth(32)
+	bus.setAddressMask(0xffffffff)
 	for _, a := range []uint32{0x00ff0000, 0x00fffffe, 0x01000000, 0x0100fffe} {
 		if err := bus.Write(Word, a, a>>8&0xffff); err != nil {
 			t.Fatalf("write %08x: %v", a, err)
@@ -69,13 +69,4 @@ func TestBus32DeviceAcrossTopLevelTables(t *testing.T) {
 	if _, err := bus.Read(Word, 0x01010000); err == nil {
 		t.Fatalf("read past the RAM should fail")
 	}
-}
-
-func TestBusSetAddressWidthRejectsOtherWidths(t *testing.T) {
-	defer func() {
-		if recover() == nil {
-			t.Fatalf("SetAddressWidth(16) should panic")
-		}
-	}()
-	NewBus(NewRAM(0, 0x100)).SetAddressWidth(16)
 }

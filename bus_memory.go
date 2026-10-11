@@ -4,7 +4,8 @@ import (
 	"fmt"
 )
 
-// simple flat memory structure
+// RAM is flat read/write memory at a fixed address range. It is a
+// MemoryDevice, so the CPU accesses it directly.
 type RAM struct {
 	offset uint32
 	mem    []byte
@@ -72,6 +73,67 @@ func (ram *RAM) Reset() {
 	// CPU RESET does not erase system RAM on a 68000-based machine such as the Atari ST.
 }
 
+// NewRAM returns size bytes of zeroed RAM starting at address offset.
 func NewRAM(offset, size uint32) *RAM {
 	return &RAM{offset: offset, mem: make([]byte, size)}
+}
+
+// Memory implements MemoryDevice.
+func (ram *RAM) Memory() ([]byte, bool) {
+	return ram.mem, false
+}
+
+// Bytes returns the RAM's contents; index 0 is the byte at its start address.
+// The slice is the live backing store.
+func (ram *RAM) Bytes() []byte {
+	return ram.mem
+}
+
+// Load copies data into the RAM at address. It returns a BusError, and
+// copies nothing, when data does not fit.
+func (ram *RAM) Load(address uint32, data []byte) error {
+	if len(data) == 0 {
+		return nil
+	}
+	if address < ram.offset || uint64(address-ram.offset)+uint64(len(data)) > uint64(len(ram.mem)) {
+		return BusError(address)
+	}
+	copy(ram.mem[address-ram.offset:], data)
+	return nil
+}
+
+// ROM is read-only memory at a fixed address range. Writes to it are bus
+// errors. It is a MemoryDevice, so the CPU reads it directly.
+type ROM RAM
+
+// NewROM returns a ROM at address offset holding a copy of data.
+func NewROM(offset uint32, data []byte) *ROM {
+	return &ROM{offset: offset, mem: append([]byte(nil), data...)}
+}
+
+func (rom *ROM) AddressRange() (uint32, uint32) { return (*RAM)(rom).AddressRange() }
+
+func (rom *ROM) Read(s Size, address uint32) (uint32, error) {
+	return (*RAM)(rom).Read(s, address)
+}
+
+func (rom *ROM) Peek(s Size, address uint32) (uint32, error) {
+	return (*RAM)(rom).Read(s, address)
+}
+
+// Write fails with a BusError.
+func (rom *ROM) Write(s Size, address uint32, value uint32) error {
+	return BusError(address)
+}
+
+func (rom *ROM) Reset() {}
+
+// Memory implements MemoryDevice.
+func (rom *ROM) Memory() ([]byte, bool) {
+	return rom.mem, true
+}
+
+// Bytes returns the ROM's contents; index 0 is the byte at its start address.
+func (rom *ROM) Bytes() []byte {
+	return rom.mem
 }

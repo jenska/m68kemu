@@ -53,12 +53,14 @@ func runConcurrencyProgram(t *testing.T, m Model, hooks bool, code []byte, data 
 	}
 	if hooks {
 		var mnemonics, accesses int
-		c.SetTracer(func(info TraceInfo) {
-			if info.Mnemonic != "" {
-				mnemonics++
-			}
+		c.SetHooks(Hooks{
+			Trace: func(info TraceInfo) {
+				if info.Mnemonic != "" {
+					mnemonics++
+				}
+			},
+			Bus: func(BusAccessInfo) { accesses++ },
 		})
-		c.SetBusTracer(func(BusAccessInfo) { accesses++ })
 		c.SetHistoryLimit(32)
 		scheduler := NewCycleScheduler()
 		var tick func(uint64)
@@ -137,7 +139,7 @@ func TestCPUsRunConcurrently(t *testing.T) {
 // newInterruptCounter returns a CPU that spins in a loop with interrupts
 // enabled and whose level 2 autovector handler counts interrupts in D7.
 // program is placed at $2000.
-func newInterruptCounter(t *testing.T, program string) *cpu {
+func newInterruptCounter(t *testing.T, program string) *CPU {
 	t.Helper()
 	ram := NewRAM(0, 0x10000)
 	ram.Write(Long, 0, 0x1000)
@@ -153,7 +155,7 @@ func newInterruptCounter(t *testing.T, program string) *cpu {
 	if err != nil {
 		t.Fatal(err)
 	}
-	cpu := c.(*cpu)
+	cpu := c
 	cpu.regs.SR = 0x2000
 	return cpu
 }

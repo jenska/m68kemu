@@ -9,7 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/SemVer
 
 ### Added
 
-- `Model` type with the constants `M68000` to `M68060`, the `WithModel`
+- `Model` type with the constants `M68000` to `M68040`, the `WithModel`
   option and a `Model()` method on `CPU`. `M68000` and `M68010` are
   implemented; `NewCPU` returns `ErrModelUnsupported` for the others
 - MC68010 model (`WithModel(M68010)`): the VBR, SFC and DFC registers
@@ -29,8 +29,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/SemVer
   the coprocessor interface (`Coprocessor`, `WithCoprocessor`,
   `ErrCoprocessorUnsupported`). Timing is approximate; CALLM/RTM and the
   68030 MMU are not implemented. See `doc/mc68020.md`
-- `Bus.SetAddressWidth` and `Bus.AddressMask` for 32-bit buses;
-  `Registers.MSP`, `CACR` and `CAAR`; `ExceptionStackFrameFormat1`, `2`,
+- 32-bit buses: `NewCPU` sets the bus to the address width of the model,
+  32 bits from the MC68020 on and 24 bits before, and `Bus.AddressMask`
+  reports it; `Registers.MSP`, `CACR` and `CAAR`; `ExceptionStackFrameFormat1`, `2`,
   `9`, `A` and `B` with the frame fields `InstructionAddress` and
   `StageBAddress`
 - `fpu.FPU.Coprocessor` attaches the FPU to an MC68020 or MC68030, which
@@ -47,8 +48,36 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/SemVer
   FMOVECR, condition predicates, exceptions and FSAVE/FRESTORE frames, and
   `fpu.CIR`, its memory-mapped coprocessor interface for 68000 machines
   (Atari Mega ST/STE at `$FFFA40`). See `doc/fpu.md`
+- `MemoryDevice`: a device that is plain memory hands the CPU its backing
+  store, and the CPU reads, writes and fetches from it directly. `RAM` and
+  the new `ROM` (`NewROM`; writes are bus errors) implement it. This works
+  for every memory device on the bus, also beside other devices, under an
+  overlay and with wait states, which the CPU charges as the bus does
+- `Bus.Remap` rebuilds the address decoding after a device changes its
+  range or backing store, for example on a bank switch
+- `RAM.Load` and `RAM.Bytes` for loading and inspecting memory
+- `CPU.SetRegisters` and `CPU.SetPC`
+- `ErrBusInUse`: `NewCPU` rejects a bus that already serves a CPU, which
+  used to break the first CPU's wait-state accounting silently
 
 ### Changed
+
+- **Breaking:** `NewCPU` returns the concrete type `*CPU` instead of the
+  `CPU` interface. Code that only calls methods keeps working; code that
+  names the type writes `*m68kemu.CPU`, and code that mocked the interface
+  defines its own
+- **Breaking:** `Registers.D` is `[8]uint32`, like `Registers.A`, instead of
+  `[8]int32`. Convert with `int32(regs.D[n])` where a signed value is meant
+- **Breaking:** the cycle scheduler works by deadline: the CPU compares its
+  cycle counter with the time of the next event and calls into the
+  scheduler only when an event is due, instead of on every cycle charge.
+  `CycleListener` and `CycleScheduler.AddListener` are removed; a device
+  that changes continuously computes its state from `Now()`, which is exact
+  also in the middle of an instruction. An attached scheduler used to slow
+  the CPU down by 24%, plus more for every listener
+- `Step` no longer rebuilds the CPU's cached run modes on every call, about
+  16% faster per call. See `doc/benchmark_report.md` for the other effects
+  of this rework
 
 - The opcode dispatch tables are built per model on first use and shared by
   every CPU of that model, instead of being package-level arrays pruned in
@@ -65,6 +94,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/SemVer
 - `fpu.FPU.Execute` returns a slice that stays valid only until the next
   call, and `Coprocessor.Execute` may only use its operand slice during the
   call
+
+### Removed
+
+- **Breaking:** `CPU.SetFastMemory` and `FastRegion`. Implement
+  `MemoryDevice` on the memory device instead, and call `Bus.Remap` where
+  the fast regions used to be re-installed
+- **Breaking:** `CPU.SetTracer`, `SetBusTracer` and `SetExceptionTracer`.
+  Use `SetHooks`, starting from `Hooks()` to keep the other callbacks
+- **Breaking:** `CPU.RunInstructions`. Use
+  `RunUntil(RunUntilOptions{MaxInstructions: n})` or a loop of `Step`
 
 ### Fixed
 

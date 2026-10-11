@@ -144,18 +144,18 @@ func TestLogicalInstructionAcceptsImmediateSourceEA(t *testing.T) {
 		name   string
 		opcode uint16
 		ext    uint16
-		setup  func(*cpu)
-		check  func(*testing.T, *cpu)
+		setup  func(*CPU)
+		check  func(*testing.T, *CPU)
 	}{
 		{
 			name:   "ANDImmediateToDataRegister",
 			opcode: 0xce7c,
 			ext:    0x0003,
-			setup: func(c *cpu) {
+			setup: func(c *CPU) {
 				c.regs.D[7] = 0x0007
 				c.regs.SR = srExtend | srCarry
 			},
-			check: func(t *testing.T, c *cpu) {
+			check: func(t *testing.T, c *CPU) {
 				if got := c.regs.D[7] & 0xffff; got != 0x0003 {
 					t.Fatalf("unexpected D7 after immediate-source AND: %04x", got)
 				}
@@ -171,10 +171,10 @@ func TestLogicalInstructionAcceptsImmediateSourceEA(t *testing.T) {
 			name:   "ORImmediateToDataRegister",
 			opcode: 0x8e7c,
 			ext:    0x0003,
-			setup: func(c *cpu) {
+			setup: func(c *CPU) {
 				c.regs.D[7] = 0x0004
 			},
-			check: func(t *testing.T, c *cpu) {
+			check: func(t *testing.T, c *CPU) {
 				if got := c.regs.D[7] & 0xffff; got != 0x0007 {
 					t.Fatalf("unexpected D7 after immediate-source OR: %04x", got)
 				}
@@ -305,12 +305,12 @@ func TestShiftRotateFlags(t *testing.T) {
 			cpu, ram := newEnvironment(t)
 			cpu.regs.SR = (cpu.regs.SR &^ (srCarry | srExtend | srZero | srNegative | srOverflow)) | tt.setupSR
 			for reg, val := range tt.setupD {
-				cpu.regs.D[reg] = val
+				cpu.regs.D[reg] = uint32(val)
 			}
 
 			runSingleInstruction(t, cpu, ram, tt.asm)
 
-			if got := uint32(cpu.regs.D[tt.dstReg]) & tt.mask; got != tt.wantValue {
+			if got := cpu.regs.D[tt.dstReg] & tt.mask; got != tt.wantValue {
 				t.Fatalf("expected result %x, got %x", tt.wantValue, got)
 			}
 
@@ -343,7 +343,7 @@ func TestRotateWordByFullWidthPreservesValueAndCarry(t *testing.T) {
 
 	runSingleInstruction(t, cpu, ram, "ROL.W D1,D0")
 
-	if got := uint32(cpu.regs.D[0]) & 0xffff; got != 0x8000 {
+	if got := cpu.regs.D[0] & 0xffff; got != 0x8000 {
 		t.Fatalf("expected value 0x8000, got %04x", got)
 	}
 	if cpu.regs.SR&srCarry != 0 {
@@ -359,7 +359,7 @@ func TestRotateRightWordByFullWidthPreservesValueAndCarry(t *testing.T) {
 
 	runSingleInstruction(t, cpu, ram, "ROR.W D1,D0")
 
-	if got := uint32(cpu.regs.D[0]) & 0xffff; got != 0x7fff {
+	if got := cpu.regs.D[0] & 0xffff; got != 0x7fff {
 		t.Fatalf("expected value 0x7fff, got %04x", got)
 	}
 	if cpu.regs.SR&srCarry != 0 {

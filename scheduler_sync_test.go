@@ -28,7 +28,7 @@ func TestExceptionCyclesReachScheduler(t *testing.T) {
 			_ = ram.Write(Long, 4*4, 0x2400) // illegal
 			cpu.regs.SR = tc.sr
 			cpu.regs.D[0] = 0
-			cpu.regs.D[1] = -1
+			cpu.regs.D[1] = 0xffffffff
 			cpu.regs.USP = 0x1800
 			for i, b := range assemble(t, tc.asm) {
 				_ = ram.Write(Byte, cpu.regs.PC+uint32(i), uint32(b))

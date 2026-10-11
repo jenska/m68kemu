@@ -14,7 +14,7 @@ type assembledProgram struct {
 
 type stepTestHelper struct {
 	tb  testing.TB
-	cpu *cpu
+	cpu *CPU
 	ram *RAM
 }
 
@@ -57,8 +57,10 @@ func (h *stepTestHelper) SetRegisters(update func(*Registers)) {
 
 func (h *stepTestHelper) RunInstructions(count uint64) {
 	h.tb.Helper()
-	if err := h.cpu.RunInstructions(count); err != nil {
-		h.tb.Fatalf("run instructions failed: %v", err)
+	for range count {
+		if err := h.cpu.Step(); err != nil {
+			h.tb.Fatalf("run instructions failed: %v", err)
+		}
 	}
 }
 
@@ -69,7 +71,7 @@ func (h *stepTestHelper) RunCycles(cycles uint64) {
 	}
 }
 
-func (h *stepTestHelper) AssertState(check func(*testing.T, *cpu, *RAM)) {
+func (h *stepTestHelper) AssertState(check func(*testing.T, *CPU, *RAM)) {
 	h.tb.Helper()
 	tester, ok := h.tb.(*testing.T)
 	if !ok {

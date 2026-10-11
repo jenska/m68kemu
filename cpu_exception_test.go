@@ -316,13 +316,10 @@ func TestBusErrorOnSecondLongWriteCycleUsesFaultCycleAddress(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to create CPU: %v", err)
 	}
-	cpu, ok := processor.(*cpu)
-	if !ok {
-		t.Fatalf("CPU implementation has unexpected type %T", processor)
-	}
+	cpu := processor
 
 	cpu.regs.A[0] = 0x800002
-	cpu.regs.D[0] = -1430532899 // 0xaabbccdd
+	cpu.regs.D[0] = 0xaabbccdd // 0xaabbccdd
 
 	handler := uint32(0x3000)
 	if err := system.Write(Long, uint32(XBusError<<2), handler); err != nil {

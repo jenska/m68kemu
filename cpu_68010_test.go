@@ -6,7 +6,7 @@ import (
 	asm "github.com/jenska/m68kasm"
 )
 
-func newEnvironment010(tb testing.TB) (*cpu, *RAM) {
+func newEnvironment010(tb testing.TB) (*CPU, *RAM) {
 	tb.Helper()
 
 	memory := NewRAM(0, 1024*64)
@@ -17,11 +17,11 @@ func newEnvironment010(tb testing.TB) (*cpu, *RAM) {
 	if err != nil {
 		tb.Fatalf("Failed to create CPU: %v", err)
 	}
-	return processor.(*cpu), memory
+	return processor, memory
 }
 
 // load010 assembles source for the 68010 and stores it at the current PC.
-func load010(tb testing.TB, cpu *cpu, ram *RAM, source string) {
+func load010(tb testing.TB, cpu *CPU, ram *RAM, source string) {
 	tb.Helper()
 	code, err := asm.AssembleStringWithOptions(source, asm.ParseOptions{Target: asm.Target{CPU: asm.CPU68010}})
 	if err != nil {
@@ -34,7 +34,7 @@ func load010(tb testing.TB, cpu *cpu, ram *RAM, source string) {
 	}
 }
 
-func step(tb testing.TB, cpu *cpu) {
+func step(tb testing.TB, cpu *CPU) {
 	tb.Helper()
 	if err := cpu.Step(); err != nil {
 		tb.Fatalf("Step failed: %v", err)
@@ -77,7 +77,7 @@ func setTrapVectors(ram *RAM) {
 	ram.Write(Long, XPrivViolation<<2, privHandler)
 }
 
-func enterUserMode(cpu *cpu) {
+func enterUserMode(cpu *CPU) {
 	cpu.regs.USP = 0x0e00
 	cpu.setSR(cpu.regs.SR &^ srSupervisor)
 }
@@ -155,16 +155,16 @@ func TestMoves(t *testing.T) {
 	ram.Write(Byte, 0x3000, 0x80)
 
 	var accesses []BusAccessInfo
-	cpu.SetBusTracer(func(info BusAccessInfo) {
+	cpu.SetHooks(Hooks{Bus: func(info BusAccessInfo) {
 		if !info.InstructionFetch {
 			accesses = append(accesses, info)
 		}
-	})
+	}})
 	for range 3 {
 		step(t, cpu)
 	}
 
-	if got := uint32(cpu.regs.D[0]); got != 0x12345680 {
+	if got := cpu.regs.D[0]; got != 0x12345680 {
 		t.Fatalf("D0 = %08x, want the byte merged into the low byte: 12345680", got)
 	}
 	if got := cpu.regs.A[0]; got != 0xffffff80 {
@@ -218,9 +218,9 @@ func TestMoveFromCcr(t *testing.T) {
 	load010(t, cpu, ram, "MOVE CCR,D0")
 	enterUserMode(cpu) // MOVE from CCR is not privileged
 	cpu.regs.SR |= 0x15
-	cpu.regs.D[0] = -1
+	cpu.regs.D[0] = 0xffffffff
 	step(t, cpu)
-	if got := uint32(cpu.regs.D[0]); got != 0xffff0015 {
+	if got := cpu.regs.D[0]; got != 0xffff0015 {
 		t.Fatalf("D0 = %08x, want the CCR as a word: ffff0015", got)
 	}
 }
@@ -243,7 +243,7 @@ func TestMoveFromSrPrivilege(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			cpu := c.(*cpu)
+			cpu := c
 			enterUserMode(cpu)
 			step(t, cpu)
 			if got := cpu.regs.PC == privHandler; got != tt.privileged {
@@ -276,7 +276,7 @@ func (d *flakyDevice) Reset() {}
 
 // newFaultEnvironment010 returns a 68010 with RAM at 0, a flaky device, and
 // bus and address error handlers that consist of a single RTE.
-func newFaultEnvironment010(t *testing.T) (*cpu, *RAM, *flakyDevice) {
+func newFaultEnvironment010(t *testing.T) (*CPU, *RAM, *flakyDevice) {
 	t.Helper()
 	ram := NewRAM(0, 0x10000)
 	dev := &flakyDevice{data: map[uint32]uint32{}}
@@ -289,7 +289,7 @@ func newFaultEnvironment010(t *testing.T) (*cpu, *RAM, *flakyDevice) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	return c.(*cpu), ram, dev
+	return c, ram, dev
 }
 
 func TestFormat0FrameAndRte(t *testing.T) {
@@ -365,7 +365,7 @@ func TestBusErrorRestartsInstruction(t *testing.T) {
 
 	var info ExceptionInfo
 	var a0 uint32
-	cpu.SetExceptionTracer(func(i ExceptionInfo) { info, a0 = i, cpu.regs.A[0] })
+	cpu.SetHooks(Hooks{Exception: func(i ExceptionInfo) { info, a0 = i, cpu.regs.A[0] }})
 
 	step(t, cpu) // the write faults
 	if cpu.regs.PC != 0x6000 || info.Vector != XBusError {
@@ -407,16 +407,16 @@ func TestFormat8SpecialStatusWord(t *testing.T) {
 	for _, tt := range []struct {
 		name    string
 		source  string
-		setup   func(*cpu)
+		setup   func(*CPU)
 		ssw     uint16
 		address uint32
 		dob     uint32
 	}{
-		{"ByteWriteHighByte", "MOVE.B D0,(A0)", func(c *cpu) { c.regs.A[0], c.regs.D[0] = 0x20000, 0xab },
+		{"ByteWriteHighByte", "MOVE.B D0,(A0)", func(c *CPU) { c.regs.A[0], c.regs.D[0] = 0x20000, 0xab },
 			1<<10 | 1<<9 | 5, 0x20000, 0xab},
-		{"WordReadOddAddress", "MOVE.W (A0),D0", func(c *cpu) { c.regs.A[0] = 0x3001 },
+		{"WordReadOddAddress", "MOVE.W (A0),D0", func(c *CPU) { c.regs.A[0] = 0x3001 },
 			1<<12 | 1<<8 | 5, 0x3001, 0},
-		{"InstructionFetchOddPC", "NOP", func(c *cpu) { c.regs.PC = 0x2001 },
+		{"InstructionFetchOddPC", "NOP", func(c *CPU) { c.regs.PC = 0x2001 },
 			1<<13 | 1<<8 | 6, 0x2001, 0},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
@@ -424,7 +424,7 @@ func TestFormat8SpecialStatusWord(t *testing.T) {
 			load010(t, cpu, ram, tt.source)
 			tt.setup(cpu)
 			var info ExceptionInfo
-			cpu.SetExceptionTracer(func(i ExceptionInfo) { info = i })
+			cpu.SetHooks(Hooks{Exception: func(i ExceptionInfo) { info = i }})
 			step(t, cpu)
 			f := info.Frame
 			if f.Format != ExceptionStackFrameFormat8 || f.StatusWord != tt.ssw || f.FaultAddress != tt.address || f.DataOutput != tt.dob {

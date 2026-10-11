@@ -5,7 +5,7 @@ import "testing"
 func TestEARegisterDirectReadWrite(t *testing.T) {
 	cpu, _ := newEnvironment(t)
 	cpu.regs.IR = 0x0001 // y=1 selects D1
-	cpu.regs.D[1] = -0x10000
+	cpu.regs.D[1] = 0xffff0000
 
 	ea, err := (&eaRegister{areg: dy}).init(cpu, Word)
 	if err != nil {
@@ -20,8 +20,8 @@ func TestEARegisterDirectReadWrite(t *testing.T) {
 		t.Fatalf("write failed: %v", err)
 	}
 
-	if cpu.regs.D[1] != -0xEDCC {
-		t.Fatalf("write masked upper bits incorrectly: %08x", uint32(cpu.regs.D[1]))
+	if cpu.regs.D[1] != 0xffff1234 {
+		t.Fatalf("write masked upper bits incorrectly: %08x", cpu.regs.D[1])
 	}
 }
 
@@ -158,10 +158,7 @@ func TestEAAbsoluteWordUsesSignExtendedAddressForAccess(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to create CPU: %v", err)
 	}
-	cpu, ok := processor.(*cpu)
-	if !ok {
-		t.Fatalf("CPU implementation has unexpected type %T", processor)
-	}
+	cpu := processor
 
 	if err := high.Write(Byte, 0xFF8001, 0x5A); err != nil {
 		t.Fatalf("write high memory failed: %v", err)
@@ -182,7 +179,7 @@ func TestEAAbsoluteWordUsesSignExtendedAddressForAccess(t *testing.T) {
 		t.Fatalf("exec: %v", err)
 	}
 
-	if got := uint32(cpu.regs.D[0]) & 0xFF; got != 0x5A {
+	if got := cpu.regs.D[0] & 0xFF; got != 0x5A {
 		t.Fatalf("expected D0 low byte 0x5A got %02x", got)
 	}
 }

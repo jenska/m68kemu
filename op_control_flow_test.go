@@ -498,7 +498,7 @@ func TestChkException(t *testing.T) {
 	if err := cpu.Step(); err != nil { // MOVEQ
 		t.Fatalf("step moveq: %v", err)
 	}
-	if cpu.regs.D[0] != -1 {
+	if cpu.regs.D[0] != 0xffffffff {
 		t.Fatalf("D0=%08x, want ffffffff", cpu.regs.D[0])
 	}
 	if err := cpu.Step(); err != nil { // bound load

@@ -60,11 +60,11 @@ func registerSystem(b *tableBuilder) {
 
 // MOVEC is not implemented on a plain 68000. The opcode traps immediately as
 // ILLEGAL before consuming the extension word that names the control register.
-func movec68000(cpu *cpu) error {
+func movec68000(cpu *CPU) error {
 	return cpu.exceptionWithCycles(XIllegal, exceptionCyclesIllegal)
 }
 
-func trapv(cpu *cpu) error {
+func trapv(cpu *CPU) error {
 	if cpu.regs.SR&srOverflow == 0 {
 		return nil
 	}
@@ -72,7 +72,7 @@ func trapv(cpu *cpu) error {
 	return cpu.exceptionWithCycles(7, exceptionCyclesTrapV)
 }
 
-func resetInstruction(cpu *cpu) error {
+func resetInstruction(cpu *CPU) error {
 	if ok, err := cpu.requireSupervisor(); err != nil || !ok {
 		return err
 	}
@@ -83,7 +83,7 @@ func resetInstruction(cpu *cpu) error {
 	return nil
 }
 
-func stop(cpu *cpu) error {
+func stop(cpu *CPU) error {
 	if ok, err := cpu.requireSupervisor(); err != nil || !ok {
 		return err
 	}
@@ -125,7 +125,7 @@ func tasCycleCalculator() cycleCalculator {
 	}
 }
 
-func logicalCcrOp(cpu *cpu, op func(uint16, uint16) uint16) error {
+func logicalCcrOp(cpu *CPU, op func(uint16, uint16) uint16) error {
 	imm, err := cpu.popPc(Word)
 	if err != nil {
 		return err
@@ -136,7 +136,7 @@ func logicalCcrOp(cpu *cpu, op func(uint16, uint16) uint16) error {
 	return nil
 }
 
-func logicalSrOp(cpu *cpu, op func(uint16, uint16) uint16) error {
+func logicalSrOp(cpu *CPU, op func(uint16, uint16) uint16) error {
 	if ok, err := cpu.requireSupervisor(); err != nil || !ok {
 		return err
 	}
@@ -148,12 +148,12 @@ func logicalSrOp(cpu *cpu, op func(uint16, uint16) uint16) error {
 	return nil
 }
 
-func oriToCcr(cpu *cpu) error  { return logicalCcrOp(cpu, func(a, b uint16) uint16 { return a | b }) }
-func oriToSr(cpu *cpu) error   { return logicalSrOp(cpu, func(a, b uint16) uint16 { return a | b }) }
-func andiToCcr(cpu *cpu) error { return logicalCcrOp(cpu, func(a, b uint16) uint16 { return a & b }) }
-func andiToSr(cpu *cpu) error  { return logicalSrOp(cpu, func(a, b uint16) uint16 { return a & b }) }
-func eoriToCcr(cpu *cpu) error { return logicalCcrOp(cpu, func(a, b uint16) uint16 { return a ^ b }) }
-func eoriToSr(cpu *cpu) error  { return logicalSrOp(cpu, func(a, b uint16) uint16 { return a ^ b }) }
+func oriToCcr(cpu *CPU) error  { return logicalCcrOp(cpu, func(a, b uint16) uint16 { return a | b }) }
+func oriToSr(cpu *CPU) error   { return logicalSrOp(cpu, func(a, b uint16) uint16 { return a | b }) }
+func andiToCcr(cpu *CPU) error { return logicalCcrOp(cpu, func(a, b uint16) uint16 { return a & b }) }
+func andiToSr(cpu *CPU) error  { return logicalSrOp(cpu, func(a, b uint16) uint16 { return a & b }) }
+func eoriToCcr(cpu *CPU) error { return logicalCcrOp(cpu, func(a, b uint16) uint16 { return a ^ b }) }
+func eoriToSr(cpu *CPU) error  { return logicalSrOp(cpu, func(a, b uint16) uint16 { return a ^ b }) }
 
 // moveFromSrCycleCalculator times MOVE SR,<ea> (table 8-12).
 func moveFromSrCycleCalculator() cycleCalculator {
@@ -171,8 +171,8 @@ func moveControlCycleCalculator(size Size) cycleCalculator {
 	}
 }
 
-func moveFromSr(cpu *cpu) error {
-	dst, err := cpu.ResolveSrcEA2(Word)
+func moveFromSr(cpu *CPU) error {
+	dst, err := cpu.resolveSrcEA2(Word)
 	if err != nil {
 		return err
 	}
@@ -181,8 +181,8 @@ func moveFromSr(cpu *cpu) error {
 
 // moveToCcr is a word operation: it reads a full word and keeps the low byte,
 // so a memory source such as (A7)+ supplies the CCR from the word's low half.
-func moveToCcr(cpu *cpu) error {
-	src, err := cpu.ResolveSrcEA(Word)
+func moveToCcr(cpu *CPU) error {
+	src, err := cpu.resolveSrcEA(Word)
 	if err != nil {
 		return err
 	}
@@ -195,11 +195,11 @@ func moveToCcr(cpu *cpu) error {
 	return nil
 }
 
-func moveToSr(cpu *cpu) error {
+func moveToSr(cpu *CPU) error {
 	if ok, err := cpu.requireSupervisor(); err != nil || !ok {
 		return err
 	}
-	src, err := cpu.ResolveSrcEA(Word)
+	src, err := cpu.resolveSrcEA(Word)
 	if err != nil {
 		return err
 	}
@@ -211,7 +211,7 @@ func moveToSr(cpu *cpu) error {
 	return nil
 }
 
-func rte(cpu *cpu) error {
+func rte(cpu *CPU) error {
 	if ok, err := cpu.requireSupervisor(); err != nil || !ok {
 		return err
 	}
@@ -231,7 +231,7 @@ func rte(cpu *cpu) error {
 	return nil
 }
 
-func rtr(cpu *cpu) error {
+func rtr(cpu *CPU) error {
 	ccr, err := cpu.pop(Word)
 	if err != nil {
 		return err
@@ -248,11 +248,11 @@ func rtr(cpu *cpu) error {
 
 // nop implements the 68000 NOP instruction (opcode 0x4E71).
 // It performs no operation and leaves all condition codes unchanged.
-func nop(cpu *cpu) error {
+func nop(cpu *CPU) error {
 	return nil
 }
 
-func swapInstruction(cpu *cpu) error {
+func swapInstruction(cpu *CPU) error {
 	reg := dy(cpu)
 	result := bits.RotateLeft32(*reg, 16)
 	*reg = result
@@ -261,7 +261,7 @@ func swapInstruction(cpu *cpu) error {
 	return nil
 }
 
-func extInstruction(cpu *cpu) error {
+func extInstruction(cpu *CPU) error {
 	// EXT.W extends a byte to a word, EXT.L (bit 6 set) a word to a long.
 	dst := dy(cpu)
 	size, result := Word, uint32(int16(int8(*dst)))
@@ -276,7 +276,7 @@ func extInstruction(cpu *cpu) error {
 	return nil
 }
 
-func exgInstruction(cpu *cpu) error {
+func exgInstruction(cpu *CPU) error {
 	// Rx is in bits 11-9, Ry in bits 2-0; opmode $08 and $09 exchange two
 	// data or two address registers, $11 Dx with Ay.
 	rx, ry := x(cpu.regs.IR), y(cpu.regs.IR)
@@ -286,13 +286,13 @@ func exgInstruction(cpu *cpu) error {
 	case 0x0148:
 		cpu.regs.A[rx], cpu.regs.A[ry] = cpu.regs.A[ry], cpu.regs.A[rx]
 	case 0x0188:
-		cpu.regs.D[rx], cpu.regs.A[ry] = int32(cpu.regs.A[ry]), uint32(cpu.regs.D[rx])
+		cpu.regs.D[rx], cpu.regs.A[ry] = cpu.regs.A[ry], cpu.regs.D[rx]
 	}
 	return nil
 }
 
-func tasInstruction(cpu *cpu) error {
-	dst, err := cpu.ResolveSrcEA(Byte)
+func tasInstruction(cpu *CPU) error {
+	dst, err := cpu.resolveSrcEA(Byte)
 	if err != nil {
 		return err
 	}
@@ -319,7 +319,7 @@ func registerExgInstruction(b *tableBuilder, match uint16, calc cycleCalculator)
 	}
 }
 
-func illegalInstruction(cpu *cpu) error {
+func illegalInstruction(cpu *CPU) error {
 	return cpu.exceptionWithCycles(XIllegal, exceptionCyclesIllegal)
 }
 
@@ -329,6 +329,6 @@ func registerTrap(b *tableBuilder) {
 
 // trap handles TRAP #n instructions by stacking the exception frame and
 // loading the handler address from the vector table.
-func trap(cpu *cpu) error {
+func trap(cpu *CPU) error {
 	return cpu.trapException(XTrap + uint32(cpu.regs.IR&0x000f))
 }

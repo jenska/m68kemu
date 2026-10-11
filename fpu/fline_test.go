@@ -14,7 +14,7 @@ import (
 // runFLine assembles source for an MC68020 with an FPU, runs it on an
 // MC68020 with f as coprocessor 1 until the label "done", and returns the
 // CPU and its RAM.
-func runFLine(t *testing.T, f *fpu.FPU, source string, setup func(*m68kemu.RAM)) (m68kemu.CPU, *m68kemu.RAM) {
+func runFLine(t *testing.T, f *fpu.FPU, source string, setup func(*m68kemu.RAM)) (*m68kemu.CPU, *m68kemu.RAM) {
 	t.Helper()
 	code, listing, err := asm.AssembleStringWithListingWithOptions(source,
 		asm.ParseOptions{Target: asm.Target{CPU: asm.CPU68020, Features: asm.FeatFPU | asm.FeatFPUFull}})
@@ -80,8 +80,8 @@ done:	BRA.S    done
 	if regs.D[1] != 4 || regs.D[2] != 0 || regs.D[3]&0xff != 0xff || regs.D[5] != 2 {
 		t.Fatalf("D1=%d D2=%d D3=%x D5=%d; want 4 (rounded), 0 (branch taken), ff (FSEQ), 2 (FDBNE fell through)", regs.D[1], regs.D[2], regs.D[3]&0xff, regs.D[5])
 	}
-	if uint32(regs.D[4])&fpu.CCZ == 0 {
-		t.Fatalf("FPSR = %08x, want Z from FCMP", uint32(regs.D[4]))
+	if regs.D[4]&fpu.CCZ == 0 {
+		t.Fatalf("FPSR = %08x, want Z from FCMP", regs.D[4])
 	}
 	if f.FP[1].ToFloat64() != 1 {
 		t.Fatalf("FMOVECR #$32 = %v, want 1", f.FP[1])
@@ -109,8 +109,8 @@ done:	BRA.S    done
 	if regs.A[2] != 0x1000-24 || regs.A[7] != 0x1000 {
 		t.Fatalf("FMOVEM moved A7 to %x and back to %x, want %x and 1000", regs.A[2], regs.A[7], 0x1000-24)
 	}
-	if uint32(regs.D[6]) != 0x40020000 { // 10 = $4002 0000 A0000000 00000000
-		t.Fatalf("lowest register in memory starts %08x, want FP0 (10 = 40020000)", uint32(regs.D[6]))
+	if regs.D[6] != 0x40020000 { // 10 = $4002 0000 A0000000 00000000
+		t.Fatalf("lowest register in memory starts %08x, want FP0 (10 = 40020000)", regs.D[6])
 	}
 	if f.FP[2].ToInt64() != 10 || f.FP[3].ToInt64() != 20 {
 		t.Fatalf("FP2=%v FP3=%v, want 10 and 20", f.FP[2], f.FP[3])
