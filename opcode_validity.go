@@ -12,6 +12,9 @@ func validFor(m Model, op uint16) bool {
 	if m >= M68010 && valid68010Addition(op) {
 		return true
 	}
+	if m >= M68020 && valid68020Addition(op) {
+		return true
+	}
 	return valid68000(op)
 }
 

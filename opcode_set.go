@@ -42,6 +42,7 @@ var registrars = []func(*tableBuilder){
 	registerSystem,
 	registerTrap,
 	register68010,
+	register68020,
 }
 
 var opcodeSets [modelCount]struct {
@@ -69,6 +70,25 @@ func opcodesFor(m Model) *opcodeSet {
 		entry.set = b.set
 	})
 	return entry.set
+}
+
+// replace is add for slots that an earlier registrar may already have
+// filled with a handler the model's validity map rejects, such as OR on the
+// encodings the MC68020 reuses for PACK and UNPK. It overwrites them.
+func (b *tableBuilder) replace(ins instruction, match, mask uint16, eaMask uint16, calc cycleCalculator) {
+	for value := uint16(0); ; {
+		index := match | value
+		if validEA(index, eaMask) {
+			b.set.handlers[index] = ins
+			if calc != nil {
+				b.set.cycles[index] = calc(index)
+			}
+		}
+		value = ((value | mask) + 1) & ^mask
+		if value == 0 {
+			break
+		}
+	}
 }
 
 // add registers ins for each opcode value that matches the mask and whose
