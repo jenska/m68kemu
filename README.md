@@ -31,7 +31,7 @@ Still missing for a complete Atari ST:
 
 * Prefetch-sensitive behavior and any remaining compatibility gaps found by larger TOS / software workloads.
 
-The MC68010 is supported (see [CPU Models](#cpu-models)), and so is a memory-mapped MC68881/MC68882 FPU (see [FPU](#fpu-mc68881mc68882)). Support for the MC68020 to MC68040, including PMMU and F-line FPU instructions, is planned. See [doc/roadmap.md](doc/roadmap.md).
+The MC68010, MC68020 and MC68030 are supported (see [CPU Models](#cpu-models)), and so is the MC68881/MC68882 FPU, memory-mapped on a 68000 or as the coprocessor of a 68020/030 (see [FPU](#fpu-mc68881mc68882)). The 68030 MMU and the MC68040/MC68060 are planned. See [doc/roadmap.md](doc/roadmap.md).
 
 ## Getting Started
 
@@ -120,7 +120,24 @@ real CPU would continue it from saved internal state. The 68010 currently
 uses the MC68000 cycle counts. [doc/mc68010.md](doc/mc68010.md) has the
 details.
 
-The constants `M68020` to `M68060` exist for the models on the
+The MC68020 and MC68030 add 32-bit addresses, the scaled-index and memory
+indirect addressing modes, the master and interrupt stack pointers, CACR and
+CAAR, the 68020 instructions (32-bit branches, MULx.L/DIVx.L, bit fields,
+CAS/CAS2, CHK2/CMP2, PACK/UNPK, TRAPcc and others), misaligned operands, the
+format $1, $2 and $B stack frames, and the coprocessor interface. Give such a
+CPU a bus that decodes 32 address bits:
+
+```go
+bus := m68kemu.NewBus(ram)
+bus.SetAddressWidth(32)
+cpu, err := m68kemu.NewCPU(bus, m68kemu.WithModel(m68kemu.M68030))
+```
+
+Their timing is approximate, CALLM/RTM are not implemented, the caches are
+not emulated, and the 68030 has no MMU yet. [doc/mc68020.md](doc/mc68020.md)
+has the details.
+
+The constants `M68040` and `M68060` exist for the models on the
 [roadmap](doc/roadmap.md). Until a model is implemented, `NewCPU` returns
 an error that matches `m68kemu.ErrModelUnsupported` with `errors.Is`.
 
@@ -143,9 +160,17 @@ Software then drives it like the real chip: it writes command words to the
 command CIR, polls the response CIR and moves operands through the operand
 CIR. The FPU supports every 68881 general instruction, all operand formats
 including packed decimal, FMOVECR, the condition predicates, exceptions and
-FSAVE/FRESTORE frames. F-line instructions (`FADD` and friends executed by
-the CPU) need the MC68020 and come with it. [doc/fpu.md](doc/fpu.md) has the
-details and the simplifications.
+FSAVE/FRESTORE frames.
+
+On an MC68020 or MC68030 the FPU is a coprocessor, and the CPU executes the
+F-line instructions (`FADD`, `FMOVEM`, `FBcc`, `FSAVE` and the rest):
+
+```go
+cpu, err := m68kemu.NewCPU(bus, m68kemu.WithModel(m68kemu.M68020),
+	m68kemu.WithCoprocessor(1, fpu.New(fpu.MC68882).Coprocessor()))
+```
+
+[doc/fpu.md](doc/fpu.md) has the details and the simplifications.
 
 ### Cycle Scheduler
 

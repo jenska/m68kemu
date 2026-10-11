@@ -7,7 +7,9 @@ and the memory-mapped coprocessor interface of 68000 machines (4b). F-line
 instructions on the 68020 (4c) follow after phase 3 of the
 [roadmap](roadmap.md).
 
-**Status: 4a and 4b are done.** The tests run 68000 programs that drive the
+**Status: 4a, 4b and 4c are done.** On an MC68020 or MC68030,
+`FPU.Coprocessor` attaches the FPU through the CPU's coprocessor interface
+([mc68020.md](mc68020.md)). The tests run 68000 programs that drive the
 memory-mapped FPU with the command words and polling loops of the SFP004
 library.
 

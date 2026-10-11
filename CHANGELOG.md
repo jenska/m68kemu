@@ -22,6 +22,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/SemVer
   `ExceptionStackFrame` fields `VectorOffset`, `DataOutput`, `DataInput`
   and `InstructionInput`; `ReadExceptionStackFrame` decodes the new formats
 - `BusAccessInfo.FunctionCode`
+- MC68020 and MC68030 models (`WithModel(M68020)`, `WithModel(M68030)`):
+  32-bit addresses, scaled-index and memory indirect addressing, MSP/ISP and
+  the M bit, CACR and CAAR, the 68020 instructions, misaligned operands,
+  format $1, $2 and $B frames with instruction restart after bus faults, and
+  the coprocessor interface (`Coprocessor`, `WithCoprocessor`,
+  `ErrCoprocessorUnsupported`). Timing is approximate; CALLM/RTM and the
+  68030 MMU are not implemented. See `doc/mc68020.md`
+- `Bus.SetAddressWidth` and `Bus.AddressMask` for 32-bit buses;
+  `Registers.MSP`, `CACR` and `CAAR`; `ExceptionStackFrameFormat1`, `2`,
+  `9`, `A` and `B` with the frame fields `InstructionAddress` and
+  `StageBAddress`
+- `fpu.FPU.Coprocessor` attaches the FPU to an MC68020 or MC68030, which
+  then executes the F-line FPU instructions
 - Package `fpu`: an MC68881/MC68882 FPU built on `github.com/jenska/float`,
   with all general instructions, operand formats including packed decimal,
   FMOVECR, condition predicates, exceptions and FSAVE/FRESTORE frames, and

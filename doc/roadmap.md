@@ -61,7 +61,7 @@ A small step that tests whether the phase 1 design holds up:
 The design question here is exception frames: `raiseExceptionWithPC` needs a
 frame builder chosen per model.
 
-### 3. MC68020 / MC68030
+### 3. MC68020 / MC68030 (done; see [mc68020.md](mc68020.md))
 
 * 32-bit address bus (an address mask per model; 24-bit for the 68EC020)
 * the new addressing modes: scaled index, memory indirect, full extension word
@@ -81,16 +81,16 @@ The FPU does not wait for phase 3. Most of it is independent of the CPU, and
 on a 68000 or 68010 the 68881 is a memory-mapped peripheral, so it comes in
 three parts; see [fpu.md](fpu.md):
 
-* **4a. FPU core**, before phase 3: the MC68881/MC68882 programming model
+* **4a. FPU core** (done), before phase 3: the MC68881/MC68882 programming model
   (FP0–FP7, FPCR, FPSR, FPIAR) on `float.Env`; all general instructions with
   their arithmetic and transcendental operations; the operand formats .B,
   .W, .L, .S, .D, .X and .P; `FMOVECR`; condition codes, the quotient byte
   and the condition predicates; exceptions and their vectors (48–54);
   `FSAVE`/`FRESTORE` frames.
-* **4b. Memory-mapped 68881**, before phase 3: the coprocessor interface
+* **4b. Memory-mapped 68881** (done), before phase 3: the coprocessor interface
   registers (CIRs) as a bus device, for 68000 machines such as the Atari
   Mega ST (SFP004) and Mega STE, which put the FPU at `$FFFA40`.
-* **4c. F-line instructions**, after phase 3: the 68020's coprocessor
+* **4c. F-line instructions** (done), after phase 3: the 68020's coprocessor
   interface drives the same FPU for `FADD`, `FBcc`, `FScc`, `FDBcc`,
   `FTRAPcc`, `FSAVE`, `FRESTORE` and the rest, with the 68020 addressing
   modes and stack frames.
