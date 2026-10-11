@@ -366,6 +366,9 @@ type (
 		// other CPU of that model.
 		ops   *opcodeSet
 		model Model
+		// addrMask selects the address bits the CPU drives: 24 on the
+		// MC68000 and MC68010, 32 from the MC68020 on.
+		addrMask uint32
 		// cycleRounding is the multiple each instruction's cycles are rounded
 		// up to (see WithCycleRounding); 0 or 1 disables it.
 		cycleRounding          uint32
@@ -559,7 +562,7 @@ func (cpu *cpu) readSystemProgram(size Size, address uint32) (uint32, error) {
 }
 
 func (cpu *cpu) readContext(size Size, address uint32, ctx accessContext) (uint32, error) {
-	address &= 0xffffff // 24bit address bus of 68000
+	address &= cpu.addrMask
 	switch size {
 	case Byte, Word, Long:
 		if cpu.breakpoints != nil {
@@ -613,7 +616,7 @@ func (cpu *cpu) writeSystemData(size Size, address uint32, value uint32) error {
 }
 
 func (cpu *cpu) writeContext(size Size, address uint32, value uint32, ctx accessContext) error {
-	address &= 0xffffff // 24bit address bus of 68000
+	address &= cpu.addrMask
 	switch size {
 	case Byte, Word, Long:
 		if cpu.breakpoints != nil {
@@ -699,7 +702,7 @@ func (cpu *cpu) fastRAMRead(size Size, address uint32) (uint32, bool, error) {
 			return 0, true, BusError(address)
 		}
 		if idx+3 >= memLen {
-			return 0, true, BusError((address + uint32(Word)) & 0xffffff)
+			return 0, true, BusError((address + uint32(Word)) & cpu.addrMask)
 		}
 		return uint32(ram.mem[idx])<<24 |
 			uint32(ram.mem[idx+1])<<16 |
@@ -749,7 +752,7 @@ func (cpu *cpu) fastRAMWrite(size Size, address uint32, value uint32) (bool, err
 		ram.mem[idx] = uint8(value >> 24)
 		ram.mem[idx+1] = uint8(value >> 16)
 		if idx+3 >= memLen {
-			return true, BusError((address + uint32(Word)) & 0xffffff)
+			return true, BusError((address + uint32(Word)) & cpu.addrMask)
 		}
 		ram.mem[idx+2] = uint8(value >> 8)
 		ram.mem[idx+3] = uint8(value)
@@ -929,7 +932,7 @@ func (cpu *cpu) rememberOpcodePC(pc uint32) {
 // beginInstructionContext records the instruction boundary so nested helpers,
 // fault handling, and bus tracing can all attribute work to the same opcode.
 func (cpu *cpu) beginInstructionContext(pc uint32) {
-	cpu.currentOpcodePC = pc & 0xffffff
+	cpu.currentOpcodePC = pc & cpu.addrMask
 	cpu.currentOpcodeValid = true
 	cpu.instructionStartCycles = cpu.cycles
 }
@@ -967,7 +970,7 @@ func (cpu *cpu) currentOpcodeAddress(fallback uint32) uint32 {
 	if cpu.currentOpcodeValid {
 		return cpu.currentOpcodePC
 	}
-	return fallback & 0xffffff
+	return fallback & cpu.addrMask
 }
 
 func (cpu *cpu) debugPC() uint32 {
@@ -975,9 +978,9 @@ func (cpu *cpu) debugPC() uint32 {
 		return cpu.currentOpcodePC
 	}
 	if cpu.lastOpcodePCValid {
-		return cpu.lastOpcodePC & 0xffffff
+		return cpu.lastOpcodePC & cpu.addrMask
 	}
-	return cpu.regs.PC & 0xffffff
+	return cpu.regs.PC & cpu.addrMask
 }
 
 func (cpu *cpu) consumeOpcodePC() uint32 {
@@ -1052,10 +1055,10 @@ func (cpu *cpu) synchronousException(vector uint32, newSR uint16, stackedPC uint
 }
 
 func (cpu *cpu) trapException(vector uint32) error {
-	stackedPC := cpu.regs.PC & 0xffffff
+	stackedPC := cpu.regs.PC & cpu.addrMask
 	instructionPC := cpu.currentOpcodeAddress(stackedPC)
 	if stackedPC == instructionPC {
-		stackedPC = (instructionPC + uint32(Word)) & 0xffffff
+		stackedPC = (instructionPC + uint32(Word)) & cpu.addrMask
 	}
 	return cpu.synchronousException(vector, cpu.regs.SR|srSupervisor, stackedPC)
 }
@@ -1517,7 +1520,7 @@ func (cpu *cpu) sendPreTrace(pc uint32, opcode uint16, regs Registers) {
 
 	bytes := traceInstructionBytes(cpu.bus, pc, opcode)
 	cpu.preTrap(PreTraceInfo{
-		PC:        pc & 0xffffff,
+		PC:        pc & cpu.addrMask,
 		SR:        regs.SR,
 		Registers: regs,
 		Opcode:    opcode,
@@ -1536,7 +1539,7 @@ func (cpu *cpu) sendTrace(pc uint32, before Registers, cycleDelta uint32) {
 
 	bytes := cpu.traceInstructionBytes(pc)
 	info := TraceInfo{
-		PC:              pc & 0xffffff,
+		PC:              pc & cpu.addrMask,
 		SR:              cpu.regs.SR,
 		Registers:       cpu.regs,
 		BeforeRegisters: before,
@@ -1664,7 +1667,7 @@ func NewCPU(bus *Bus, opts ...Option) (CPU, error) {
 	if !cfg.model.implemented() {
 		return nil, fmt.Errorf("%w: %v", ErrModelUnsupported, cfg.model)
 	}
-	c := cpu{bus: bus, ops: opcodesFor(cfg.model), model: cfg.model, interrupts: newInterruptController(), cycleRounding: cfg.cycleRounding}
+	c := cpu{bus: bus, ops: opcodesFor(cfg.model), model: cfg.model, addrMask: cfg.model.addressMask(), interrupts: newInterruptController(), cycleRounding: cfg.cycleRounding}
 	c.operands.init()
 	bus.waitHook = func(states uint32) { c.addCycles(states) }
 
@@ -1777,7 +1780,7 @@ func (cpu *cpu) popPc(s Size) (uint32, error) {
 // bus topology, or an address outside every fast region) so the caller falls
 // back to the full bus.
 func (cpu *cpu) readProgramFastWord(address uint32) (uint16, bool, error) {
-	address &= 0xffffff
+	address &= cpu.addrMask
 	if cpu.fastRegionsReady {
 		if r := cpu.fastRegionFor(Word, address); r != nil {
 			if address&1 != 0 {
@@ -1805,7 +1808,7 @@ func (cpu *cpu) readProgramFastWord(address uint32) (uint16, bool, error) {
 }
 
 func (cpu *cpu) readProgramFastLong(address uint32) (uint32, bool, error) {
-	address &= 0xffffff
+	address &= cpu.addrMask
 	if cpu.fastRegionsReady {
 		if r := cpu.fastRegionFor(Long, address); r != nil {
 			if address&1 != 0 {
@@ -1833,7 +1836,7 @@ func (cpu *cpu) readProgramFastLong(address uint32) (uint32, bool, error) {
 		return 0, true, BusError(address)
 	}
 	if idx+3 >= uint32(len(mem)) {
-		return 0, true, BusError((address + uint32(Word)) & 0xffffff)
+		return 0, true, BusError((address + uint32(Word)) & cpu.addrMask)
 	}
 	return uint32(mem[idx])<<24 |
 		uint32(mem[idx+1])<<16 |
@@ -1902,7 +1905,7 @@ func (cpu *cpu) programFunctionCode() uint16 {
 
 func (cpu *cpu) recordFault(address uint32, ctx accessContext, size Size, value uint32) {
 	cpu.fault = faultInfo{
-		address:        address & 0xffffff,
+		address:        address & cpu.addrMask,
 		pc:             cpu.regs.PC,
 		ir:             cpu.regs.IR,
 		functionCode:   ctx.functionCode & 0x7,
@@ -1952,7 +1955,7 @@ func (cpu *cpu) shouldTraceBusAccess(ctx accessContext) bool {
 // the external callback with the same normalized record.
 func (cpu *cpu) traceBusAccess(size Size, address uint32, value uint32, ctx accessContext) {
 	info := BusAccessInfo{
-		Address:          address & 0xffffff,
+		Address:          address & cpu.addrMask,
 		Size:             size,
 		Value:            value & size.mask(),
 		Write:            ctx.write,
@@ -2005,10 +2008,10 @@ func (cpu *cpu) runStopReason(options RunUntilOptions, result *RunResult) (RunSt
 }
 
 func (cpu *cpu) pcStopReason(options RunUntilOptions) (RunStopReason, bool) {
-	if options.StopOnPCRange != nil && options.StopOnPCRange.Contains(cpu.regs.PC) {
+	if options.StopOnPCRange != nil && options.StopOnPCRange.contains(cpu.regs.PC, cpu.addrMask) {
 		return RunStopPCInRange, true
 	}
-	if options.StopWhenPCOutside != nil && !options.StopWhenPCOutside.Contains(cpu.regs.PC) {
+	if options.StopWhenPCOutside != nil && !options.StopWhenPCOutside.contains(cpu.regs.PC, cpu.addrMask) {
 		return RunStopPCOutsideRange, true
 	}
 	return RunStopNone, false
@@ -2054,9 +2057,15 @@ func (ctx accessContext) instructionFetch() bool {
 		(ctx.functionCode == functionCodeUserProgram || ctx.functionCode == functionCodeSupervisorProg)
 }
 
+// Contains reports whether the 24-bit address lies in r.
 func (r AddressRange) Contains(address uint32) bool {
-	address &= 0xffffff
-	return address >= (r.Start&0xffffff) && address <= (r.End&0xffffff)
+	return r.contains(address, 0xffffff)
+}
+
+// contains reports whether address lies in r, comparing the bits in mask.
+func (r AddressRange) contains(address, mask uint32) bool {
+	address &= mask
+	return address >= r.Start&mask && address <= r.End&mask
 }
 
 func isIllegalException(vector uint32) bool {
@@ -2070,8 +2079,8 @@ func isIllegalException(vector uint32) bool {
 
 func (cpu *cpu) matchStopAtPC(options RunUntilOptions) (uint32, bool) {
 	for _, target := range options.StopAtPC {
-		if cpu.regs.PC&0xffffff == target&0xffffff {
-			return cpu.regs.PC & 0xffffff, true
+		if cpu.regs.PC&cpu.addrMask == target&cpu.addrMask {
+			return cpu.regs.PC & cpu.addrMask, true
 		}
 	}
 	return 0, false

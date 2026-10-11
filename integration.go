@@ -134,10 +134,10 @@ func (cpu *cpu) SetFastMemory(regions ...FastRegion) {
 		if len(r.Mem) == 0 {
 			continue
 		}
-		base := r.Base & 0xffffff
+		base := r.Base & cpu.addrMask
 		cpu.fastRegions = append(cpu.fastRegions, fastMemRegion{
 			base:     base,
-			last:     (base + uint32(len(r.Mem)) - 1) & 0xffffff,
+			last:     (base + uint32(len(r.Mem)) - 1) & cpu.addrMask,
 			mem:      r.Mem,
 			wait:     r.WaitStates,
 			readOnly: r.ReadOnly,

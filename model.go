@@ -32,6 +32,15 @@ func (m Model) String() string {
 	return modelNames[m]
 }
 
+// addressMask returns the address bits model m drives: 24 on the MC68000
+// and MC68010, 32 from the MC68020 on.
+func (m Model) addressMask() uint32 {
+	if m >= M68020 {
+		return 0xffffffff
+	}
+	return 0xffffff
+}
+
 // implemented reports whether NewCPU accepts model m.
 func (m Model) implemented() bool {
 	return m == M68000 || m == M68010
