@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/SemVer
 
 ## [Unreleased]
 
+## [1.7.0] - 2026-10-11
+
 ### Added
 
 - `Model` type with the constants `M68000` to `M68040`, the `WithModel`
