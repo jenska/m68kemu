@@ -1,6 +1,6 @@
 # Roadmap: MC68010 to MC68060
 
-m68kemu emulates the MC68000 and M68010 today. The aim is to grow it into an emulator for the whole family, from the MC68020 to the MC68040, including the paged memory management unit (PMMU) and floating-point unit (FPU).
+m68kemu emulates the MC68000, MC68010, MC68020 and MC68030 and the MC68881/MC68882 FPU today. The aim is to grow it into an emulator for the whole family, up to the MC68060, including the paged memory management unit (PMMU) and floating-point unit (FPU).
 
 ## Repository Layout
 
@@ -61,7 +61,7 @@ A small step that tests whether the phase 1 design holds up:
 The design question here is exception frames: `raiseExceptionWithPC` needs a
 frame builder chosen per model.
 
-### 3. MC68020 / MC68030 (done; see [mc68020.md](mc68020.md))
+### 3. MC68020 / MC68030 (done except `CALLM`/`RTM`; see [mc68020.md](mc68020.md))
 
 * 32-bit address bus (an address mask per model; 24-bit for the 68EC020)
 * the new addressing modes: scaled index, memory indirect, full extension word
@@ -75,7 +75,7 @@ frame builder chosen per model.
 Exact cycle timing is out of reach once there are caches and a pipeline. From
 the 68020 on, timing is an approximation, and the goal is correct behaviour.
 
-### 4. FPU (`m68kemu/fpu`)
+### 4. FPU (`m68kemu/fpu`) (done; see [fpu.md](fpu.md))
 
 The FPU does not wait for phase 3. Most of it is independent of the CPU, and
 on a 68000 or 68010 the 68881 is a memory-mapped peripheral, so it comes in
@@ -99,7 +99,10 @@ Tests: `float` covers numerical accuracy against reference values; `fpu`
 tests cover decoding, operands, condition codes, frames and exceptions, and
 run the routines of a real SFP004 library against the memory-mapped FPU.
 
-### 5. PMMU (`m68kemu/mmu`)
+Both paths also model the FPU's execution time from a table of typical
+MC68881/MC68882 times, with the FPU running concurrently with the CPU.
+
+### 5. PMMU (`m68kemu/mmu`) (next)
 
 * MC68030 MMU first: TC, CRP, SRP, TT0/TT1, MMUSR; `PMOVE`, `PFLUSH`,
   `PTEST`, `PLOAD`

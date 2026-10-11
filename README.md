@@ -1,17 +1,18 @@
 # m68kemu
 
-A Motorola 68000 emulator written in Go.
+A Motorola 680x0 emulator written in Go.
 
-This project provides a Motorola 68000 CPU emulator for retro-computing projects, with a current focus on becoming part of an Atari ST emulator. The core aims to be timing-aware, testable, and easy to embed in a larger machine model.
+This project provides a Motorola 68000-family CPU emulator for retro-computing projects, with a current focus on becoming part of an Atari ST emulator. The core aims to be timing-aware, testable, and easy to embed in a larger machine model.
 
 ## Features
 
-* Motorola 68000 instruction set emulation, and the MC68010 as a second model.
+* The MC68000, MC68010, MC68020 and MC68030 (integer units), selected per CPU with `WithModel`.
+* The MC68881/MC68882 FPU, memory-mapped on a 68000 or attached as the coprocessor of a 68020/030, with typical execution times.
 * Timing-aware execution with per-instruction cycle accounting.
 * Supervisor and user modes.
 * Interrupt handling and exception processing.
-* Correct short exception frames for group 1/2 exceptions and 68000 group 0 bus/address error frames.
-* 24-bit address bus with support for multiple devices, fixed-range mappings, and Atari ST-style region layout.
+* Correct short exception frames for group 1/2 exceptions and 68000 group 0 bus/address error frames; format $0–$B frames and instruction restart on the 68010 and later.
+* 24-bit or 32-bit address bus with support for multiple devices, fixed-range mappings, and Atari ST-style region layout.
 * Tracing, breakpoints, cycle-budgeted execution, and verbose logging helpers with instruction-range disassembly.
 * Rich debug hooks for per-instruction trace, pre-instruction snapshots, exceptions, bus accesses, and accepted interrupts.
 * `RunUntil` stop conditions for instruction budgets, exact PC stops, PC ranges, exceptions, bus-access matches, and custom predicates.
@@ -31,7 +32,7 @@ Still missing for a complete Atari ST:
 
 * Prefetch-sensitive behavior and any remaining compatibility gaps found by larger TOS / software workloads.
 
-The MC68010, MC68020 and MC68030 are supported (see [CPU Models](#cpu-models)), and so is the MC68881/MC68882 FPU, memory-mapped on a 68000 or as the coprocessor of a 68020/030 (see [FPU](#fpu-mc68881mc68882)). The 68030 MMU and the MC68040/MC68060 are planned. See [doc/roadmap.md](doc/roadmap.md).
+The MC68010, MC68020 and MC68030 are supported (see [CPU Models](#cpu-models)), and so is the MC68881/MC68882 FPU, memory-mapped on a 68000 or as the coprocessor of a 68020/030 (see [FPU](#fpu-mc68881mc68882)). The 68030 MMU (next, phase 5) and the MC68040/MC68060 are planned. See [doc/roadmap.md](doc/roadmap.md).
 
 ## Getting Started
 
@@ -168,6 +169,17 @@ F-line instructions (`FADD`, `FMOVEM`, `FBcc`, `FSAVE` and the rest):
 ```go
 cpu, err := m68kemu.NewCPU(bus, m68kemu.WithModel(m68kemu.M68020),
 	m68kemu.WithCoprocessor(1, fpu.New(fpu.MC68882).Coprocessor()))
+```
+
+Both paths can model the FPU's execution time from a table of typical
+MC68881/MC68882 times (`FPU.Cycles`). On a 68020/030 the FPU runs concurrently
+with the CPU, which waits only at the next FPU instruction or for a result.
+On a 68000, set `CIR.Clock` and the response CIR reports busy while a command
+runs, so polling loops behave as on the real card:
+
+```go
+cir := fpu.NewCIR(fpu68881, 0xfffa40)
+cir.Clock = cpu.Cycles
 ```
 
 [doc/fpu.md](doc/fpu.md) has the details and the simplifications.
@@ -323,6 +335,9 @@ Representative results on October 4, 2026 on Apple M1 (`darwin/arm64`, Go 1.27.1
 * `BenchmarkRecursiveFibonacci`: ~18.3 ms/op
 * `BenchmarkCycleSchedulerAdvanceBurst`: ~2.97 us/op
 * `BenchmarkBusReadMappedRanges`: ~15.9 ns/op
+
+`BenchmarkFFT` runs a 1024-point FFT in fixed-point, SFP004 and native FPU
+variants on every model that supports them.
 
 See [doc/benchmark_report.md](doc/benchmark_report.md) for more detail.
 

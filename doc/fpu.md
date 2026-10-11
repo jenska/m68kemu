@@ -1,11 +1,10 @@
-# Plan: MC68881/MC68882 FPU (phases 4a and 4b)
+# MC68881/MC68882 FPU (phase 4)
 
 Package `m68kemu/fpu` emulates the MC68881 and MC68882 floating-point
 coprocessors on top of [github.com/jenska/float](https://github.com/jenska/float).
-This plan covers the parts that do not need the MC68020: the FPU core (4a)
-and the memory-mapped coprocessor interface of 68000 machines (4b). F-line
-instructions on the 68020 (4c) follow after phase 3 of the
-[roadmap](roadmap.md).
+This document covers the FPU core (4a), the memory-mapped coprocessor
+interface of 68000 machines (4b), the F-line instructions on the 68020/030
+(4c) and the execution timing. See the [roadmap](roadmap.md) for the phases.
 
 **Status: 4a, 4b and 4c are done.** On an MC68020 or MC68030,
 `FPU.Coprocessor` attaches the FPU through the CPU's coprocessor interface
@@ -52,7 +51,7 @@ A general instruction is a 16-bit command word; bits 15–13 select the class:
 
 The FPU core is independent of the CPU. A command reads its source operand
 as bytes in memory format and returns its result the same way; the caller
-(the CIR device now, the 68020 later) moves the bytes. A command that needs
+(the CIR device or the 68020's coprocessor interface) moves the bytes. A command that needs
 a data register for a dynamic k-factor or register list names it, and the
 caller supplies its value.
 
