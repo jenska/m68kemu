@@ -67,7 +67,7 @@ func (logger *VerboseLogger) Trace(info TraceInfo) {
 	}
 
 	var text strings.Builder
-	fmt.Fprintf(&text, "TRACE PC %08x", info.PC&0xffffff)
+	fmt.Fprintf(&text, "TRACE PC %08x", info.PC)
 	if info.Opcode != 0 || len(info.Bytes) >= 2 {
 		fmt.Fprintf(&text, " OPCODE %04x", info.Opcode)
 	}
@@ -89,7 +89,7 @@ func (logger *VerboseLogger) Trace(info TraceInfo) {
 	}
 
 	for _, memRange := range logger.options.MemoryRanges {
-		fmt.Fprintf(&text, "DISASM RANGE %s\n", formatMemoryRangeLabel(memRange))
+		fmt.Fprintf(&text, "DISASM RANGE %s\n", formatMemoryRangeLabel(memRange, addressMaskOf(logger.bus)))
 		lines, err := DisassembleMemoryRange(logger.bus, memRange.Start, memRange.Length)
 		if err != nil {
 			fmt.Fprintf(&text, "  <error: %v>\n", err)
@@ -114,7 +114,8 @@ func DisassembleInstruction(bus AddressBus, address uint32) (DisassemblyLine, er
 
 // DisassembleMemoryRange decodes instructions sequentially until the range is covered.
 func DisassembleMemoryRange(bus AddressBus, start uint32, length uint32) ([]DisassemblyLine, error) {
-	start &= 0xffffff
+	mask := addressMaskOf(bus)
+	start &= mask
 	if length == 0 {
 		return nil, nil
 	}
@@ -134,7 +135,7 @@ func DisassembleMemoryRange(bus AddressBus, start uint32, length uint32) ([]Disa
 			return lines, fmt.Errorf("decoded zero-length instruction at %08x", address)
 		}
 
-		address = (address + size) & 0xffffff
+		address = (address + size) & mask
 		if size >= remaining {
 			break
 		}
@@ -162,9 +163,10 @@ func decodeInstruction(bus AddressBus, address uint32) (*m68kdasm.Instruction, e
 		return nil, fmt.Errorf("address bus does not support Peek")
 	}
 
+	mask := addressMaskOf(bus)
 	read := func(addr uint32, p []byte) (int, error) {
 		for i := range p {
-			value, err := peeker.Peek(Byte, (addr+uint32(i))&0xffffff)
+			value, err := peeker.Peek(Byte, (addr+uint32(i))&mask)
 			if err != nil {
 				return i, err
 			}
@@ -172,7 +174,7 @@ func decodeInstruction(bus AddressBus, address uint32) (*m68kdasm.Instruction, e
 		}
 		return len(p), nil
 	}
-	return m68kdasm.DecodeFunc(read, address&0xffffff)
+	return m68kdasm.DecodeFunc(read, address&mask)
 }
 
 // decodeAt prefers decoding the supplied raw bytes and falls back to reading
@@ -230,13 +232,22 @@ func formatDisassemblyBytes(data []byte) string {
 	return text.String()
 }
 
-func formatMemoryRangeLabel(memRange MemoryRange) string {
+func formatMemoryRangeLabel(memRange MemoryRange, mask uint32) string {
 	if memRange.Label != "" {
 		return memRange.Label
 	}
 	if memRange.Length == 0 {
-		return fmt.Sprintf("%08x", memRange.Start&0xffffff)
+		return fmt.Sprintf("%08x", memRange.Start&mask)
 	}
-	end := (memRange.Start + memRange.Length - 1) & 0xffffff
-	return fmt.Sprintf("%08x-%08x", memRange.Start&0xffffff, end)
+	end := (memRange.Start + memRange.Length - 1) & mask
+	return fmt.Sprintf("%08x-%08x", memRange.Start&mask, end)
+}
+
+// addressMaskOf returns the address bits bus decodes: those of a *Bus, 24
+// for any other AddressBus.
+func addressMaskOf(bus AddressBus) uint32 {
+	if b, ok := bus.(*Bus); ok {
+		return b.AddressMask()
+	}
+	return 0xffffff
 }

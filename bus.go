@@ -26,17 +26,23 @@ type ContainsDevice interface {
 }
 
 // deviceContains reports whether dev answers for address, using Contains when
-// the device provides it and otherwise its AddressRange.
-func deviceContains(dev Device, address uint32) bool {
+// the device provides it and otherwise its AddressRange compared under mask.
+func deviceContains(dev Device, address, mask uint32) bool {
 	if c, ok := dev.(ContainsDevice); ok {
 		return c.Contains(address)
 	}
 	if r, ok := dev.(AddressRangeDevice); ok {
-		a := address & 0xffffff
+		a := address & mask
 		start, end := r.AddressRange()
-		return a >= start&0xffffff && a <= end&0xffffff
+		return a >= start&mask && a <= end&mask
 	}
 	return false
+}
+
+// addressMasker is implemented by devices that compare addresses themselves
+// and must know how many address bits the bus decodes.
+type addressMasker interface {
+	setAddressMask(mask uint32)
 }
 
 // WaitStateDevice optionally advertises additional wait states a device
@@ -54,6 +60,9 @@ type PeekDevice interface {
 // Bus multiplexes memory access between attached devices and performs common
 // checks such as alignment and bus error handling.
 type Bus struct {
+	// mask selects the address bits the bus decodes: 24 (the default) or
+	// 32.
+	mask                uint32
 	devices             []Device
 	waitStates          uint32
 	waitHook            func(states uint32)
@@ -62,7 +71,11 @@ type Bus struct {
 	fastRAM             *RAM
 	hasWaitStateDevices bool
 	hasPageMap          bool
-	pageRanges          [256][]pageRange
+	// low holds the device ranges of the 64 KB pages of the first 16 MB,
+	// all a 24-bit bus decodes. high extends the map to 32 bits: the top
+	// address byte selects a pageTable, allocated only where devices sit.
+	low  pageTable
+	high [256]*pageTable
 	// scanList holds every device in lookup order, each paired with its
 	// containment test resolved once so the per-access scan does no type
 	// assertions. The first rangedCount entries are the page-mapped devices;
@@ -76,10 +89,12 @@ type scanEntry struct {
 	contains func(address uint32) bool
 }
 
-// mappedDevice wraps another device with an explicit 24-bit address range.
+// mappedDevice wraps another device with an explicit address range, compared
+// in the bus's address width (24 bits until a bus says otherwise).
 type mappedDevice struct {
 	start  uint32
 	end    uint32
+	mask   uint32
 	device Device
 }
 
@@ -87,6 +102,8 @@ type mappedWaitStateDevice struct {
 	*mappedDevice
 	waitStateDevice WaitStateDevice
 }
+
+type pageTable [256][]pageRange
 
 type pageRange struct {
 	start  uint32
@@ -99,9 +116,29 @@ type pageRange struct {
 
 // NewBus constructs a bus optionally seeded with devices.
 func NewBus(devices ...Device) *Bus {
-	b := &Bus{devices: devices}
+	b := &Bus{devices: devices, mask: 0xffffff}
 	b.refreshTopology()
 	return b
+}
+
+// SetAddressWidth sets the number of address bits the bus decodes: 24, the
+// default and the width of the MC68000 and MC68010, or 32, for the MC68020
+// and later with a full 32-bit address bus. It panics for other widths.
+func (b *Bus) SetAddressWidth(bits int) {
+	switch bits {
+	case 24:
+		b.mask = 0xffffff
+	case 32:
+		b.mask = 0xffffffff
+	default:
+		panic(fmt.Sprintf("m68kemu: unsupported bus address width %d", bits))
+	}
+	b.refreshTopology()
+}
+
+// AddressMask returns the address bits the bus decodes.
+func (b *Bus) AddressMask() uint32 {
+	return b.mask
 }
 
 // AddDevice attaches an additional device to the bus.
@@ -127,7 +164,7 @@ func (b *Bus) Reset() {
 // Read forwards a read to the mapped device after performing alignment and
 // mapping checks.
 func (b *Bus) Read(s Size, address uint32) (uint32, error) {
-	address &= 0xffffff
+	address &= b.mask
 
 	if err := b.validateAlignment(address, s); err != nil {
 		return 0, err
@@ -138,7 +175,7 @@ func (b *Bus) Read(s Size, address uint32) (uint32, error) {
 		if err != nil {
 			return 0, err
 		}
-		low, err := b.readCycle(Word, (address+uint32(Word))&0xffffff)
+		low, err := b.readCycle(Word, (address+uint32(Word))&b.mask)
 		if err != nil {
 			return 0, err
 		}
@@ -151,7 +188,7 @@ func (b *Bus) Read(s Size, address uint32) (uint32, error) {
 // Peek reads from the mapped device without charging wait states. Devices may
 // use this for debugger-friendly, side-effect-free inspection.
 func (b *Bus) Peek(s Size, address uint32) (uint32, error) {
-	address &= 0xffffff
+	address &= b.mask
 
 	if err := b.validateAlignment(address, s); err != nil {
 		return 0, err
@@ -162,7 +199,7 @@ func (b *Bus) Peek(s Size, address uint32) (uint32, error) {
 		if err != nil {
 			return 0, err
 		}
-		low, err := b.peekCycle(Word, (address+uint32(Word))&0xffffff)
+		low, err := b.peekCycle(Word, (address+uint32(Word))&b.mask)
 		if err != nil {
 			return 0, err
 		}
@@ -175,7 +212,7 @@ func (b *Bus) Peek(s Size, address uint32) (uint32, error) {
 // Write forwards a write to the mapped device after performing alignment and
 // mapping checks.
 func (b *Bus) Write(s Size, address uint32, value uint32) error {
-	address &= 0xffffff
+	address &= b.mask
 
 	if err := b.validateAlignment(address, s); err != nil {
 		return err
@@ -185,7 +222,7 @@ func (b *Bus) Write(s Size, address uint32, value uint32) error {
 		if err := b.writeCycle(Word, address, value>>16); err != nil {
 			return err
 		}
-		return b.writeCycle(Word, (address+uint32(Word))&0xffffff, value)
+		return b.writeCycle(Word, (address+uint32(Word))&b.mask, value)
 	}
 
 	return b.writeCycle(s, address, value)
@@ -243,7 +280,8 @@ func (b *Bus) refreshTopology() {
 	b.fastRAM = nil
 	b.hasWaitStateDevices = false
 	b.hasPageMap = false
-	b.pageRanges = [256][]pageRange{}
+	b.low = pageTable{}
+	b.high = [256]*pageTable{}
 	b.scanList = b.scanList[:0]
 	b.rangedCount = 0
 	var unranged []scanEntry
@@ -256,6 +294,9 @@ func (b *Bus) refreshTopology() {
 	}
 
 	for _, dev := range b.devices {
+		if m, ok := dev.(addressMasker); ok {
+			m.setAddressMask(b.mask)
+		}
 		if _, ok := dev.(WaitStateDevice); ok {
 			b.hasWaitStateDevices = true
 		}
@@ -272,12 +313,12 @@ func (b *Bus) refreshTopology() {
 		var start, end uint32
 		if hasRange {
 			start, end = ranged.AddressRange()
-			start &= 0xffffff
-			end &= 0xffffff
+			start &= b.mask
+			end &= b.mask
 		}
 		if !hasRange || end < start {
 			if contains == nil {
-				contains = rangeContains(start, end)
+				contains = rangeContains(start, end, b.mask)
 			}
 			unranged = append(unranged, scanEntry{device: dev, contains: contains})
 			continue
@@ -286,7 +327,7 @@ func (b *Bus) refreshTopology() {
 		// Any device with a usable range goes into the page map, earlier
 		// devices taking priority. A Contains method may still decode the
 		// range sparsely, so the page entry keeps it as a filter.
-		b.scanList = append(b.scanList, scanEntry{device: dev, contains: boundedContains(start, end, contains)})
+		b.scanList = append(b.scanList, scanEntry{device: dev, contains: boundedContains(start, end, b.mask, contains)})
 		b.hasPageMap = true
 		for page := start >> 16; page <= end>>16; page++ {
 			pageStart := page << 16
@@ -308,19 +349,19 @@ func (b *Bus) refreshTopology() {
 
 // boundedContains returns a check for a device whose AddressRange bounds its
 // optional Contains decode.
-func boundedContains(start, end uint32, contains func(uint32) bool) func(uint32) bool {
+func boundedContains(start, end, mask uint32, contains func(uint32) bool) func(uint32) bool {
 	if contains == nil {
-		return rangeContains(start, end)
+		return rangeContains(start, end, mask)
 	}
 	return func(address uint32) bool {
-		a := address & 0xffffff
+		a := address & mask
 		return a >= start && a <= end && contains(address)
 	}
 }
 
-func rangeContains(start, end uint32) func(uint32) bool {
+func rangeContains(start, end, mask uint32) func(uint32) bool {
 	return func(address uint32) bool {
-		a := address & 0xffffff
+		a := address & mask
 		return a >= start && a <= end
 	}
 }
@@ -336,8 +377,8 @@ func (b *Bus) refreshFastRAM() {
 func (b *Bus) findDevice(address uint32) Device {
 	scan := b.scanList[b.rangedCount:]
 	if b.hasPageMap {
-		page := (address & 0xffffff) >> 16
-		if r := b.findPageRange(page, address); r != nil {
+		// Read, Peek and Write have masked the address already.
+		if r := findInRanges(b.pageRanges(address), address); r != nil {
 			if r.contains == nil || r.contains(address) {
 				return r.device
 			}
@@ -365,7 +406,7 @@ func (b *Bus) deviceForAddress(address uint32) Device {
 	}
 
 	if dev := b.singleDevice; dev != nil {
-		if deviceContains(dev, address) {
+		if deviceContains(dev, address, b.mask) {
 			return dev
 		}
 		return nil
@@ -381,44 +422,50 @@ func (b *Bus) validateAlignment(address uint32, s Size) error {
 	return nil
 }
 
+// MapDevice places device at the address range [start, end]. The range is
+// compared in the address width of the bus the result is attached to.
 func MapDevice(start, end uint32, device Device) Device {
-	mapped := &mappedDevice{start: start & 0xffffff, end: end & 0xffffff, device: device}
+	mapped := &mappedDevice{start: start, end: end, mask: 0xffffff, device: device}
 	if ws, ok := device.(WaitStateDevice); ok {
 		return &mappedWaitStateDevice{mappedDevice: mapped, waitStateDevice: ws}
 	}
 	return mapped
 }
 
+func (d *mappedDevice) setAddressMask(mask uint32) {
+	d.mask = mask
+}
+
 func (d *mappedDevice) AddressRange() (uint32, uint32) {
-	return d.start, d.end
+	return d.start & d.mask, d.end & d.mask
 }
 
 func (d *mappedDevice) Contains(address uint32) bool {
-	address &= 0xffffff
-	return address >= d.start && address <= d.end
+	address &= d.mask
+	return address >= d.start&d.mask && address <= d.end&d.mask
 }
 
 func (d *mappedDevice) Read(size Size, address uint32) (uint32, error) {
 	if !d.containsAccess(size, address) {
-		return 0, BusError(address & 0xffffff)
+		return 0, BusError(address & d.mask)
 	}
 	return d.device.Read(size, address)
 }
 
 func (d *mappedDevice) Peek(size Size, address uint32) (uint32, error) {
 	if !d.containsAccess(size, address) {
-		return 0, BusError(address & 0xffffff)
+		return 0, BusError(address & d.mask)
 	}
 	peekable, ok := d.device.(PeekDevice)
 	if !ok {
-		return 0, fmt.Errorf("peek unsupported at %08x", address&0xffffff)
+		return 0, fmt.Errorf("peek unsupported at %08x", address&d.mask)
 	}
 	return peekable.Peek(size, address)
 }
 
 func (d *mappedDevice) Write(size Size, address uint32, value uint32) error {
 	if !d.containsAccess(size, address) {
-		return BusError(address & 0xffffff)
+		return BusError(address & d.mask)
 	}
 	return d.device.Write(size, address, value)
 }
@@ -432,7 +479,7 @@ func (d *mappedWaitStateDevice) WaitStates(size Size, address uint32) uint32 {
 }
 
 func (d *mappedDevice) containsAccess(size Size, address uint32) bool {
-	address &= 0xffffff
+	address &= d.mask
 	if !d.Contains(address) {
 		return false
 	}
@@ -442,13 +489,13 @@ func (d *mappedDevice) containsAccess(size Size, address uint32) bool {
 		return false
 	}
 
-	return end <= d.end
+	return end <= d.end&d.mask
 }
 
 func peekDevice(dev Device, size Size, address uint32) (uint32, error) {
 	peekable, ok := dev.(PeekDevice)
 	if !ok {
-		return 0, fmt.Errorf("peek unsupported at %08x", address&0xffffff)
+		return 0, fmt.Errorf("peek unsupported at %08x", address)
 	}
 	return peekable.Peek(size, address)
 }
@@ -458,7 +505,14 @@ func (b *Bus) addPageRange(page, start, end uint32, dev Device, contains func(ui
 		return
 	}
 
-	existing := b.pageRanges[page]
+	table := &b.low
+	if top := page >> 8; top != 0 {
+		if b.high[top] == nil {
+			b.high[top] = new(pageTable)
+		}
+		table = b.high[top]
+	}
+	existing := table[page&0xff]
 	uncovered := make([]pageRange, 0, 1)
 	cursor := start
 	for _, current := range existing {
@@ -502,11 +556,24 @@ func (b *Bus) addPageRange(page, start, end uint32, dev Device, contains func(ui
 	}
 	merged = append(merged, existing[i:]...)
 	merged = append(merged, uncovered[j:]...)
-	b.pageRanges[page] = merged
+	table[page&0xff] = merged
 }
 
-func (b *Bus) findPageRange(page, address uint32) *pageRange {
-	ranges := b.pageRanges[page]
+// pageRanges returns the device ranges of the page that holds the masked
+// address. The uint8 indexes keep the lookups free of bounds checks.
+func (b *Bus) pageRanges(address uint32) []pageRange {
+	if top := uint8(address >> 24); top != 0 {
+		if table := b.high[top]; table != nil {
+			return table[uint8(address>>16)]
+		}
+		return nil
+	}
+	return b.low[uint8(address>>16)]
+}
+
+// findInRanges returns the range of a page that holds address. It is kept
+// separate from pageRanges so both stay small enough to inline.
+func findInRanges(ranges []pageRange, address uint32) *pageRange {
 	lo, hi := 0, len(ranges)
 	for lo < hi {
 		mid := lo + (hi-lo)/2

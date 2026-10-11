@@ -286,13 +286,13 @@ func TestVerboseHelperFallbackPaths(t *testing.T) {
 		t.Fatalf("traceInstructionMnemonic(fallback) = %q", got)
 	}
 
-	if got := formatMemoryRangeLabel(MemoryRange{Label: "program"}); got != "program" {
+	if got := formatMemoryRangeLabel(MemoryRange{Label: "program"}, 0xffffff); got != "program" {
 		t.Fatalf("formatMemoryRangeLabel(label) = %q", got)
 	}
-	if got := formatMemoryRangeLabel(MemoryRange{Start: 0x2000}); got != "00002000" {
+	if got := formatMemoryRangeLabel(MemoryRange{Start: 0x2000}, 0xffffff); got != "00002000" {
 		t.Fatalf("formatMemoryRangeLabel(single) = %q", got)
 	}
-	if got := formatMemoryRangeLabel(MemoryRange{Start: 0x2000, Length: 0x10}); got != "00002000-0000200f" {
+	if got := formatMemoryRangeLabel(MemoryRange{Start: 0x2000, Length: 0x10}, 0xffffff); got != "00002000-0000200f" {
 		t.Fatalf("formatMemoryRangeLabel(range) = %q", got)
 	}
 }
