@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/SemVer
 
 ## [Unreleased]
 
+### Added
+
+- CALLM and RTM on the MC68020 for type $00 module descriptors; type $01
+  descriptors and frames, which need access control hardware, and other
+  types take the format error exception. See `doc/mc68020.md`
+
 ## [1.7.0] - 2026-10-11
 
 ### Added

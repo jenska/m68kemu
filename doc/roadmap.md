@@ -61,7 +61,7 @@ A small step that tests whether the phase 1 design holds up:
 The design question here is exception frames: `raiseExceptionWithPC` needs a
 frame builder chosen per model.
 
-### 3. MC68020 / MC68030 (done except `CALLM`/`RTM`; see [mc68020.md](mc68020.md))
+### 3. MC68020 / MC68030 (done; see [mc68020.md](mc68020.md))
 
 * 32-bit address bus (an address mask per model; 24-bit for the 68EC020)
 * the new addressing modes: scaled index, memory indirect, full extension word

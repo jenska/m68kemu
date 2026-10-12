@@ -3,8 +3,7 @@ package m68kemu
 import "math/bits"
 
 // Instructions the MC68020 adds to the MC68010 set. Branches with a 32-bit
-// displacement are handled by branch; CALLM and RTM are not implemented and
-// raise the illegal-instruction exception.
+// displacement are handled by branch; CALLM and RTM are MC68020 only.
 
 func register68020(b *tableBuilder) {
 	if b.model < M68020 {
@@ -24,6 +23,11 @@ func register68020(b *tableBuilder) {
 	b.replace(branchLong, 0x60ff, 0xf0ff, 0, constantCycles(8))
 	b.add(linkLong, 0x4808, 0xfff8, 0, constantCycles(16))
 	b.add(extb, 0x49c0, 0xfff8, 0, constantCycles(4))
+	if b.model == M68020 {
+		// RTM takes the CALLM slots with the Dn and An modes.
+		b.add(callm, 0x06c0, 0xffc0, controlMask, constantCycles(28))
+		b.add(rtm, 0x06c0, 0xfff0, 0, constantCycles(18))
+	}
 	b.add(chkLong, 0x4100, 0xf1c0, dataMask, constantCycles(10))
 	b.add(mulLong, 0x4c00, 0xffc0, dataMask, constantCycles(44))
 	b.add(divLong, 0x4c40, 0xffc0, dataMask, constantCycles(84))
@@ -104,6 +108,18 @@ func valid68020Addition(op uint16) bool {
 		return specIn(op, specControl)
 	case op&0xf000 == 0xf000: // coprocessor interface
 		return (op>>6)&7 <= 5
+	}
+	return false
+}
+
+// validModuleCall reports whether op is CALLM or RTM, which only the MC68020
+// has.
+func validModuleCall(op uint16) bool {
+	switch {
+	case op&0xfff0 == 0x06c0: // RTM
+		return true
+	case op&0xffc0 == 0x06c0: // CALLM
+		return specIn(op, specControl)
 	}
 	return false
 }
@@ -611,5 +627,134 @@ func chk2(cpu *CPU) error {
 	if outside && ext&0x0800 != 0 {
 		return cpu.exceptionWithCycles(6, exceptionCyclesCHK)
 	}
+	return nil
+}
+
+// Module descriptor and module stack frame fields (MC68020 User's Manual,
+// 9.7). The descriptor starts with a long word holding opt (bits 31-29),
+// type (28-24) and access level (23-16), followed by the module entry word
+// pointer, the module data area pointer and the module stack pointer. The
+// frame CALLM pushes is:
+//
+//	+$00 opt, type, saved access level (word)
+//	+$02 condition codes (word)
+//	+$04 argument count (word)
+//	+$06 reserved (word)
+//	+$08 module descriptor pointer
+//	+$0C saved program counter
+//	+$10 saved module data area pointer
+//	+$14 saved stack pointer
+//	+$18 arguments
+const (
+	moduleFrameSize    = 0x18
+	moduleOptStack     = 0 // arguments on the stack below the frame
+	moduleOptPointer   = 4 // arguments through the saved stack pointer
+	moduleTypeNoAccess = 0 // no change of access rights
+)
+
+// moduleFormatValid reports whether CALLM and RTM accept the opt and type
+// fields of a descriptor or frame. Type $01 changes the access level through
+// access control hardware in CPU space; there is none, so its accesses would
+// end in a bus error, which CALLM and RTM turn into a format error.
+func moduleFormatValid(opt, kind uint32) bool {
+	return (opt == moduleOptStack || opt == moduleOptPointer) && kind == moduleTypeNoAccess
+}
+
+// callm calls the module whose descriptor is at the effective address: it
+// pushes a module stack frame with the caller's state, loads the module data
+// area pointer into the register the module entry word names and continues
+// after that word.
+func callm(cpu *CPU) error {
+	ext, err := cpu.popPc(Word)
+	if err != nil {
+		return err
+	}
+	operand, err := cpu.resolveSrcEA(Long)
+	if err != nil {
+		return err
+	}
+	descriptor := operand.computedAddress()
+	control, err := cpu.read(Long, descriptor)
+	if err != nil {
+		return err
+	}
+	opt, kind := control>>29, (control>>24)&0x1f
+	if !moduleFormatValid(opt, kind) {
+		return cpu.exceptionWithCycles(XFormatError, exceptionCyclesIllegal)
+	}
+	entry, err := cpu.read(Long, descriptor+4)
+	if err != nil {
+		return err
+	}
+	dataArea, err := cpu.read(Long, descriptor+8)
+	if err != nil {
+		return err
+	}
+	entryWord, err := cpu.read(Word, entry)
+	if err != nil {
+		return err
+	}
+	reg := generalRegister(cpu, uint16(entryWord>>12))
+
+	callerSP := cpu.regs.A[7]
+	sp := callerSP - moduleFrameSize
+	fields := []struct {
+		size  Size
+		value uint32
+	}{
+		{Word, control >> 16 & 0xff00}, // the saved access level stays zero without access control
+		{Word, uint32(cpu.regs.SR & 0xff)},
+		{Word, ext & 0xff},
+		{Word, 0},
+		{Long, descriptor},
+		{Long, cpu.regs.PC},
+		{Long, *reg},
+		{Long, callerSP},
+	}
+	address := sp
+	for _, f := range fields {
+		if err := cpu.write(f.size, address, f.value); err != nil {
+			return err
+		}
+		address += uint32(f.size)
+	}
+	*reg = dataArea
+	cpu.regs.A[7] = sp // overrides the data area pointer if the entry word names A7
+	cpu.regs.PC = entry + 2
+	return nil
+}
+
+// rtm returns from a module: it reloads the condition codes, the program
+// counter and Rn from the module stack frame, then removes the frame and the
+// arguments.
+func rtm(cpu *CPU) error {
+	sp := cpu.regs.A[7]
+	control, err := cpu.read(Word, sp)
+	if err != nil {
+		return err
+	}
+	if !moduleFormatValid(control>>13, (control>>8)&0x1f) {
+		return cpu.exceptionWithCycles(XFormatError, exceptionCyclesIllegal)
+	}
+	ccr, err := cpu.read(Word, sp+2)
+	if err != nil {
+		return err
+	}
+	argCount, err := cpu.read(Word, sp+4)
+	if err != nil {
+		return err
+	}
+	pc, err := cpu.read(Long, sp+0x0c)
+	if err != nil {
+		return err
+	}
+	dataArea, err := cpu.read(Long, sp+0x10)
+	if err != nil {
+		return err
+	}
+	*generalRegister(cpu, cpu.regs.IR&0xf) = dataArea
+	cpu.regs.A[7] = sp + moduleFrameSize + argCount&0xff // overrides Rn if it is A7
+	replaceStatusFlags(cpu, statusMaskNZVCX, uint16(ccr))
+	cpu.regs.PC = pc
 	return nil
 }

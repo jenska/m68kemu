@@ -229,3 +229,96 @@ func TestChk2Cmp2(t *testing.T) {
 		t.Fatalf("CHK2 out of range should trap, PC=%x", cpu.regs.PC)
 	}
 }
+
+const moduleProgram = `
+	ORG     $2000
+	MOVE.W  #$1234,-(A7)
+	MOVE    #$11,CCR
+	CALLM   #2,desc
+	NOP
+desc:	DC.L    $00000000,entry,$9000,0
+entry:	DC.W    $D000
+	MOVE.W  24(A7),D0
+	RTM     A5
+`
+
+func TestCallmRtm(t *testing.T) {
+	cpu, ram := run020(t, moduleProgram, 3, func(c *core, _ *RAM) { c.regs.A[5] = 0x1111 })
+	sp := uint32(0x1000 - 2 - moduleFrameSize)
+	if cpu.regs.A[7] != sp || cpu.regs.A[5] != 0x9000 {
+		t.Fatalf("after CALLM A7=%x A5=%x, want %x and the data area 9000", cpu.regs.A[7], cpu.regs.A[5], sp)
+	}
+	callmEnd := uint32(0x2000 + 4 + 4 + 8)
+	for _, f := range []struct {
+		offset uint32
+		size   Size
+		want   uint32
+	}{
+		{0, Word, 0}, {2, Word, 0x11}, {4, Word, 2},
+		{8, Long, callmEnd + 2}, {0x0c, Long, callmEnd}, {0x10, Long, 0x1111}, {0x14, Long, 0x1000 - 2},
+	} {
+		if got, _ := ram.Read(f.size, sp+f.offset); got != f.want {
+			t.Errorf("frame +$%02x = %x, want %x", f.offset, got, f.want)
+		}
+	}
+	if cpu.regs.PC != callmEnd+2+16+2 {
+		t.Fatalf("PC = %x, want the word after the module entry word", cpu.regs.PC)
+	}
+
+	step(t, cpu) // MOVE.W 24(A7),D0 reads the argument and sets the flags
+	step(t, cpu) // RTM A5
+	if cpu.regs.D[0] != 0x1234 {
+		t.Errorf("argument = %x, want 1234", cpu.regs.D[0])
+	}
+	if cpu.regs.PC != callmEnd || cpu.regs.A[7] != 0x1000 || cpu.regs.A[5] != 0x1111 || cpu.regs.SR&0x1f != 0x11 {
+		t.Fatalf("after RTM PC=%x A7=%x A5=%x CCR=%02x, want %x, 1000, 1111 and 11",
+			cpu.regs.PC, cpu.regs.A[7], cpu.regs.A[5], cpu.regs.SR&0x1f, callmEnd)
+	}
+}
+
+func TestCallmEntryWordA7(t *testing.T) {
+	// A module that names A7 in its entry word keeps the stack pointer.
+	cpu, _ := run020(t, `
+	ORG     $2000
+	CALLM   #0,desc
+desc:	DC.L    $80000000,entry,$9000,0
+entry:	DC.W    $F000
+	RTM     A7
+`, 2, nil)
+	if cpu.regs.A[7] != 0x1000 || cpu.regs.PC != 0x2008 {
+		t.Fatalf("A7=%x PC=%x, want 1000 and 2008", cpu.regs.A[7], cpu.regs.PC)
+	}
+}
+
+func TestCallmFormatErrors(t *testing.T) {
+	for _, control := range []string{"$01000000", "$20000000", "$10000000"} { // type $01, opt 001, type $10
+		cpu, ram := newEnvironmentFor(t, M68020)
+		ram.Write(Long, XFormatError<<2, 0x5000)
+		load020(t, cpu, ram, "\tORG $2000\n\tCALLM #0,desc\ndesc:\tDC.L "+control+",entry,$9000,0\nentry:\tDC.W $D000\n")
+		step(t, cpu)
+		if cpu.regs.PC != 0x5000 {
+			t.Errorf("descriptor %s: PC = %x, want the format error handler", control, cpu.regs.PC)
+		}
+	}
+
+	cpu, ram := newEnvironmentFor(t, M68020)
+	ram.Write(Long, XFormatError<<2, 0x5000)
+	load020(t, cpu, ram, "RTM D0")
+	cpu.regs.A[7] = 0x0f00
+	ram.Write(Word, 0x0f00, 0x0100) // type $01
+	step(t, cpu)
+	if cpu.regs.PC != 0x5000 {
+		t.Errorf("RTM with a type $01 frame: PC = %x, want the format error handler", cpu.regs.PC)
+	}
+}
+
+func TestCallmIllegalOnMC68030(t *testing.T) {
+	for _, op := range []uint16{0x06d0, 0x06c0, 0x06c8} { // CALLM #n,(A0); RTM D0; RTM A0
+		if !validFor(M68020, op) || validFor(M68030, op) {
+			t.Errorf("%04x: valid on 68020 %v, on 68030 %v; want only the 68020", op, validFor(M68020, op), validFor(M68030, op))
+		}
+	}
+	if validFor(M68020, 0x06e0) || validFor(M68020, 0x06fc) { // CALLM -(A0), #imm
+		t.Errorf("CALLM accepts only control addressing modes")
+	}
+}

@@ -242,7 +242,12 @@
 06b0-06b7 addi 34
 06b8-06b8 addi 32
 06b9-06b9 addi 36
-06ba-06ff - 0
+06ba-06bf - 0
+06c0-06cf rtm 18
+06d0-06d7 callm 28
+06d8-06e7 - 0
+06e8-06fb callm 28
+06fc-06ff - 0
 0700-0707 bitDynamic 6
 0708-070f movep 16
 0710-071f bitDynamic 8

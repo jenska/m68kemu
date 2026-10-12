@@ -124,9 +124,9 @@ MC68010):
 cpu, err := m68kemu.NewCPU(m68kemu.NewBus(ram), m68kemu.WithModel(m68kemu.M68030))
 ```
 
-Their timing is approximate, CALLM/RTM are not implemented, the caches are
-not emulated, and the 68030 has no MMU yet. [doc/mc68020.md](doc/mc68020.md)
-has the details.
+Their timing is approximate, CALLM/RTM support only type $00 module
+descriptors, the caches are not emulated, and the 68030 has no MMU yet.
+[doc/mc68020.md](doc/mc68020.md) has the details.
 
 The constant `M68040` exist for the model on the
 [roadmap](doc/roadmap.md). Until a model is implemented, `NewCPU` returns
