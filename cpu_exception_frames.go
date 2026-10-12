@@ -126,6 +126,9 @@ type frameField struct {
 func (cpu *CPU) raiseBusFault(vector uint32) error {
 	fault := cpu.fault
 	pc := cpu.currentOpcodeAddress(fault.pc)
+	if cpu.translating && (cpu.regs.SR^cpu.restartRegs.SR)&srSupervisor != 0 {
+		cpu.code, cpu.data = fastPage{}, fastPage{} // they map the other function codes
+	}
 	cpu.regs = cpu.restartRegs
 	cpu.regs.IR = fault.ir
 

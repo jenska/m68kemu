@@ -55,8 +55,8 @@ type CoprocessorTiming interface {
 }
 
 // ErrCoprocessorUnsupported is returned by NewCPU for a coprocessor on a
-// model without a coprocessor interface (before the MC68020) or with an ID
-// outside 0-7.
+// model without a coprocessor interface (before the MC68020), with an ID
+// outside 0-7, or with ID 0 on an MC68030, whose MMU has that ID.
 var ErrCoprocessorUnsupported = errors.New("m68kemu: coprocessor not supported")
 
 // WithCoprocessor attaches c with coprocessor ID id (0-7) to an MC68020 or
@@ -78,6 +78,9 @@ func coprocessorInstruction(cpu *CPU) error {
 	id := (cpu.regs.IR >> 9) & 7
 	cp := cpu.coprocessors[id]
 	instructionPC := cpu.currentOpcodeAddress(cpu.regs.PC - 2)
+	if id == 0 && cpu.mmu != nil {
+		return cpu.mmuInstruction(instructionPC)
+	}
 	if cp == nil {
 		return cpu.opcodeException(XLineF, instructionPC)
 	}

@@ -125,8 +125,22 @@ cpu, err := m68kemu.NewCPU(m68kemu.NewBus(ram), m68kemu.WithModel(m68kemu.M68030
 ```
 
 Their timing is approximate, CALLM/RTM support only type $00 module
-descriptors, the caches are not emulated, and the 68030 has no MMU yet.
-[doc/mc68020.md](doc/mc68020.md) has the details.
+descriptors and the caches are not emulated. [doc/mc68020.md](doc/mc68020.md)
+has the details.
+
+### MMU (MC68030)
+
+An MC68030 has its paged memory management unit built in, emulated by
+package `github.com/jenska/m68kemu/mmu`. The CPU executes PMOVE, PFLUSH,
+PLOAD and PTEST, translates every access through the translation tables in
+memory once TC enables it, and takes a restartable bus error on a page
+fault. `cpu.MMU()` returns the MMU, for example to read its registers:
+
+```go
+tc := cpu.MMU().Register(mmu.TC)
+```
+
+[doc/mmu.md](doc/mmu.md) has the details.
 
 The constant `M68040` exist for the model on the
 [roadmap](doc/roadmap.md). Until a model is implemented, `NewCPU` returns

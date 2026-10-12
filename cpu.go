@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"slices"
 	"strings"
+
+	"github.com/jenska/m68kemu/mmu"
 )
 
 const (
@@ -17,6 +19,7 @@ const (
 	XLineA            = 10
 	XLineF            = 11
 	XFormatError      = 14 // MC68010 and later: RTE found an unknown frame format
+	XMMUConfiguration = 56 // MC68030: PMOVE loaded an invalid TC, SRP or CRP
 	XUninitializedInt = 15
 	XTrap             = 32
 
@@ -415,6 +418,11 @@ type (
 		history            []HistoryEntry
 		historyNext        int
 		historyCount       int
+		// mmu is the MMU of an MC68030. While it translates, translating is
+		// set and the fast pages code and data map logical addresses of the
+		// current program and data function codes (see cpu_mmu.go).
+		mmu         *mmu.MC68030
+		translating bool
 		// coprocessors are attached by ID through WithCoprocessor.
 		coprocessors [8]Coprocessor
 		// coprocessorTimings holds each coprocessor that implements
@@ -560,11 +568,29 @@ func (cpu *CPU) read(size Size, address uint32) (uint32, error) {
 }
 
 func (cpu *CPU) readProgram(size Size, address uint32) (uint32, error) {
-	return cpu.readCtx(size, address, accessContext{functionCode: cpu.programFunctionCode()})
+	return cpu.readSpace(size, address, accessContext{functionCode: cpu.programFunctionCode()})
 }
 
 func (cpu *CPU) readSystemProgram(size Size, address uint32) (uint32, error) {
-	return cpu.readCtx(size, address, accessContext{functionCode: functionCodeSupervisorProg, notInstruction: true})
+	return cpu.readSpace(size, address, accessContext{functionCode: functionCodeSupervisorProg, notInstruction: true})
+}
+
+// readSpace is readCtx for an access whose function code may differ from the
+// current data space. While the MMU translates, such an access must not use
+// the fast data page, which maps the data space.
+func (cpu *CPU) readSpace(size Size, address uint32, ctx accessContext) (uint32, error) {
+	if cpu.translating {
+		return cpu.readTranslated(size, address, ctx)
+	}
+	return cpu.readCtx(size, address, ctx)
+}
+
+// writeSpace is the write counterpart of readSpace.
+func (cpu *CPU) writeSpace(size Size, address uint32, value uint32, ctx accessContext) error {
+	if cpu.translating {
+		return cpu.writeTranslated(size, address, value, ctx)
+	}
+	return cpu.writeCtx(size, address, value, ctx)
 }
 
 func (cpu *CPU) readCtx(size Size, address uint32, ctx accessContext) (uint32, error) {
@@ -589,6 +615,9 @@ func (cpu *CPU) readCtx(size Size, address uint32, ctx accessContext) (uint32, e
 			}
 			return result, nil
 		}
+		if cpu.translating {
+			return cpu.readTranslated(size, address, ctx)
+		}
 		result, err := cpu.bus.Read(size, address)
 		if err != nil {
 			cpu.recordFault(faultAddress(address, err), ctx, size, 0)
@@ -607,7 +636,7 @@ func (cpu *CPU) write(size Size, address uint32, value uint32) error {
 }
 
 func (cpu *CPU) writeSystemData(size Size, address uint32, value uint32) error {
-	return cpu.writeCtx(size, address, value, accessContext{functionCode: functionCodeSupervisorData, notInstruction: true, write: true})
+	return cpu.writeSpace(size, address, value, accessContext{functionCode: functionCodeSupervisorData, notInstruction: true, write: true})
 }
 
 func (cpu *CPU) writeCtx(size Size, address uint32, value uint32, ctx accessContext) error {
@@ -631,6 +660,9 @@ func (cpu *CPU) writeCtx(size Size, address uint32, value uint32, ctx accessCont
 				cpu.traceBusAccess(size, address, value, ctx)
 			}
 			return nil
+		}
+		if cpu.translating {
+			return cpu.writeTranslated(size, address, value, ctx)
 		}
 		if err := cpu.bus.Write(size, address, value); err != nil {
 			cpu.recordFault(faultAddress(address, err), ctx, size, value)
@@ -657,6 +689,7 @@ func (cpu *CPU) Registers() Registers {
 // hold the others. Registers a model does not have are ignored by it.
 func (cpu *CPU) SetRegisters(regs Registers) {
 	cpu.regs = regs
+	cpu.refreshTranslation()
 }
 
 // SetPC sets the program counter, for example to start a program loaded
@@ -1101,6 +1134,9 @@ func (cpu *CPU) setSR(value uint16) {
 		return
 	}
 	if (cpu.regs.SR^value)&srSupervisor != 0 {
+		if cpu.translating {
+			cpu.code, cpu.data = fastPage{}, fastPage{}
+		}
 		if value&srSupervisor != 0 {
 			cpu.regs.USP = cpu.regs.A[7]
 			cpu.regs.A[7] = cpu.regs.SSP
@@ -1115,6 +1151,9 @@ func (cpu *CPU) setSR(value uint16) {
 // setSR020 is setSR for the MC68020 and later, which have three stack
 // pointers: USP (S clear), ISP (S set, M clear) and MSP (S and M set).
 func (cpu *CPU) setSR020(value uint16) {
+	if cpu.translating && (cpu.regs.SR^value)&srSupervisor != 0 {
+		cpu.code, cpu.data = fastPage{}, fastPage{} // they map the old function codes
+	}
 	if old, now := cpu.stackSlot(cpu.regs.SR), cpu.stackSlot(value); old != now {
 		*old = cpu.regs.A[7]
 		cpu.regs.A[7] = *now
@@ -1541,6 +1580,10 @@ func (cpu *CPU) fetchOpcode() (uint16, error) {
 
 func (cpu *CPU) Reset() error {
 	cpu.regs = Registers{SR: 0x2700}
+	if cpu.mmu != nil {
+		cpu.mmu.Reset()
+	}
+	cpu.refreshTranslation()
 	if cpu.interrupts == nil {
 		cpu.interrupts = newInterruptController()
 	} else {
@@ -1592,7 +1635,7 @@ func NewCPU(bus *Bus, opts ...Option) (*CPU, error) {
 		return nil, fmt.Errorf("%w: %v", ErrModelUnsupported, cfg.model)
 	}
 	for _, a := range cfg.coprocessors {
-		if cfg.model < M68020 || a.id < 0 || a.id > 7 {
+		if cfg.model < M68020 || a.id < 0 || a.id > 7 || a.id == 0 && cfg.model == M68030 {
 			return nil, fmt.Errorf("%w: ID %d on the %v", ErrCoprocessorUnsupported, a.id, cfg.model)
 		}
 	}
@@ -1611,6 +1654,9 @@ func newCPU(bus *Bus, cfg cpuConfig) (*CPU, error) {
 	for _, a := range cfg.coprocessors {
 		c.coprocessors[a.id&7] = a.c
 		c.coprocessorTimings[a.id&7], _ = a.c.(CoprocessorTiming)
+	}
+	if cfg.model == M68030 {
+		c.mmu = mmu.NewMC68030(physicalMemory{&c})
 	}
 	bus.cpu = &c
 	bus.waitHook = func(states uint32) { c.addCycles(states) }
@@ -1759,7 +1805,7 @@ func (cpu *CPU) dataIndex(size Size, address uint32) (uint32, bool) {
 
 // loadDataPage is the miss path of dataIndex.
 func (cpu *CPU) loadDataPage(size Size, address uint32) (uint32, bool) {
-	if address&1 != 0 && size != Byte {
+	if address&1 != 0 && size != Byte || cpu.translating {
 		return 0, false
 	}
 	p := cpu.bus.fastPageFor(address)
@@ -1773,7 +1819,7 @@ func (cpu *CPU) loadDataPage(size Size, address uint32) (uint32, bool) {
 // loadCodePage points the code cache at the direct memory that holds the
 // aligned size-byte fetch at address, if there is one and fetches may use it.
 func (cpu *CPU) loadCodePage(size Size, address uint32) bool {
-	if !cpu.fastFetch || address&1 != 0 {
+	if !cpu.fastFetch || address&1 != 0 || cpu.translating {
 		return false
 	}
 	p := cpu.bus.fastPageFor(address)

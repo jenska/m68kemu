@@ -83,9 +83,9 @@ func moves(cpu *CPU) error {
 
 	if ext&0x0800 != 0 {
 		ctx := accessContext{functionCode: uint16(cpu.regs.DFC), notInstruction: true, write: true}
-		return cpu.writeCtx(size, address, *rn&size.mask(), ctx)
+		return cpu.writeSpace(size, address, *rn&size.mask(), ctx)
 	}
-	value, err := cpu.readCtx(size, address, accessContext{functionCode: uint16(cpu.regs.SFC), notInstruction: true})
+	value, err := cpu.readSpace(size, address, accessContext{functionCode: uint16(cpu.regs.SFC), notInstruction: true})
 	if err != nil {
 		return err
 	}

@@ -12,6 +12,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/SemVer
 - CALLM and RTM on the MC68020 for type $00 module descriptors; type $01
   descriptors and frames, which need access control hardware, and other
   types take the format error exception. See `doc/mc68020.md`
+- The MC68030's paged memory management unit, in the new package `mmu`
+  and built into every `M68030` CPU (`CPU.MMU`): TC, CRP, SRP, TT0, TT1 and
+  MMUSR; transparent translation; table searches with function code lookup,
+  short and long, early termination and indirect descriptors, limits,
+  write and supervisor protection and the U and M bits; a 22-entry ATC;
+  PMOVE, PMOVEFD, PFLUSH, PFLUSHA, PLOAD and PTEST. Page faults are
+  restartable bus errors, and invalid MMU registers take the MMU
+  configuration exception (`XMMUConfiguration`, vector 56). See
+  `doc/mmu.md`
+
+### Changed
+
+- `WithCoprocessor` rejects ID 0 on an MC68030, which its MMU uses
+- The tests use m68kasm v1.6.4, which encodes PTEST with an address
+  register correctly
 
 ## [1.7.0] - 2026-10-11
 
