@@ -1,16 +1,24 @@
 package m68kemu
 
 import (
+	"encoding/binary"
 	"errors"
 
 	"github.com/jenska/m68kemu/mmu"
 )
 
-// MMU returns the paged memory management unit of an MC68030, or nil for a
-// model without one. The CPU translates every access through it once its TC
-// register enables translation, and executes PMOVE, PFLUSH, PLOAD and PTEST
-// on it.
-func (cpu *CPU) MMU() *mmu.MC68030 { return cpu.mmu }
+// MMU returns the paged memory management unit: the MMU of an MC68030, an
+// *mmu.MC68030, or the MC68851 attached to an MC68020 with WithMC68851, an
+// *mmu.MC68851. It is nil for a CPU without one. The CPU translates every
+// access through the MMU once its TC register enables translation, and
+// executes the MMU instructions on it.
+func (cpu *CPU) MMU() mmu.MMU { return cpu.mmu }
+
+// WithMC68851 attaches an MC68851 paged memory management unit to an
+// MC68020, as coprocessor 0.
+func WithMC68851() Option {
+	return func(cfg *cpuConfig) { cfg.mc68851 = true }
+}
 
 // tableSearchCycles is the time of one descriptor access during a table
 // search. The real cost depends on the bus; this is an approximation.
@@ -213,20 +221,37 @@ func (cpu *CPU) translatedPage(address uint32, t mmu.Translation, ctx accessCont
 }
 
 // mmuInstruction runs an F-line instruction with coprocessor ID 0 on a CPU
-// with an MMU: PMOVE, PFLUSH, PLOAD or PTEST. They are privileged; other
-// instructions take the line-F exception.
+// with an MMU. All but PVALID are privileged; encodings the MMU does not
+// implement take the line-F exception.
 func (cpu *CPU) mmuInstruction(instructionPC uint32) error {
-	if ok, err := cpu.requireSupervisor(); !ok {
+	if kind := (cpu.regs.IR >> 6) & 7; kind != 0 {
+		if ok, err := cpu.requireSupervisor(); !ok {
+			return err
+		}
+		if cpu.pmmu == nil {
+			return cpu.opcodeException(XLineF, instructionPC)
+		}
+		err := cpu.pmmuInstruction(kind)
+		if errors.Is(err, errCoprocessorRejected) {
+			return cpu.opcodeException(XLineF, instructionPC)
+		}
 		return err
-	}
-	if (cpu.regs.IR>>6)&7 != 0 {
-		return cpu.opcodeException(XLineF, instructionPC)
 	}
 	cmd, err := cpu.popPc(Word)
 	if err != nil {
 		return err
 	}
-	ok, err := cpu.mmuCommand(uint16(cmd))
+	if cpu.regs.SR&srSupervisor == 0 && (cpu.pmmu == nil || !isPValid(uint16(cmd))) {
+		cpu.regs.PC -= 2 // the privilege check comes before the command word
+		_, err := cpu.requireSupervisor()
+		return err
+	}
+	var ok bool
+	if cpu.pmmu != nil {
+		ok, err = cpu.pmmuCommand(uint16(cmd))
+	} else {
+		ok, err = cpu.mmuCommand(uint16(cmd))
+	}
 	cpu.refreshTranslation()
 	if err != nil || ok {
 		return err
@@ -234,8 +259,39 @@ func (cpu *CPU) mmuInstruction(instructionPC uint32) error {
 	return cpu.opcodeException(XLineF, instructionPC)
 }
 
-// mmuCommand decodes and runs the command word of an MMU instruction. ok is
-// false for an encoding the MMU does not implement.
+// pmmuInstruction runs the MC68851's conditional and context switch
+// instructions through the coprocessor interface: PScc, PDBcc and PTRAPcc,
+// PBcc, PSAVE and PRESTORE.
+func (cpu *CPU) pmmuInstruction(kind uint16) error {
+	switch kind {
+	case 1:
+		return cpu.cpConditional(cpu.pmmu)
+	case 2, 3:
+		return cpu.cpBranch(cpu.pmmu, kind == 3)
+	case 4:
+		return cpu.cpSave(cpu.pmmu)
+	case 5:
+		err := cpu.cpRestore(cpu.pmmu)
+		cpu.refreshTranslation()
+		return err
+	}
+	return errCoprocessorRejected
+}
+
+// mmuException takes the exception an MMU operation reports.
+func (cpu *CPU) mmuException(err error) error {
+	switch {
+	case errors.Is(err, mmu.ErrConfiguration):
+		cpu.refreshTranslation()
+		return cpu.exceptionWithCycles(XMMUConfiguration, exceptionCyclesIllegal)
+	case errors.Is(err, mmu.ErrIllegalOperation):
+		return cpu.exceptionWithCycles(XMMUIllegalOperation, exceptionCyclesIllegal)
+	}
+	return err
+}
+
+// mmuCommand decodes and runs the command word of an MC68030 MMU
+// instruction. ok is false for an encoding the MMU does not implement.
 func (cpu *CPU) mmuCommand(cmd uint16) (ok bool, err error) {
 	switch {
 	case cmd&0xe0ff == 0x4000 || cmd&0xe0ff == 0x0000: // PMOVE TC, SRP, CRP, TT0, TT1
@@ -250,68 +306,166 @@ func (cpu *CPU) mmuCommand(cmd uint16) (ok bool, err error) {
 		}
 		return true, cpu.pmove(mmu.MMUSR, 2, cmd&0x0200 != 0, false)
 	case cmd&0xfde0 == 0x2000: // PLOADR, PLOADW
-		fc, ok := cpu.mmuFunctionCode(cmd)
-		if !ok {
-			return false, nil
-		}
-		address, ok, err := cpu.mmuAddress()
-		if !ok || err != nil {
-			return ok, err
-		}
-		cpu.mmu.Load(address, fc, cmd&0x0200 == 0)
-		cpu.addCycles(16)
-		return true, nil
-	case cmd&0xe300 == 0x2000: // PFLUSHA, PFLUSH
-		mode, mask := (cmd>>10)&7, uint8(cmd>>5)&7
-		switch mode {
-		case 1: // PFLUSHA
-			if cmd&0xff != 0 {
-				return false, nil
-			}
-			cpu.mmu.Flush(0, 0, 0, false)
-		case 4, 6:
-			fc, ok := cpu.mmuFunctionCode(cmd)
-			if !ok {
-				return false, nil
-			}
-			var address uint32
-			if mode == 6 {
-				var err error
-				if address, ok, err = cpu.mmuAddress(); !ok || err != nil {
-					return ok, err
-				}
-			}
-			cpu.mmu.Flush(fc, mask, address, mode == 6)
-		default:
-			return false, nil
-		}
+		return cpu.pload(cmd)
+	case cmd == 0x2400: // PFLUSHA
+		cpu.mmu.FlushAll()
 		cpu.addCycles(8)
 		return true, nil
+	case cmd&0xe300 == 0x2000: // PFLUSH
+		mode := (cmd >> 10) & 7
+		if mode != 4 && mode != 6 {
+			return false, nil
+		}
+		return cpu.pflush(cmd, uint8(cmd>>5)&7, mode == 6, false)
 	case cmd&0xe000 == 0x8000: // PTESTR, PTESTW
-		level, withRegister, reg := int(cmd>>10)&7, cmd&0x0100 != 0, (cmd>>5)&7
-		if level == 0 && cmd&0x01e0 != 0 || !withRegister && reg != 0 {
+		if cmd&0x1c00 == 0 && cmd&0x01e0 != 0 { // level 0 with an address register
 			return false, nil
 		}
-		fc, ok := cpu.mmuFunctionCode(cmd)
-		if !ok {
-			return false, nil
-		}
-		address, ok, err := cpu.mmuAddress()
-		if !ok || err != nil {
-			return ok, err
-		}
-		descriptor := cpu.mmu.Test(address, fc, level, cmd&0x0200 == 0)
-		if withRegister {
-			cpu.regs.A[reg] = descriptor
-		}
-		cpu.addCycles(12)
-		return true, nil
+		return cpu.ptest(cmd)
 	}
 	return false, nil
 }
 
-// pmoveRegister decodes the register and operand size of PMOVE to or from
-// TC, SRP, CRP, TT0 or TT1.
+// pmmuCommand decodes and runs the command word of an MC68851 general
+// instruction. ok is false for an encoding the MC68851 does not implement.
+func (cpu *CPU) pmmuCommand(cmd uint16) (ok bool, err error) {
+	switch {
+	case cmd&0xe1ff == 0x4000: // PMOVE TC, DRP, SRP, CRP, CAL, VAL, SCC, AC
+		regs := [...]struct {
+			reg  mmu.Register
+			size int
+		}{{mmu.TC, 4}, {mmu.DRP, 8}, {mmu.SRP, 8}, {mmu.CRP, 8}, {mmu.CAL, 1}, {mmu.VAL, 1}, {mmu.SCC, 1}, {mmu.AC, 2}}
+		r := regs[(cmd>>10)&7]
+		return cpu.pmoveOperand(r.reg, r.size, cmd&0x0200 != 0)
+	case cmd&0xfdff == 0x6000: // PMOVE PSR
+		return cpu.pmoveOperand(mmu.PSR, 2, cmd&0x0200 != 0)
+	case cmd == 0x6600: // PMOVE PCSR,<ea>
+		return cpu.pmoveOperand(mmu.PCSR, 2, true)
+	case cmd&0xf9e3 == 0x7000: // PMOVE BADn, BACn
+		reg := mmu.BAD0
+		if cmd&0x0400 != 0 {
+			reg = mmu.BAC0
+		}
+		return cpu.pmoveOperand(reg+mmu.Register(cmd>>2)&7, 2, cmd&0x0200 != 0)
+	case cmd&0xfde0 == 0x2000: // PLOADR, PLOADW
+		return cpu.pload(cmd)
+	case cmd == 0x2400: // PFLUSHA
+		cpu.mmu.FlushAll()
+		cpu.addCycles(8)
+		return true, nil
+	case isPValid(cmd):
+		return cpu.pvalid(cmd)
+	case cmd&0xe200 == 0x2000 && cmd&0x1000 != 0: // PFLUSH, PFLUSHS
+		mode := (cmd >> 10) & 7
+		return cpu.pflush(cmd, uint8(cmd>>5)&15, mode&2 != 0, mode&1 != 0)
+	case cmd == 0xa000: // PFLUSHR
+		mode := (cpu.regs.IR >> 3) & 7
+		if mode <= 1 {
+			return false, nil
+		}
+		location, err := cpu.cpOperandLocation(8)
+		if err != nil {
+			return true, err
+		}
+		b, err := location.read(cpu, 8)
+		if err != nil {
+			return true, err
+		}
+		cpu.pmmu.FlushRoot(binary.BigEndian.Uint64(b))
+		cpu.addCycles(12)
+		return true, nil
+	case cmd&0xe000 == 0x8000: // PTESTR, PTESTW
+		return cpu.ptest(cmd)
+	}
+	return false, nil
+}
+
+// isPValid reports whether cmd is PVALID VAL,<ea> or PVALID An,<ea>, the
+// MC68851's only unprivileged instruction.
+func isPValid(cmd uint16) bool {
+	return cmd == 0x2800 || cmd&0xfff8 == 0x2c00
+}
+
+// pvalid checks the access level of a pointer against VAL or an address
+// register and takes the MMU access level exception if it is more
+// privileged.
+func (cpu *CPU) pvalid(cmd uint16) (bool, error) {
+	source := uint32(cpu.mmu.Register(mmu.VAL)) << 24
+	if cmd != 0x2800 {
+		source = cpu.regs.A[cmd&7]
+	}
+	address, ok, err := cpu.mmuAddress()
+	if !ok || err != nil {
+		return ok, err
+	}
+	cpu.addCycles(8)
+	if !cpu.pmmu.Validate(source, address) {
+		return true, cpu.exceptionWithCycles(XMMUAccessLevel, exceptionCyclesIllegal)
+	}
+	return true, nil
+}
+
+// pload runs PLOADR and PLOADW.
+func (cpu *CPU) pload(cmd uint16) (bool, error) {
+	fc, ok := cpu.mmuFunctionCode(cmd)
+	if !ok {
+		return false, nil
+	}
+	address, ok, err := cpu.mmuAddress()
+	if !ok || err != nil {
+		return ok, err
+	}
+	cpu.addCycles(16)
+	return true, cpu.mmuException(cpu.mmu.Load(address, fc, cmd&0x0200 == 0))
+}
+
+// pflush runs PFLUSH and PFLUSHS by function code, with byAddress also by
+// the effective address.
+func (cpu *CPU) pflush(cmd uint16, mask uint8, byAddress, shared bool) (bool, error) {
+	fc, ok := cpu.mmuFunctionCode(cmd)
+	if !ok {
+		return false, nil
+	}
+	var address uint32
+	if byAddress {
+		var err error
+		if address, ok, err = cpu.mmuAddress(); !ok || err != nil {
+			return ok, err
+		}
+	}
+	cpu.mmu.Flush(fc, mask, address, byAddress, shared)
+	cpu.addCycles(8)
+	return true, nil
+}
+
+// ptest runs PTESTR and PTESTW, loading the address of the last descriptor
+// into An if the command word names one.
+func (cpu *CPU) ptest(cmd uint16) (bool, error) {
+	level, withRegister, reg := int(cmd>>10)&7, cmd&0x0100 != 0, (cmd>>5)&7
+	if !withRegister && reg != 0 {
+		return false, nil
+	}
+	fc, ok := cpu.mmuFunctionCode(cmd)
+	if !ok {
+		return false, nil
+	}
+	address, ok, err := cpu.mmuAddress()
+	if !ok || err != nil {
+		return ok, err
+	}
+	cpu.addCycles(12)
+	descriptor, err := cpu.mmu.Test(address, fc, level, cmd&0x0200 == 0)
+	if err != nil {
+		return true, cpu.mmuException(err)
+	}
+	if withRegister {
+		cpu.regs.A[reg] = descriptor
+	}
+	return true, nil
+}
+
+// pmoveRegister decodes the register and operand size of the MC68030's
+// PMOVE to or from TC, SRP, CRP, TT0 or TT1.
 func pmoveRegister(cmd uint16) (mmu.Register, uint32, bool) {
 	preg := (cmd >> 10) & 7
 	if cmd&0xe000 == 0x4000 {
@@ -334,8 +488,8 @@ func pmoveRegister(cmd uint16) (mmu.Register, uint32, bool) {
 	return 0, 0, false
 }
 
-// pmove moves an MMU register of size bytes to (toMemory) or from the
-// control alterable effective address. Loading a register flushes the
+// pmove moves an MC68030 MMU register of size bytes to (toMemory) or from
+// the control alterable effective address. Loading a register flushes the
 // address translation cache unless the flush-disable bit is set.
 func (cpu *CPU) pmove(reg mmu.Register, size uint32, toMemory, flush bool) error {
 	operand, err := cpu.resolveSrcEA(Long)
@@ -384,24 +538,53 @@ func (cpu *CPU) pmove(reg mmu.Register, size uint32, toMemory, flush bool) error
 		value = uint64(hi)<<32 | uint64(lo)
 	}
 	cpu.addCycles(12)
-	if err := cpu.mmu.SetRegister(reg, value, flush); errors.Is(err, mmu.ErrConfiguration) {
-		cpu.refreshTranslation()
-		return cpu.exceptionWithCycles(XMMUConfiguration, exceptionCyclesIllegal)
-	} else if err != nil {
-		return err
+	return cpu.mmuException(cpu.mmu.SetRegister(reg, value, flush))
+}
+
+// pmoveOperand moves an MC68851 register of size bytes to (toMemory) or from
+// the effective address, through the coprocessor operand path: any mode for
+// a load, an alterable one for a store, and no data or address register for
+// the 64-bit root pointers.
+func (cpu *CPU) pmoveOperand(reg mmu.Register, size int, toMemory bool) (bool, error) {
+	mode, r := (cpu.regs.IR>>3)&7, cpu.regs.IR&7
+	if size == 8 && mode <= 1 || mode == 7 && r > 4 || toMemory && mode == 7 && r > 1 {
+		return false, nil
 	}
-	return nil
+	location, err := cpu.cpOperandLocation(size)
+	if err != nil {
+		return true, err
+	}
+	cpu.addCycles(8)
+	if toMemory {
+		var b [8]byte
+		binary.BigEndian.PutUint64(b[:], cpu.mmu.Register(reg))
+		return true, location.write(cpu, b[8-size:])
+	}
+	b, err := location.read(cpu, size)
+	if err != nil {
+		return true, err
+	}
+	var value uint64
+	for _, v := range b {
+		value = value<<8 | uint64(v)
+	}
+	return true, cpu.mmuException(cpu.mmu.SetRegister(reg, value, true))
 }
 
 // mmuFunctionCode decodes the function code field (bits 4-0) of an MMU
-// command word: immediate, from a data register, or SFC or DFC.
+// command word: immediate, from a data register, or SFC or DFC. The
+// MC68851's function codes have four bits (FC3 selects DMA), the MC68030's
+// three.
 func (cpu *CPU) mmuFunctionCode(cmd uint16) (uint8, bool) {
-	field := cmd & 0x1f
+	field, mask := cmd&0x1f, uint16(7)
+	if cpu.pmmu != nil {
+		mask = 15
+	}
 	switch {
-	case field&0x18 == 0x10:
-		return uint8(field & 7), true
+	case field&0x10 != 0 && field&^mask&0x0f == 0:
+		return uint8(field & mask), true
 	case field&0x18 == 0x08:
-		return uint8(cpu.regs.D[field&7] & 7), true
+		return uint8(uint16(cpu.regs.D[field&7]) & mask), true
 	case field == 0:
 		return uint8(cpu.regs.SFC & 7), true
 	case field == 1:
@@ -411,8 +594,8 @@ func (cpu *CPU) mmuFunctionCode(cmd uint16) (uint8, bool) {
 }
 
 // mmuAddress evaluates the control alterable effective address of PFLUSH,
-// PLOAD or PTEST, the logical address the instruction is about. ok is false
-// for another addressing mode.
+// PLOAD, PTEST or PVALID, the logical address the instruction is about. ok
+// is false for another addressing mode.
 func (cpu *CPU) mmuAddress() (address uint32, ok bool, err error) {
 	if !mmuControlAlterable(cpu.regs.IR) {
 		return 0, false, nil
@@ -425,8 +608,7 @@ func (cpu *CPU) mmuAddress() (address uint32, ok bool, err error) {
 }
 
 // mmuControlAlterable reports whether the effective address of an MMU
-// instruction uses a control alterable addressing mode, the only ones the
-// MC68030 accepts.
+// instruction uses a control alterable addressing mode.
 func mmuControlAlterable(op uint16) bool {
 	return specIn(op, specControl&^(specPCDisp|specPCIndex))
 }

@@ -10,18 +10,20 @@ import (
 )
 
 const (
-	Version           = "1.5.0"
-	XBusError         = 2
-	XAddressError     = 3
-	XIllegal          = 4
-	XDivByZero        = 5
-	XPrivViolation    = 8
-	XLineA            = 10
-	XLineF            = 11
-	XFormatError      = 14 // MC68010 and later: RTE found an unknown frame format
-	XMMUConfiguration = 56 // MC68030: PMOVE loaded an invalid TC, SRP or CRP
-	XUninitializedInt = 15
-	XTrap             = 32
+	Version              = "1.5.0"
+	XBusError            = 2
+	XAddressError        = 3
+	XIllegal             = 4
+	XDivByZero           = 5
+	XPrivViolation       = 8
+	XLineA               = 10
+	XLineF               = 11
+	XFormatError         = 14 // MC68010 and later: RTE found an unknown frame format
+	XMMUConfiguration    = 56 // MC68030, MC68851: PMOVE loaded an invalid TC or root pointer
+	XMMUIllegalOperation = 57 // MC68851: PTEST or PLOAD while translation is disabled
+	XMMUAccessLevel      = 58 // MC68851: PVALID found a pointer more privileged than allowed
+	XUninitializedInt    = 15
+	XTrap                = 32
 
 	srCarry         = 0x0001
 	srOverflow      = 0x0002
@@ -418,10 +420,13 @@ type (
 		history            []HistoryEntry
 		historyNext        int
 		historyCount       int
-		// mmu is the MMU of an MC68030. While it translates, translating is
-		// set and the fast pages code and data map logical addresses of the
-		// current program and data function codes (see cpu_mmu.go).
-		mmu         *mmu.MC68030
+		// mmu is the MMU of an MC68030, or the MC68851 attached to an
+		// MC68020, which pmmu then also holds. While it translates,
+		// translating is set and the fast pages code and data map logical
+		// addresses of the current program and data function codes (see
+		// cpu_mmu.go).
+		mmu         mmu.MMU
+		pmmu        *mmu.MC68851
 		translating bool
 		// coprocessors are attached by ID through WithCoprocessor.
 		coprocessors [8]Coprocessor
@@ -1635,9 +1640,12 @@ func NewCPU(bus *Bus, opts ...Option) (*CPU, error) {
 		return nil, fmt.Errorf("%w: %v", ErrModelUnsupported, cfg.model)
 	}
 	for _, a := range cfg.coprocessors {
-		if cfg.model < M68020 || a.id < 0 || a.id > 7 || a.id == 0 && cfg.model == M68030 {
+		if cfg.model < M68020 || a.id < 0 || a.id > 7 || a.id == 0 && (cfg.model == M68030 || cfg.mc68851) {
 			return nil, fmt.Errorf("%w: ID %d on the %v", ErrCoprocessorUnsupported, a.id, cfg.model)
 		}
+	}
+	if cfg.mc68851 && cfg.model != M68020 {
+		return nil, fmt.Errorf("%w: MC68851 on the %v", ErrCoprocessorUnsupported, cfg.model)
 	}
 	return newCPU(bus, cfg)
 }
@@ -1655,8 +1663,12 @@ func newCPU(bus *Bus, cfg cpuConfig) (*CPU, error) {
 		c.coprocessors[a.id&7] = a.c
 		c.coprocessorTimings[a.id&7], _ = a.c.(CoprocessorTiming)
 	}
-	if cfg.model == M68030 {
+	switch {
+	case cfg.model == M68030:
 		c.mmu = mmu.NewMC68030(physicalMemory{&c})
+	case cfg.mc68851 && cfg.model == M68020:
+		c.pmmu = mmu.NewMC68851(physicalMemory{&c})
+		c.mmu = c.pmmu
 	}
 	bus.cpu = &c
 	bus.waitHook = func(states uint32) { c.addCycles(states) }

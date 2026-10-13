@@ -34,6 +34,7 @@ type cpuConfig struct {
 	cycleRounding uint32
 	model         Model
 	coprocessors  []attachedCoprocessor
+	mc68851       bool
 }
 
 // WithDeferredReset skips the implicit Reset performed by NewCPU. The caller

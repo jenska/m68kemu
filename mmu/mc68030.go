@@ -1,60 +1,6 @@
-// Package mmu emulates the paged memory management units of the 68000
-// family. MC68030 is the on-chip MMU of the MC68030.
-//
-// The CPU of package m68kemu creates and drives the MMU of its model: it
-// translates every access through Translate and executes the MMU
-// instructions (PMOVE, PFLUSH, PLOAD, PTEST) with the other methods. A
-// program inspects the MMU through CPU.MMU. An MMU must not be used from
-// several goroutines at once.
 package mmu
 
-import "errors"
-
-// Register names an MMU register.
-type Register int
-
-const (
-	TC    Register = iota // translation control
-	SRP                   // supervisor root pointer
-	CRP                   // CPU root pointer
-	TT0                   // transparent translation 0
-	TT1                   // transparent translation 1
-	MMUSR                 // MMU status register
-)
-
-// Translation is the translation of a logical address.
-type Translation struct {
-	// Physical is the physical address.
-	Physical uint32
-	// Mask selects the low address bits the translation passes through
-	// unchanged: it applies to the naturally aligned block of Mask+1 bytes
-	// around the address (a page, or a transparent block).
-	Mask uint32
-	// Writable reports whether writes to the block may use the same
-	// translation without asking the MMU again.
-	Writable bool
-}
-
-// Memory is the physical memory an MMU reads and updates its translation
-// tables in, a long word at a time.
-type Memory interface {
-	ReadLong(address uint32) (uint32, error)
-	WriteLong(address uint32, value uint32) error
-}
-
-// ErrConfiguration is returned by SetRegister for a value that makes the CPU
-// take the MMU configuration exception.
-var ErrConfiguration = errors.New("mmu: configuration error")
-
-// TC bits (MC68030 User's Manual, 9.7.2).
-const (
-	tcEnable = 1 << 31
-	tcSRE    = 1 << 25 // supervisor root pointer enable
-	tcFCL    = 1 << 24 // function code lookup
-	tcMask   = 0x83ffffff
-)
-
-// Transparent translation register bits (9.7.3).
+// Transparent translation register bits (MC68030 User's Manual 9.7.3).
 const (
 	ttEnable = 1 << 15
 	ttCI     = 1 << 10
@@ -63,65 +9,20 @@ const (
 	ttMask   = 0xffff8777
 )
 
-// Descriptor fields (9.5.1). Short descriptors are one long word; long
-// descriptors put the limit and these bits in the first long word and the
-// address in the second.
-const (
-	dtInvalid = 0
-	dtPage    = 1
-	dtShort   = 2 // valid, the next table holds 4-byte descriptors
-	dtLong    = 3 // valid, the next table holds 8-byte descriptors
-
-	descWP = 1 << 2
-	descU  = 1 << 3
-	descM  = 1 << 4
-	descCI = 1 << 6
-	descS  = 1 << 8 // long descriptors only
-)
-
-// MMUSR bits (9.7.4).
-const (
-	SRBusError     uint16 = 1 << 15
-	SRLimit        uint16 = 1 << 14
-	SRSupervisor   uint16 = 1 << 13
-	SRWriteProtect uint16 = 1 << 11
-	SRInvalid      uint16 = 1 << 10
-	SRModified     uint16 = 1 << 9
-	SRTransparent  uint16 = 1 << 6
-	SRLevels       uint16 = 7 // number of levels searched
-)
-
-// atcSize is the number of entries of the MC68030's address translation
-// cache.
-const atcSize = 22
-
-// atcEntry is a cached translation of one page.
-type atcEntry struct {
-	valid    bool
-	used     bool // recently used, for the pseudo-LRU replacement
-	fc       uint8
-	logical  uint32 // page address
-	physical uint32 // page frame address
-	bus      bool   // the access takes a bus error
-	ci       bool
-	wp       bool
-	modified bool
-}
-
-// MC68030 is the MMU of the MC68030.
+// MC68030 is the MMU of the MC68030 (MC68030 User's Manual, section 9).
 type MC68030 struct {
 	mem      Memory
 	tc       uint32
 	crp, srp uint64
 	tt       [2]uint32
 	mmusr    uint16
-	atc      [atcSize]atcEntry
+	atc      atc
 }
 
 // NewMC68030 returns an MC68030 MMU that searches translation tables in mem.
 // Translation and the transparent translation registers are disabled.
 func NewMC68030(mem Memory) *MC68030 {
-	return &MC68030{mem: mem}
+	return &MC68030{mem: mem, atc: newATC(22)}
 }
 
 // Reset disables translation and transparent translation. It does not flush
@@ -136,7 +37,7 @@ func (m *MC68030) Reset() {
 func (m *MC68030) Enabled() bool { return m.tc&tcEnable != 0 }
 
 // Register returns an MMU register, right-aligned: TC, TT0 and TT1 are 32
-// bits wide, CRP and SRP 64, MMUSR 16.
+// bits wide, CRP and SRP 64, MMUSR 16. Registers of the MC68851 read as 0.
 func (m *MC68030) Register(r Register) uint64 {
 	switch r {
 	case TC:
@@ -186,37 +87,14 @@ func (m *MC68030) SetRegister(r Register, value uint64, flush bool) error {
 	case MMUSR:
 		m.mmusr = uint16(value)
 		return nil
+	default:
+		return nil
 	}
 	if flush {
-		m.Flush(0, 0, 0, false)
+		m.atc.flushAll()
 	}
 	return err
 }
-
-// validTC reports whether the page size of tc is defined and its fields
-// cover the 32 address bits.
-func validTC(tc uint32) bool {
-	ps, is := (tc>>20)&15, (tc>>16)&15
-	if ps < 8 {
-		return false
-	}
-	sum := ps + is
-	for _, ti := range tableIndexes(tc) {
-		if ti == 0 {
-			break
-		}
-		sum += ti
-	}
-	return sum == 32 && (tc>>12)&15 != 0
-}
-
-// tableIndexes returns the TIA, TIB, TIC and TID fields of tc.
-func tableIndexes(tc uint32) [4]uint32 {
-	return [4]uint32{(tc >> 12) & 15, (tc >> 8) & 15, (tc >> 4) & 15, tc & 15}
-}
-
-// pageShift returns log2 of the page size.
-func (m *MC68030) pageShift() uint32 { return (m.tc >> 20) & 15 }
 
 // transparent reports whether a transparent translation register maps the
 // access.
@@ -248,11 +126,15 @@ func (m *MC68030) Translate(address uint32, fc uint8, write bool) (Translation, 
 			Writable: fc == 7 || m.transparent(address, fc, true) && m.transparent(address, fc, false),
 		}, true
 	}
-	shift := m.pageShift()
-	e := m.lookup(address, fc)
+	return translateATC(&m.atc, address, fc, 0, write, pageShift(m.tc), m.load)
+}
+
+// translateATC translates address through cache a, calling load on a miss
+// or on the first write to a page, which sets its M bit.
+func translateATC(a *atc, address uint32, fc, alias uint8, write bool, shift uint32, load func(uint32, uint8, bool) *atcEntry) (Translation, bool) {
+	e := a.lookup(address, fc, alias, shift)
 	if e == nil || write && !e.modified && !e.wp && !e.bus {
-		// A miss, or the first write to the page, which sets M.
-		e = m.load(address, fc, write)
+		e = load(address, fc, write)
 	}
 	e.used = true
 	if e.bus || write && e.wp {
@@ -266,27 +148,25 @@ func (m *MC68030) Translate(address uint32, fc uint8, write bool) (Translation, 
 	}, true
 }
 
-// lookup returns the cache entry for the page of address, or nil.
-func (m *MC68030) lookup(address uint32, fc uint8) *atcEntry {
-	page := address >> m.pageShift()
-	for i := range m.atc {
-		e := &m.atc[i]
-		if e.valid && e.fc == fc && e.logical>>m.pageShift() == page {
-			return e
-		}
+// search runs a table search for address.
+func (m *MC68030) search(address uint32, fc uint8, write, update bool, maxLevels int) searchResult {
+	rp := m.crp
+	if m.tc&tcSRE != 0 && fc&4 != 0 {
+		rp = m.srp
 	}
-	return nil
+	s := search{mem: m.mem, tc: m.tc, fc: fc, write: write, update: update}
+	return s.run(address, rp, m.tc&tcFCL != 0, maxLevels)
 }
 
 // load searches the tables for address, as a read or write would, and
 // caches the result in place of any entry for the page.
 func (m *MC68030) load(address uint32, fc uint8, write bool) *atcEntry {
-	if e := m.lookup(address, fc); e != nil {
+	shift := pageShift(m.tc)
+	if e := m.atc.lookup(address, fc, 0, shift); e != nil {
 		e.valid = false
 	}
 	r := m.search(address, fc, write, true, 7)
-	shift := m.pageShift()
-	e := m.victim()
+	e := m.atc.victim()
 	*e = atcEntry{
 		valid:    true,
 		fc:       fc,
@@ -300,90 +180,58 @@ func (m *MC68030) load(address uint32, fc uint8, write bool) *atcEntry {
 	return e
 }
 
-// victim returns the cache entry to replace: an invalid one, or else one not
-// used recently. When every entry has been used recently, the history starts
-// over.
-func (m *MC68030) victim() *atcEntry {
-	for i := range m.atc {
-		if !m.atc[i].valid {
-			return &m.atc[i]
-		}
-	}
-	for i := range m.atc {
-		if !m.atc[i].used {
-			return &m.atc[i]
-		}
-	}
-	for i := range m.atc {
-		m.atc[i].used = false
-	}
-	return &m.atc[0]
-}
+// FlushAll invalidates every cached translation (PFLUSHA).
+func (m *MC68030) FlushAll() { m.atc.flushAll() }
 
 // Flush invalidates the cached translations whose function code matches fc
 // in the bits set in fcMask, and with byAddress only those of the page that
-// holds address (PFLUSH). A zero fcMask flushes them all (PFLUSHA).
-func (m *MC68030) Flush(fc, fcMask uint8, address uint32, byAddress bool) {
-	page := address >> m.pageShift()
-	for i := range m.atc {
-		e := &m.atc[i]
-		if (e.fc^fc)&fcMask != 0 || byAddress && e.logical>>m.pageShift() != page {
-			continue
-		}
-		e.valid = false
-	}
+// holds address (PFLUSH). The MC68030 has no shared entries.
+func (m *MC68030) Flush(fc, fcMask uint8, address uint32, byAddress, shared bool) {
+	shift := pageShift(m.tc)
+	m.atc.flush(func(e *atcEntry) bool {
+		return (e.fc^fc)&fcMask == 0 && (!byAddress || e.logical>>shift == address>>shift)
+	})
 }
 
 // Load searches the tables for address as a read or write would, even while
 // translation is disabled, and caches the translation (PLOAD).
-func (m *MC68030) Load(address uint32, fc uint8, write bool) {
+func (m *MC68030) Load(address uint32, fc uint8, write bool) error {
 	m.load(address, fc, write)
+	return nil
 }
 
 // Test searches the translation cache (level 0) or the translation tables
 // down to level and sets MMUSR (PTEST). It returns the physical address of
 // the last descriptor fetched.
-func (m *MC68030) Test(address uint32, fc uint8, level int, write bool) uint32 {
-	if level == 0 {
-		switch e := m.lookup(address, fc); {
-		case m.transparent(address, fc, write):
-			m.mmusr = SRTransparent
-		case e == nil:
-			m.mmusr = SRInvalid
-		default:
-			m.mmusr = 0
-			if e.bus {
-				m.mmusr |= SRBusError | SRInvalid
-			}
-			if e.wp {
-				m.mmusr |= SRWriteProtect
-			}
-			if e.modified {
-				m.mmusr |= SRModified
-			}
-		}
-		return 0
+func (m *MC68030) Test(address uint32, fc uint8, level int, write bool) (uint32, error) {
+	if level > 0 {
+		r := m.search(address, fc, write, false, level)
+		m.mmusr = statusOf(&r)
+		return r.descriptor, nil
 	}
-	r := m.search(address, fc, write, false, level)
+	switch e := m.atc.lookup(address, fc, 0, pageShift(m.tc)); {
+	case m.transparent(address, fc, write):
+		m.mmusr = SRTransparent
+	case e == nil:
+		m.mmusr = SRInvalid
+	default:
+		m.mmusr = atcStatus(e)
+	}
+	return 0, nil
+}
+
+// atcStatus returns the status register bits PTEST at level 0 sets from a
+// cache entry.
+func atcStatus(e *atcEntry) uint16 {
 	var sr uint16
-	if r.busError {
-		sr |= SRBusError
+	if e.bus {
+		sr |= SRBusError | SRInvalid
 	}
-	if r.limit {
-		sr |= SRLimit
-	}
-	if r.supervisor {
-		sr |= SRSupervisor
-	}
-	if r.wp {
+	if e.wp {
 		sr |= SRWriteProtect
 	}
-	if r.invalid || r.busError || r.limit {
-		sr |= SRInvalid
-	}
-	if r.modified {
+	if e.modified {
 		sr |= SRModified
 	}
-	m.mmusr = sr | uint16(min(r.levels, 7))
-	return r.descriptor
+	return sr
 }

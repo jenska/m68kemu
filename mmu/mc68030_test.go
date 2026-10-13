@@ -23,10 +23,20 @@ const (
 	missing   = 0x11000    // page with an invalid descriptor
 	protected = 0x12000    // write-protected page
 
-	berrHandler   = 0x6000
-	configHandler = 0x6100
-	privHandler   = 0x6200
+	berrHandler = 0x6000
 )
+
+// handlers are the exception handlers run stops at, by name, with their
+// vectors.
+var handlers = map[string]struct{ vector, address uint32 }{
+	"berr":    {m68kemu.XBusError, berrHandler},
+	"config":  {m68kemu.XMMUConfiguration, 0x6100},
+	"priv":    {m68kemu.XPrivViolation, 0x6200},
+	"illop":   {m68kemu.XMMUIllegalOperation, 0x6300},
+	"access":  {m68kemu.XMMUAccessLevel, 0x6400},
+	"illegal": {m68kemu.XIllegal, 0x6500},
+	"trap":    {7, 0x6600}, // TRAPcc, cpTRAPcc
+}
 
 func pageDescriptor(page uint32) uint32 { return tableB + page*4 }
 
@@ -58,26 +68,34 @@ tc:	DC.L	$80C86600
 type machine struct {
 	cpu    *m68kemu.CPU
 	ram    *m68kemu.RAM
-	mmu    *mmu.MC68030
+	mmu    mmu.MMU
 	labels map[string]uint32
 }
 
 // run assembles source for an MC68030, loads it at $2000 into 256 KB of RAM
 // with the translation tables, and runs it until the label done or one of
-// the exception handlers.
+// the exception handlers. setup runs before the program starts.
 func run(t *testing.T, source string, setup func(*machine)) *machine {
 	t.Helper()
+	return runOn(t, asm.CPU68030, []m68kemu.Option{m68kemu.WithModel(m68kemu.M68030)}, source, setup)
+}
+
+// runOn is run for the CPU that opts select, assembling for cpu.
+func runOn(t *testing.T, cpu asm.CPUKind, opts []m68kemu.Option, source string, setup func(*machine)) *machine {
+	t.Helper()
 	result, err := asm.AssembleDetailedWithOptions(strings.NewReader(source),
-		asm.ParseOptions{Target: asm.Target{CPU: asm.CPU68030, Features: asm.FeatPMMU}})
+		asm.ParseOptions{Target: asm.Target{CPU: cpu, Features: asm.FeatPMMU}})
 	if err != nil {
 		t.Fatalf("assembler: %v", err)
 	}
 	ram := m68kemu.NewRAM(0, 0x40000)
 	ram.Write(m68kemu.Long, 0, 0x8000)
 	ram.Write(m68kemu.Long, 4, 0x2000)
-	ram.Write(m68kemu.Long, m68kemu.XBusError<<2, berrHandler)
-	ram.Write(m68kemu.Long, m68kemu.XMMUConfiguration<<2, configHandler)
-	ram.Write(m68kemu.Long, m68kemu.XPrivViolation<<2, privHandler)
+	stops := []uint32{}
+	for _, h := range handlers {
+		ram.Write(m68kemu.Long, h.vector<<2, h.address)
+		stops = append(stops, h.address)
+	}
 	for i, b := range result.Bytes {
 		ram.Write(m68kemu.Byte, result.Origin+uint32(i), uint32(b))
 	}
@@ -86,15 +104,14 @@ func run(t *testing.T, source string, setup func(*machine)) *machine {
 	if handler, ok := result.Labels["berr"]; ok {
 		ram.Write(m68kemu.Long, m68kemu.XBusError<<2, handler)
 	}
-	if setup != nil {
-		setup(m)
-	}
-	m.cpu, err = m68kemu.NewCPU(m68kemu.NewBus(ram), m68kemu.WithModel(m68kemu.M68030))
+	m.cpu, err = m68kemu.NewCPU(m68kemu.NewBus(ram), opts...)
 	if err != nil {
 		t.Fatal(err)
 	}
 	m.mmu = m.cpu.MMU()
-	stops := []uint32{berrHandler, configHandler, privHandler}
+	if setup != nil {
+		setup(m)
+	}
 	if done, ok := result.Labels["done"]; ok {
 		stops = append(stops, done)
 	}
@@ -113,7 +130,7 @@ func (m *machine) expectPC(t *testing.T, label string) {
 	t.Helper()
 	want, ok := m.labels[label]
 	if !ok {
-		want = map[string]uint32{"berr": berrHandler, "config": configHandler, "priv": privHandler}[label]
+		want = handlers[label].address
 	}
 	if pc := m.cpu.Registers().PC; pc != want {
 		t.Fatalf("PC = %x, want %s at %x", pc, label, want)

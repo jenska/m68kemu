@@ -6,33 +6,44 @@ MC68020, and the MC68040's MMU with phase 6. The models without an MMU keep
 their behaviour and speed, and so does an MC68030 until TC enables
 translation.
 
-**Status: 5a done** (the MC68030 MMU). 5b and 5c are open.
+**Status: 5a and 5b done** (the MC68030 MMU and the MC68851). 5c comes with
+phase 6.
 
 ## Design
 
 The MMU is part of the MC68030, so `NewCPU` creates one for every `M68030`
-CPU; `cpu.MMU()` returns it, and nil for the other models. Its emulation
-lives in package `m68kemu/mmu`, which, like `float`, does not depend on the
-core: the core imports it, so the MMU adds no interfaces or options to the
+CPU. The MC68851 is an optional part of an MC68020 system: `WithMC68851()`
+attaches one. `cpu.MMU()` returns the MMU as an `mmu.MMU` (an
+`*mmu.MC68030` or `*mmu.MC68851`), and nil without one. The emulation lives
+in package `m68kemu/mmu`, which, like `float`, does not depend on the core:
+the core imports it, so the MMUs add only `WithMC68851` and `MMU()` to the
 core's API.
 
-The core (`cpu_mmu.go`) uses `mmu.MC68030` like this:
+The core (`cpu_mmu.go`) drives both MMUs through the `mmu.MMU` interface:
 
 * `Translate(address, fc, write)` translates one access, or reports a bus
   error. The core calls it only while `Enabled` reports the E bit of TC set;
   otherwise logical addresses are physical.
-* `Register`, `SetRegister`, `Flush`, `Load` and `Test` back the
+* `Register`, `SetRegister`, `FlushAll`, `Flush`, `Load` and `Test` back the
   instructions PMOVE, PFLUSH, PLOAD and PTEST. The core decodes them (they
   are F-line instructions with coprocessor ID 0 and take effective
   addresses, function code operands and address registers) and calls the
-  MMU. `SetRegister` returns `mmu.ErrConfiguration` for an invalid TC, CRP
-  or SRP, and the CPU takes the MMU configuration exception (vector 56).
+  MMU. `SetRegister` returns `mmu.ErrConfiguration` for an invalid TC or
+  root pointer, and the CPU takes the MMU configuration exception (vector
+  56).
 * The MMU reads its tables through an `mmu.Memory` the core passes to
-  `NewMC68030`. Each descriptor access costs 4 cycles plus the bus's wait
-  states, an approximation.
+  `NewMC68030` or `NewMC68851`. Each descriptor access costs 4 cycles plus
+  the bus's wait states, an approximation.
 
-An MC68030's coprocessor ID 0 belongs to the MMU, so `WithCoprocessor`
-rejects it. The MC68EC030, which has no MMU, is not modelled.
+The MC68851's other instructions use methods of `*mmu.MC68851`: PVALID
+(`Validate`), PFLUSHR (`FlushRoot`), the conditionals PBcc, PDBcc, PScc
+and PTRAPcc (`Condition`), PSAVE and PRESTORE (`Save`, `Restore`, through
+the core's coprocessor interface code), and BKPT (`Breakpoint`).
+
+Coprocessor ID 0 belongs to the MMU, so `WithCoprocessor` rejects it on an
+MC68030 and beside an MC68851. The MC68EC030, which has no MMU, is not
+modelled. The table search and the ATC are shared between the two MMUs
+(`mmu/search.go`, `mmu/atc.go`).
 
 ### Speed
 
@@ -99,15 +110,52 @@ the MMUDIS signal; locked read-modify-write cycles (TAS and CAS are
 translated as a read and a write). Disassembly in instruction traces reads
 physical memory.
 
-### 5b. MC68851
+### 5b. MC68851 (done)
 
-The external PMMU for the MC68020. As an optional part it will need an
-option to attach it, and the core an internal interface over the MMU
-types. It
-adds the access levels, the breakpoint registers, the root pointer table and
-DRP, task aliases, lockable and shared ATC entries, a 64-entry ATC, and the
-instructions the MC68030 dropped (PVALID, PFLUSHR, PFLUSHS, PBcc, PDBcc,
-PScc, PTRAPcc, PSAVE, PRESTORE, and PMOVE for CAL, VAL, SCC, AC, BAD, BAC).
+The external PMMU for the MC68020, attached with `WithMC68851()`, following
+the MC68851 User's Manual:
+
+* TC, CRP, SRP, DRP, PCSR, PSR, CAL, VAL, SCC, AC and BAD0-7/BAC0-7, moved
+  by PMOVE with any addressing mode the manual allows (byte, word, long and
+  quad registers). Loading TC with E clear flushes the ATC, SRP and DRP
+  flush the entries formed with them; an invalid root pointer is refused.
+  There are no transparent translation registers.
+* The table search of 5a, plus: DRP for DMA function codes (FC3 set) with
+  function code lookup; the SG, G and L bits; access levels. With AC.ALC
+  set, the top 1-3 bits of a user address are its access level: a level
+  more privileged than CAL ends in a bus error, and the RAL and WAL fields
+  of long descriptors deny reads and writes. Supervisor accesses are not
+  checked.
+* A 64-entry ATC tagged with task aliases. Loading CRP looks the root
+  pointer up in an eight-entry root pointer table; a new one takes over an
+  entry and flushes its alias, and PCSR reports the alias and the flush.
+  Entries of other tasks survive a task switch; globally shared entries
+  match every alias; locked entries are not replaced, up to 63, after which
+  PCSR's lock warning is set.
+* PFLUSHA, PFLUSH and PFLUSHS (by function code with a 4-bit mask, with or
+  without an address; only PFLUSHS flushes shared entries), PFLUSHR,
+  PLOADR/W and PTESTR/W (which take the PMMU illegal operation exception,
+  vector 57, while translation is disabled), PSR with the A, G and C bits,
+  and PVALID, the one unprivileged MC68851 instruction (the access level
+  exception, vector 58).
+* PBcc, PDBcc, PScc and PTRAPcc on the PSR conditions (B, L, S, A, W, I, G,
+  C, set or clear).
+* PSAVE and PRESTORE with the idle (36 bytes) and breakpoint (76 bytes)
+  frames, and the null frame. PRESTORE also accepts the mid-instruction
+  frame (44 bytes). The format word's version byte is $C0, a guess: the
+  manual's figure is not legible in the available copy.
+* BKPT: the MC68020 decodes BKPT #n and runs the breakpoint acknowledge
+  cycle. While BACn is enabled and its skip count is not zero, the
+  MC68851 counts down and supplies BADn, which the CPU executes in place of
+  the BKPT; otherwise the CPU takes the illegal instruction exception, as
+  without an MC68851.
+
+Not modelled: CALLM and RTM with type $01 descriptors, which change the
+access level through the MC68851's access level control registers in CPU
+space (they still take the format error exception), and the gate checks of
+module descriptors; the bus error the MC68851 signals for a
+read-modify-write cycle (TAS, CAS, CAS2) that misses the ATC; the
+coprocessor protocol's timing.
 
 ### 5c. MC68040 MMU
 
@@ -122,10 +170,22 @@ data and instruction fetches, the U and M bits, a page fault whose handler
 maps the page and returns with RTE, write protection, limits,
 supervisor-only descriptors, SRE, early termination, transparent
 translation, accesses across pages, PTEST, PFLUSH, PLOAD, configuration
-errors and privilege. The core's opcode snapshots are unchanged.
+errors and privilege.
+
+On an MC68020 with an MC68851 it runs translation, task switches between
+two translation trees (task aliases, PCSR, cached entries surviving the
+switch, PFLUSHR), shared entries with PFLUSH and PFLUSHS, PTEST with the
+conditionals, the illegal operation exception, PSAVE and PRESTORE, BKPT
+replacement opcodes with skip counts, PVALID, privilege, configuration
+errors and the attach rules. Unit tests cover access levels, DMA
+translation, the breakpoint frame and locked entries.
+
+The MC68020 opcode snapshot gains BKPT; the others are unchanged.
 
 ## Sources
 
 The MC68030 Enhanced 32-Bit Microprocessor User's Manual (second edition,
-1989), sections 3 and 9. Encodings are checked against `m68kasm`, which
-assembles them with `FeatPMMU`.
+1989), sections 3 and 9, and the MC68851 Paged Memory Management Unit
+User's Manual (first edition, 1986). Encodings are checked against
+`m68kasm`, which assembles them with `FeatPMMU`.
+

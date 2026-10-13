@@ -102,7 +102,7 @@ run the routines of a real SFP004 library against the memory-mapped FPU.
 Both paths also model the FPU's execution time from a table of typical
 MC68881/MC68882 times, with the FPU running concurrently with the CPU.
 
-### 5. PMMU (`m68kemu/mmu`) (MC68030 done; see [mmu.md](mmu.md))
+### 5. PMMU (`m68kemu/mmu`) (MC68030 and MC68851 done; see [mmu.md](mmu.md))
 
 * MC68030 MMU first: TC, CRP, SRP, TT0/TT1, MMUSR; `PMOVE`, `PFLUSH`,
   `PTEST`, `PLOAD`

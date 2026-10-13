@@ -56,7 +56,8 @@ type CoprocessorTiming interface {
 
 // ErrCoprocessorUnsupported is returned by NewCPU for a coprocessor on a
 // model without a coprocessor interface (before the MC68020), with an ID
-// outside 0-7, or with ID 0 on an MC68030, whose MMU has that ID.
+// outside 0-7, with ID 0 on an MC68030 or beside an MC68851, whose MMU has
+// that ID, and for an MC68851 on another model than the MC68020.
 var ErrCoprocessorUnsupported = errors.New("m68kemu: coprocessor not supported")
 
 // WithCoprocessor attaches c with coprocessor ID id (0-7) to an MC68020 or
@@ -173,8 +174,21 @@ func (cpu *CPU) cpGeneral(cp Coprocessor, id uint16) error {
 	return nil
 }
 
+// conditionTester evaluates coprocessor conditions: a Coprocessor or the
+// MC68851.
+type conditionTester interface {
+	Condition(predicate uint16) (bool, error)
+}
+
+// stateFramer saves and restores coprocessor state frames: a Coprocessor or
+// the MC68851.
+type stateFramer interface {
+	Save() []byte
+	Restore(frame []byte) error
+}
+
 // cpConditional runs cpScc, cpDBcc and cpTRAPcc.
-func (cpu *CPU) cpConditional(cp Coprocessor) error {
+func (cpu *CPU) cpConditional(cp conditionTester) error {
 	condition, err := cpu.popPc(Word)
 	if err != nil {
 		return err
@@ -226,7 +240,7 @@ func (cpu *CPU) cpConditional(cp Coprocessor) error {
 }
 
 // cpBranch runs cpBcc with a word or long displacement.
-func (cpu *CPU) cpBranch(cp Coprocessor, long bool) error {
+func (cpu *CPU) cpBranch(cp conditionTester, long bool) error {
 	basePC := cpu.regs.PC
 	size := Word
 	if long {
@@ -251,7 +265,7 @@ func (cpu *CPU) cpBranch(cp Coprocessor, long bool) error {
 
 // cpSave writes the coprocessor's state frame to the effective address, a
 // control alterable mode or -(An).
-func (cpu *CPU) cpSave(cp Coprocessor) error {
+func (cpu *CPU) cpSave(cp stateFramer) error {
 	if ok, err := cpu.requireSupervisor(); err != nil || !ok {
 		return err
 	}
@@ -266,7 +280,7 @@ func (cpu *CPU) cpSave(cp Coprocessor) error {
 // cpRestore reads a state frame from the effective address, a control mode
 // or (An)+: its first long, then as many bytes as that long gives. A frame
 // the coprocessor rejects raises the format-error exception.
-func (cpu *CPU) cpRestore(cp Coprocessor) error {
+func (cpu *CPU) cpRestore(cp stateFramer) error {
 	if ok, err := cpu.requireSupervisor(); err != nil || !ok {
 		return err
 	}

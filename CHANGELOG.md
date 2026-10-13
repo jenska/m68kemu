@@ -21,12 +21,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/SemVer
   restartable bus errors, and invalid MMU registers take the MMU
   configuration exception (`XMMUConfiguration`, vector 56). See
   `doc/mmu.md`
+- The MC68851 PMMU for the MC68020 (`WithMC68851`, `mmu.NewMC68851`): DRP,
+  PCSR, CAL, VAL, SCC, AC, BAD0-7 and BAC0-7; task aliases and a root
+  pointer table; shared and locked entries in a 64-entry ATC; access
+  levels; PMOVE with all addressing modes, PFLUSHS, PFLUSHR, PVALID, PBcc,
+  PDBcc, PScc, PTRAPcc, PSAVE and PRESTORE; BKPT answered with replacement
+  opcodes. The exceptions `XMMUIllegalOperation` (57) and `XMMUAccessLevel`
+  (58). `CPU.MMU` returns the `mmu.MMU` interface, which both MMUs
+  implement
 
 ### Changed
 
 - `WithCoprocessor` rejects ID 0 on an MC68030, which its MMU uses
-- The tests use m68kasm v1.6.4, which encodes PTEST with an address
-  register correctly
+- The tests use m68kasm v1.6.5, which encodes PTEST with an address
+  register, PMOVE immediates and BADn/BACn, PVALID, 4-bit function codes
+  and the FDBcc/PDBcc displacement correctly
 
 ## [1.7.0] - 2026-10-11
 

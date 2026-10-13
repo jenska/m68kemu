@@ -140,6 +140,15 @@ fault. `cpu.MMU()` returns the MMU, for example to read its registers:
 tc := cpu.MMU().Register(mmu.TC)
 ```
 
+An MC68020 can have an MC68851 PMMU, attached with `WithMC68851`. It
+translates in the same way and adds the DMA root pointer, task aliases,
+access levels, PVALID, the PMMU conditionals, PSAVE/PRESTORE and the
+breakpoint registers that answer BKPT:
+
+```go
+cpu, err := m68kemu.NewCPU(bus, m68kemu.WithModel(m68kemu.M68020), m68kemu.WithMC68851())
+```
+
 [doc/mmu.md](doc/mmu.md) has the details.
 
 The constant `M68040` exist for the model on the

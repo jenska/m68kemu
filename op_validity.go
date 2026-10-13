@@ -15,7 +15,7 @@ func validFor(m Model, op uint16) bool {
 	if m >= M68020 && valid68020Addition(op) {
 		return true
 	}
-	if m == M68020 && validModuleCall(op) {
+	if m == M68020 && valid68020Only(op) {
 		return true
 	}
 	return valid68000(op)

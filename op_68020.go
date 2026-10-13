@@ -27,6 +27,7 @@ func register68020(b *tableBuilder) {
 		// RTM takes the CALLM slots with the Dn and An modes.
 		b.add(callm, 0x06c0, 0xffc0, controlMask, constantCycles(28))
 		b.add(rtm, 0x06c0, 0xfff0, 0, constantCycles(18))
+		b.add(bkpt, 0x4848, 0xfff8, 0, constantCycles(10))
 	}
 	b.add(chkLong, 0x4100, 0xf1c0, dataMask, constantCycles(10))
 	b.add(mulLong, 0x4c00, 0xffc0, dataMask, constantCycles(44))
@@ -112,11 +113,14 @@ func valid68020Addition(op uint16) bool {
 	return false
 }
 
-// validModuleCall reports whether op is CALLM or RTM, which only the MC68020
-// has.
-func validModuleCall(op uint16) bool {
+// valid68020Only reports whether op is one of the opcode words only the
+// MC68020 decodes: CALLM, RTM, and BKPT, which it answers through an
+// MC68851.
+func valid68020Only(op uint16) bool {
 	switch {
 	case op&0xfff0 == 0x06c0: // RTM
+		return true
+	case op&0xfff8 == 0x4848: // BKPT
 		return true
 	case op&0xffc0 == 0x06c0: // CALLM
 		return specIn(op, specControl)
@@ -757,4 +761,23 @@ func rtm(cpu *CPU) error {
 	replaceStatusFlags(cpu, statusMaskNZVCX, uint16(ccr))
 	cpu.regs.PC = pc
 	return nil
+}
+
+// bkpt runs the breakpoint acknowledge cycle of BKPT. An MC68851 can answer
+// it with a replacement opcode, which the CPU then executes in place of the
+// BKPT, with its extension words following the BKPT in memory. Without an
+// answer the CPU takes the illegal instruction exception.
+func bkpt(cpu *CPU) error {
+	instructionPC := cpu.currentOpcodeAddress(cpu.regs.PC - 2)
+	if cpu.pmmu != nil {
+		if opcode, ok := cpu.pmmu.Breakpoint(int(cpu.regs.IR & 7)); ok {
+			cpu.regs.IR = opcode
+			cpu.addCycles(cpu.ops.cycles[opcode])
+			if handler := cpu.ops.handlers[opcode]; handler != nil {
+				return handler(cpu)
+			}
+			return cpu.opcodeException(exceptionVectorForOpcode(opcode), instructionPC)
+		}
+	}
+	return cpu.opcodeException(XIllegal, instructionPC)
 }

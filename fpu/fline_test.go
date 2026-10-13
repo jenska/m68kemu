@@ -166,3 +166,18 @@ func TestFLineWithoutCoprocessor(t *testing.T) {
 		t.Fatalf("coprocessor on an MC68000: error %v, want ErrCoprocessorUnsupported", err)
 	}
 }
+
+func TestFDBccLoops(t *testing.T) {
+	// FDBF never ends on its condition: it counts D0 down to -1, so the
+	// loop body runs four times.
+	cpu, _ := runFLine(t, fpu.New(fpu.MC68882), `
+	MOVEQ    #3,D0
+	MOVEQ    #0,D1
+loop:	ADDQ.L   #1,D1
+	FDBF     D0,loop
+done:	NOP
+`, nil)
+	if regs := cpu.Registers(); regs.D[1] != 4 || regs.D[0]&0xffff != 0xffff {
+		t.Fatalf("D1 = %d, D0 = %x; want 4 passes and ffff", regs.D[1], regs.D[0]&0xffff)
+	}
+}
