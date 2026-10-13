@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/SemVer
 
 ## [Unreleased]
 
+## [1.8.0] - 2026-10-13
+
 ### Added
 
 - CALLM and RTM on the MC68020 for type $00 module descriptors; type $01
