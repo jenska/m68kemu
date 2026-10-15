@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/SemVer
 
 ## [Unreleased]
 
+### Removed
+
+- The `Version` constant, which was not kept up to date; the module's tags
+  are the version
+
 ## [1.8.0] - 2026-10-13
 
 ### Added
